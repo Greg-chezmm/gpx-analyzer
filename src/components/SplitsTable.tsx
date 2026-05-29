@@ -8,10 +8,10 @@ interface SplitsTableProps {
 }
 
 export const formatDuration = (seconds: number): string => {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.round(seconds % 60);
-  
+  const total = Math.round(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
   if (h > 0) {
     return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   }
@@ -20,8 +20,9 @@ export const formatDuration = (seconds: number): string => {
 
 export const formatPace = (secondsPerKm: number): string => {
   if (secondsPerKm === 0 || isNaN(secondsPerKm) || !isFinite(secondsPerKm)) return "--:--";
-  const m = Math.floor(secondsPerKm / 60);
-  const s = Math.round(secondsPerKm % 60);
+  const total = Math.round(secondsPerKm);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 

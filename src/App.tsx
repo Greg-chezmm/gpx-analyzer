@@ -6,6 +6,7 @@ import {
   calcTRIMP, calcNormalizedPower, estimateVO2max,
   type GPXActivity, type GPXLap, type SuuntoSessionHeader, type BaroSample,
 } from "./utils/gpxParser";
+import { parseFIT } from "./utils/fitParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
 import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
@@ -23,6 +24,7 @@ import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { VO2maxEstimate } from "./components/VO2maxEstimate";
+import { VDOTPredictor } from "./components/VDOTPredictor";
 import { SplitsBars } from "./components/SplitsBars";
 import { FloatingNav } from "./components/FloatingNav";
 import { AISummaryModal } from "./components/AISummary";
@@ -103,13 +105,15 @@ function App() {
     [enrichedActivity, fcMax, fcRest]
   );
 
-  const handleActivityLoaded = (gpxText: string, name: string) => {
+  const handleActivityLoaded = (data: string | ArrayBuffer, name: string) => {
     const cleanName = name.replace(/\.[^/.]+$/, "");
+    const isFit = name.toLowerCase().endsWith(".fit");
     setIsLoading(true);
-    // Defer parsing by one frame so the loading spinner renders before blocking
-    requestAnimationFrame(() => setTimeout(() => {
+    requestAnimationFrame(() => setTimeout(async () => {
       try {
-        const parsed = parseGPX(gpxText, cleanName);
+        const parsed = isFit && data instanceof ArrayBuffer
+          ? await parseFIT(data, cleanName)
+          : parseGPX(data as string, cleanName);
         setActivity(parsed);
         setLaps(null);
         setSuuntoHeader(null);
@@ -118,7 +122,7 @@ function App() {
         setHoveredPointIndex(null);
         setSplitDistance(1000);
       } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : "Erreur de chargement du fichier GPX.");
+        alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
       }
       setIsLoading(false);
     }, 30));
@@ -424,6 +428,9 @@ function App() {
               />
             )}
 
+            {/* VDOT predictions — Jack Daniels (running only, fiabilité ≥ moyenne) */}
+            {vo2maxEst && <VDOTPredictor estimate={vo2maxEst} />}
+
             {/* Power metrics (cycling + power data) */}
             {normalizedPower !== null && enrichedActivity!.activityType === 'cycling' && (
               <PowerMetrics
@@ -506,7 +513,7 @@ function App() {
         />
       )}
 
-      {/* Loading overlay (Web Worker parsing) */}
+      {/* Loading overlay — parse bloquant sur le thread principal via requestAnimationFrame */}
       {isLoading && (
         <div style={{
           position: "fixed", inset: 0,

@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import { UploadCloud, FileWarning, HelpCircle } from "lucide-react";
 
 interface DropzoneProps {
-  onActivityLoaded: (gpxText: string, fileName: string) => void;
+  onActivityLoaded: (data: string | ArrayBuffer, fileName: string) => void;
   onLoadSample: () => void;
 }
 
@@ -24,25 +24,29 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
   const processFile = (file: File) => {
     if (!file) return;
 
-    // Validate extension
     const extension = file.name.split(".").pop()?.toLowerCase();
-    if (extension !== "gpx") {
-      setError("Format invalide. Veuillez importer un fichier au format .gpx uniquement.");
+    if (extension !== "gpx" && extension !== "fit") {
+      setError("Format invalide. Veuillez importer un fichier .gpx ou .fit.");
       return;
     }
 
     setError(null);
     const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      if (text) {
-        onActivityLoaded(text, file.name);
-      }
-    };
-    reader.onerror = () => {
-      setError("Erreur lors de la lecture du fichier. Veuillez réessayer.");
-    };
-    reader.readAsText(file);
+    reader.onerror = () => setError("Erreur lors de la lecture du fichier. Veuillez réessayer.");
+
+    if (extension === "fit") {
+      reader.onload = (e) => {
+        const buffer = e.target?.result as ArrayBuffer;
+        if (buffer) onActivityLoaded(buffer, file.name);
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      reader.onload = (e) => {
+        const text = e.target?.result as string;
+        if (text) onActivityLoaded(text, file.name);
+      };
+      reader.readAsText(file);
+    }
   };
 
   const handleDrop = (e: React.DragEvent) => {
@@ -75,11 +79,11 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
         onDragLeave={handleDrag}
         onDrop={handleDrop}
       >
-        <input 
+        <input
           ref={fileInputRef}
-          type="file" 
+          type="file"
           id="gpx-file-input"
-          accept=".gpx" 
+          accept=".gpx,.fit"
           onChange={handleChange}
           style={{ display: "none" }}
         />
@@ -89,10 +93,14 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
         </div>
 
         <h2 style={{ fontSize: "1.5rem", marginBottom: "0.5rem" }}>
-          Analysez votre fichier GPX
+          Analysez votre activité
         </h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: "1.5rem", fontSize: "0.95rem" }}>
-          Glissez et déposez votre fichier de parcours ici, ou cliquez pour parcourir votre ordinateur.
+          Glissez et déposez votre fichier ici, ou cliquez pour parcourir.
+          <br />
+          <span style={{ fontSize: "0.85rem", color: "var(--text-tertiary)" }}>
+            Formats acceptés : .gpx (Garmin, Strava, Wahoo…) · .fit (Garmin natif)
+          </span>
         </p>
 
         {error && (
