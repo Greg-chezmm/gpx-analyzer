@@ -131,7 +131,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       case "elevation":
       default:
         return {
-          getValue: (pt) => pt.ele || 0,
+          getValue: (pt) => pt.ele ?? 0,
           label: "Altitude", unit: " m",
           color: "var(--color-ele)", colorClass: "ele",
           yMin: limits.minEle, yMax: limits.maxEle,
@@ -160,11 +160,15 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 
     for (let i = 0; i < points.length; i += samplingInterval) {
       const pt = points[i];
+      // Skip null-elevation points so they don't draw a line down to y=0
+      if (activeTab === 'elevation' && pt.ele === null) continue;
       pathPoints.push([getX(pt.distFromStart), getY(chartParams.getValue(pt))]);
     }
     if (points.length > 1 && (points.length - 1) % samplingInterval !== 0) {
       const last = points[points.length - 1];
-      pathPoints.push([getX(last.distFromStart), getY(chartParams.getValue(last))]);
+      if (!(activeTab === 'elevation' && last.ele === null)) {
+        pathPoints.push([getX(last.distFromStart), getY(chartParams.getValue(last))]);
+      }
     }
     if (pathPoints.length === 0) return { line: "", area: "" };
 

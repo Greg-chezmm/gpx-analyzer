@@ -1,3 +1,5 @@
+import { enrichPoints, computeTrackStats } from './trackProcessing';
+
 export interface GPXTrackPoint {
   lat: number;
   lon: number;
@@ -76,8 +78,6 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
 
   const points: GPXTrackPoint[] = [];
   let accumulatedDistance = 0;
-  let elevationGain = 0;
-  let elevationLoss = 0;
 
   let hrSum = 0;
   let hrCount = 0;
@@ -187,151 +187,9 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
     });
   }
 
-  // Smooth elevation with a symmetric moving average before accumulating gain.
-  // Required for DEM-corrected GPX (Strava exports): each point changes by < 0.25m
-  // but real terrain accumulates over thousands of meters. A naive per-point threshold
-  // would filter out nearly all of those small steps, massively under-counting gain.
-  const rawEleSnap = points.map(p => p.ele);
-  const ELE_WIN = 5; // points each side → 11-point window
-  for (let i = 0; i < points.length; i++) {
-    if (rawEleSnap[i] === null) continue;
-    const lo = Math.max(0, i - ELE_WIN);
-    const hi = Math.min(points.length - 1, i + ELE_WIN);
-    let sum = 0, cnt = 0;
-    for (let j = lo; j <= hi; j++) {
-      if (rawEleSnap[j] !== null) { sum += rawEleSnap[j]!; cnt++; }
-    }
-    points[i].ele = cnt > 0 ? sum / cnt : rawEleSnap[i];
-  }
-
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    if (curr.ele !== null && prev.ele !== null) {
-      const diff = curr.ele - prev.ele;
-      if (diff > 0) elevationGain += diff;
-      else elevationLoss += Math.abs(diff);
-    }
-  }
-
-  // Calculate speeds and grade between points
-  for (let i = 0; i < points.length; i++) {
-    const curr = points[i];
-
-    if (i === 0) {
-      curr.speed = 0;
-      curr.rawSpeed = 0;
-      continue;
-    }
-
-    const prev = points[i - 1];
-    const distDiff = curr.distFromStart - prev.distFromStart;
-
-    // Time difference
-    let timeDiff = 0;
-    if (curr.time && prev.time) {
-      timeDiff = (curr.time.getTime() - prev.time.getTime()) / 1000; // seconds
-    }
-
-    // Speed (m/s)
-    let rawSpeed = 0;
-    if (timeDiff > 0 && distDiff > 0) {
-      rawSpeed = distDiff / timeDiff;
-    }
-    curr.rawSpeed = rawSpeed;
-
-    // Grade computed later with a windowed approach (see below)
-  }
-
-  // Smooth speeds using a moving average window to filter out GPS speed spikes
-  const windowSize = 5;
-  for (let i = 0; i < points.length; i++) {
-    if (i === 0) {
-      points[i].speed = 0;
-      continue;
-    }
-
-    let sum = 0;
-    let count = 0;
-    const startIdx = Math.max(0, i - Math.floor(windowSize / 2));
-    const endIdx = Math.min(points.length - 1, i + Math.floor(windowSize / 2));
-
-    for (let j = startIdx; j <= endIdx; j++) {
-      if (points[j].rawSpeed !== null) {
-        sum += points[j].rawSpeed!;
-        count++;
-      }
-    }
-
-    points[i].speed = count > 0 ? sum / count : 0;
-  }
-
-  // Grade: distance-based window (target ±30 m each side = ~60 m total).
-  // Fixed-point windows break when GPS records densely (slow hiking, pauses) —
-  // ±4 points may cover only 5 m, turning any residual elevation error into 50%+ noise.
-  // A 60 m window stays stable regardless of recording frequency.
-  const GRADE_TARGET_M = 30;
-  for (let i = 0; i < points.length; i++) {
-    const base = points[i].distFromStart;
-    let lo = i, hi = i;
-    while (lo > 0 && base - points[lo - 1].distFromStart < GRADE_TARGET_M) lo--;
-    while (hi < points.length - 1 && points[hi + 1].distFromStart - base < GRADE_TARGET_M) hi++;
-    const hDist = points[hi].distFromStart - points[lo].distFromStart;
-    if (hDist >= 10 && points[hi].ele !== null && points[lo].ele !== null) {
-      points[i].grade = Math.round(((points[hi].ele! - points[lo].ele!) / hDist) * 1000) / 10;
-    } else {
-      points[i].grade = 0;
-    }
-  }
-
-  // Calculate global statistics
-  const firstPt = points[0];
-  const lastPt = points[points.length - 1];
-
-  const startTime = firstPt.time;
-  const endTime = lastPt.time;
-
-  // Total elapsed duration in seconds
-  const totalDuration = startTime && endTime ? (endTime.getTime() - startTime.getTime()) / 1000 : 0;
-
-  // Moving time: ignore time gaps where speed is below 0.5 m/s (1.8 km/h)
-  let movingTime = 0;
-  let maxSpeed = 0;
-  let movingSpeedSum = 0;
-  let movingPointsCount = 0;
-
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i];
-    const prev = points[i - 1];
-
-    let timeDiff = 0;
-    if (curr.time && prev.time) {
-      timeDiff = (curr.time.getTime() - prev.time.getTime()) / 1000;
-    }
-
-    if (timeDiff > 0 && timeDiff < 30) { // filter out long pause durations
-      const spd = curr.speed || 0;
-      if (spd > 0.5) {
-        movingTime += timeDiff;
-        movingSpeedSum += spd * timeDiff; // weighted speed
-        movingPointsCount += timeDiff;
-      }
-    }
-
-    if (curr.speed && curr.speed > maxSpeed) {
-      maxSpeed = curr.speed;
-    }
-  }
-
-  // Fallback for moving time if time wasn't parsed properly
-  if (movingTime === 0 || !startTime) {
-    movingTime = totalDuration || (accumulatedDistance / 4); // assume 4 m/s average if no times
-  }
-
-  // Average speed in moving time
-  const avgSpeed = movingTime > 0 ? (movingPointsCount > 0 ? movingSpeedSum / movingPointsCount : accumulatedDistance / movingTime) : 0;
-
-  // Pace in seconds per kilometer (e.g. 5:30/km)
-  const avgPace = avgSpeed > 0 ? 1000 / avgSpeed : 0;
+  const { elevationGain, elevationLoss } = enrichPoints(points);
+  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace }
+    = computeTrackStats(points, accumulatedDistance);
 
   // Detect activity type from <type> tag or speed heuristic
   let activityType: 'running' | 'cycling' | 'unknown' = 'unknown';

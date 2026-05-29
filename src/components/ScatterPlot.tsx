@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { TrendingUp, Info, ChevronDown, ChevronUp } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { karvonenBounds } from "../utils/gpxParser";
@@ -29,16 +29,29 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
     [points]
   );
 
+  const hasPower = useMemo(
+    () => !isRunning && validPts.some(p => p.power !== null && (p.power ?? 0) > 10),
+    [isRunning, validPts]
+  );
+
+  // For cycling: default to power mode if power data is available
+  const [powerMode, setPowerMode] = useState(false);
+  useEffect(() => { setPowerMode(hasPower); }, [hasPower]);
+
+  const usePower = !isRunning && hasPower && powerMode;
+
   if (validPts.length < 20) return null;
 
   const ratio = Math.ceil(validPts.length / 600);
   const sampled = ratio > 1 ? validPts.filter((_, i) => i % ratio === 0) : validPts;
 
   const hrArr = sampled.map(p => p.hr!);
-  // Running: pace in s/km (lower = faster). Cycling: speed in km/h.
+  // Running: pace s/km. Cycling: power (W) or speed (km/h).
   const yArr = isRunning
-    ? sampled.map(p => 1000 / p.speed!)   // s/km
-    : sampled.map(p => p.speed! * 3.6);   // km/h
+    ? sampled.map(p => 1000 / p.speed!)            // s/km
+    : usePower
+      ? sampled.map(p => p.power ?? 0)             // watts
+      : sampled.map(p => p.speed! * 3.6);          // km/h
 
   const hrLo = Math.max(Math.min(...hrArr) - 3, 0);
   const hrHi = Math.max(...hrArr) + 3;
@@ -91,9 +104,12 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
   // Y ticks
   const yTicks: number[] = [];
   if (isRunning) {
-    // Round to nearest 30s
     const ySpan = yHi - yLo;
     const step = ySpan > 180 ? 60 : ySpan > 90 ? 30 : 15;
+    for (let v = Math.ceil(yLo / step) * step; v <= yHi; v += step) yTicks.push(v);
+  } else if (usePower) {
+    const ySpan = yHi - yLo;
+    const step = ySpan > 200 ? 50 : ySpan > 100 ? 25 : 10;
     for (let v = Math.ceil(yLo / step) * step; v <= yHi; v += step) yTicks.push(v);
   } else {
     const ySpan = yHi - yLo;
@@ -110,8 +126,10 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
   ];
 
   const r2Label = r2 >= 0.7 ? "corrélation forte" : r2 >= 0.4 ? "corrélation modérée" : "corrélation faible";
-  const yAxisLabel = isRunning ? "Allure (/km)" : "Vitesse (km/h)";
-  const title = isRunning ? "Allure vs Fréquence Cardiaque" : "Vitesse vs Fréquence Cardiaque";
+  const yAxisLabel = isRunning ? "Allure (/km)" : usePower ? "Puissance (W)" : "Vitesse (km/h)";
+  const title = isRunning ? "Allure vs Fréquence Cardiaque"
+    : usePower ? "Puissance vs Fréquence Cardiaque"
+    : "Vitesse vs Fréquence Cardiaque";
 
   return (
     <div className="card animate-slide-up">
@@ -120,8 +138,22 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
           <TrendingUp size={18} style={{ color: "#60a5fa" }} />
           <span>{title}</span>
         </h3>
-        <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", fontWeight: 600 }}>
-          R² = {r2.toFixed(2)} · {r2Label}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          {hasPower && (
+            <button type="button" onClick={() => setPowerMode(v => !v)}
+              style={{
+                padding: "0.25rem 0.65rem", fontSize: "0.75rem", fontWeight: 700,
+                border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)",
+                background: powerMode ? "var(--accent-primary)" : "transparent",
+                color: powerMode ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer", transition: "all 0.15s",
+              }}>
+              {powerMode ? "⚡ Puissance" : "🚴 Vitesse"}
+            </button>
+          )}
+          <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", fontWeight: 600 }}>
+            R² = {r2.toFixed(2)} · {r2Label}
+          </div>
         </div>
       </div>
 

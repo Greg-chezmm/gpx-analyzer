@@ -3,6 +3,7 @@
 import FitParser from 'fit-file-parser';
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 import { calculateDistance } from './gpxCore';
+import { enrichPoints, computeTrackStats } from './trackProcessing';
 
 // ─── Internal FIT types ──────────────────────────────────────────────────────
 
@@ -142,94 +143,9 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     });
   }
 
-  // ── Elevation smoothing — 11-point symmetric moving average ───────────────
-  const rawEle = points.map(p => p.ele);
-  const ELE_WIN = 5;
-  for (let i = 0; i < points.length; i++) {
-    if (rawEle[i] === null) continue;
-    const lo = Math.max(0, i - ELE_WIN);
-    const hi = Math.min(points.length - 1, i + ELE_WIN);
-    let sum = 0, cnt = 0;
-    for (let j = lo; j <= hi; j++) {
-      if (rawEle[j] !== null) { sum += rawEle[j]!; cnt++; }
-    }
-    points[i].ele = cnt > 0 ? sum / cnt : rawEle[i];
-  }
-
-  let elevationGain = 0, elevationLoss = 0;
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    if (curr.ele !== null && prev.ele !== null) {
-      const diff = curr.ele - prev.ele;
-      if (diff > 0) elevationGain += diff;
-      else elevationLoss += Math.abs(diff);
-    }
-  }
-
-  // ── Raw speed from time deltas ────────────────────────────────────────────
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    const distDiff = curr.distFromStart - prev.distFromStart;
-    let timeDiff = 0;
-    if (curr.time && prev.time) timeDiff = (curr.time.getTime() - prev.time.getTime()) / 1000;
-    curr.rawSpeed = timeDiff > 0 && distDiff > 0 ? distDiff / timeDiff : 0;
-  }
-
-  // Speed smoothing — 5-point moving average
-  const SPD_WIN = 5;
-  for (let i = 0; i < points.length; i++) {
-    const lo = Math.max(0, i - Math.floor(SPD_WIN / 2));
-    const hi = Math.min(points.length - 1, i + Math.floor(SPD_WIN / 2));
-    let sum = 0, count = 0;
-    for (let j = lo; j <= hi; j++) {
-      if (points[j].rawSpeed !== null) { sum += points[j].rawSpeed!; count++; }
-    }
-    points[i].speed = count > 0 ? sum / count : 0;
-  }
-  points[0].speed = 0;
-
-  // ── Grade — 60 m distance window ──────────────────────────────────────────
-  const GRADE_TARGET_M = 30;
-  for (let i = 0; i < points.length; i++) {
-    const base = points[i].distFromStart;
-    let lo = i, hi = i;
-    while (lo > 0 && base - points[lo - 1].distFromStart < GRADE_TARGET_M) lo--;
-    while (hi < points.length - 1 && points[hi + 1].distFromStart - base < GRADE_TARGET_M) hi++;
-    const hDist = points[hi].distFromStart - points[lo].distFromStart;
-    if (hDist >= 10 && points[hi].ele !== null && points[lo].ele !== null) {
-      points[i].grade = Math.round(((points[hi].ele! - points[lo].ele!) / hDist) * 1000) / 10;
-    } else {
-      points[i].grade = 0;
-    }
-  }
-
-  // ── Global statistics ──────────────────────────────────────────────────────
-  const startTime = points[0].time;
-  const endTime   = points[points.length - 1].time;
-  const totalDuration = startTime && endTime
-    ? (endTime.getTime() - startTime.getTime()) / 1000 : 0;
-
-  let movingTime = 0, maxSpeed = 0, movingSpeedSum = 0, movingPointsCount = 0;
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    let timeDiff = 0;
-    if (curr.time && prev.time) timeDiff = (curr.time.getTime() - prev.time.getTime()) / 1000;
-    if (timeDiff > 0 && timeDiff < 30) {
-      const spd = curr.speed ?? 0;
-      if (spd > 0.5) {
-        movingTime       += timeDiff;
-        movingSpeedSum   += spd * timeDiff;
-        movingPointsCount += timeDiff;
-      }
-    }
-    if ((curr.speed ?? 0) > maxSpeed) maxSpeed = curr.speed ?? 0;
-  }
-  if (movingTime === 0 || !startTime) movingTime = totalDuration || accumulatedDistance / 4;
-
-  const avgSpeed = movingTime > 0
-    ? (movingPointsCount > 0 ? movingSpeedSum / movingPointsCount : accumulatedDistance / movingTime)
-    : 0;
-  const avgPace = avgSpeed > 0 ? 1000 / avgSpeed : 0;
+  const { elevationGain, elevationLoss } = enrichPoints(points);
+  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace }
+    = computeTrackStats(points, accumulatedDistance);
 
   // ── Activity type — FIT sport field is explicit, fallback to speed ─────────
   const session = data.sessions?.[0];

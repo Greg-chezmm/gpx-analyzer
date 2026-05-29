@@ -29,6 +29,7 @@ import { SplitsBars } from "./components/SplitsBars";
 import { FloatingNav } from "./components/FloatingNav";
 import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
+import { AthleteSettingsButton } from "./components/AthleteSettings";
 import { generateSummary } from "./utils/generateSummary";
 
 import {
@@ -109,6 +110,7 @@ function App() {
     const cleanName = name.replace(/\.[^/.]+$/, "");
     const isFit = name.toLowerCase().endsWith(".fit");
     setIsLoading(true);
+    // Defer by one frame so the spinner renders before the synchronous parse.
     requestAnimationFrame(() => setTimeout(async () => {
       try {
         const parsed = isFit && data instanceof ArrayBuffer
@@ -214,6 +216,15 @@ function App() {
               <span className="btn-text">Résumé IA</span>
             </button>
           )}
+          <AthleteSettingsButton
+            fcMax={fcMax}       onFcMaxChange={setFcMax}
+            fcRest={fcRest}     onFcRestChange={setFcRest}
+            vma={vma}           onVmaChange={setVma}
+            ftp={ftp}           onFtpChange={setFtp}
+            weight={weight}     onWeightChange={setWeight}
+            birthYear={birthYear} onBirthYearChange={setBirthYear}
+            isCycling={enrichedActivity?.activityType === 'cycling'}
+          />
           <button type="button" className="btn btn-outline"
             onClick={toggleTheme}
             title={isDark ? "Mode clair" : "Mode sombre"}
