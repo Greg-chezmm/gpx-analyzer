@@ -66,6 +66,16 @@ export function parseFIT(buffer: ArrayBuffer, defaultName = "Activité FIT"): Pr
 // Note: smoothing and grade logic mirrors parseGPX in gpxCore.ts intentionally —
 // both formats must produce identical GPXActivity shapes for downstream components.
 
+// Returns true for plausible GPS coordinates in degrees.
+// Rejects: null, (0,0) = Gulf of Guinea (pre-lock), out-of-range (unconverted semicircles).
+function isValidGPS(lat: number | null | undefined, lon: number | null | undefined): boolean {
+  if (lat == null || lon == null) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+  if (lat === 0 && lon === 0) return false;
+  return true;
+}
+
 function fitDataToActivity(data: FitData, name: string): GPXActivity {
   const records = (data.records ?? []).filter(r => r.timestamp != null);
 
@@ -73,51 +83,62 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     throw new Error('Aucun point de tracé trouvé dans ce fichier FIT.');
   }
 
-  // ── Raw points ────────────────────────────────────────────────────────────
-  const points: GPXTrackPoint[] = [];
-  let accumulatedDistance = 0;
+  // ── Aggregate stats from ALL records (HR, cadence, power, temp) ─────────
+  // Records before GPS lock have HR but no coordinates. We compute aggregate
+  // stats here so that avgHeartRate / maxHeartRate reflect the full session.
   let hrSum = 0, hrCount = 0, maxHr = 0;
   let cadSum = 0, cadCount = 0, maxCad = 0;
   let powerSum = 0, powerCount = 0, maxPower = 0;
   let tempSum = 0, tempCount = 0;
 
-  for (let i = 0; i < records.length; i++) {
-    const r = records[i];
-    const lat  = r.position_lat  ?? null;
-    const lon  = r.position_long ?? null;
-    // prefer barometric/enhanced altitude when available
-    const ele  = r.enhanced_altitude ?? r.altitude ?? null;
+  for (const r of records) {
+    const hr  = r.heart_rate != null && r.heart_rate > 0 ? r.heart_rate : null;
+    const cad = r.cadence    != null && r.cadence    > 0 ? r.cadence    : null;
+    const pwr = r.power      != null && r.power      > 0 ? r.power      : null;
+    const tmp = r.temperature ?? null;
+    if (hr  !== null) { hrSum    += hr;  hrCount++;    if (hr  > maxHr)    maxHr    = hr;  }
+    if (cad !== null) { cadSum   += cad; cadCount++;   if (cad > maxCad)   maxCad   = cad; }
+    if (pwr !== null) { powerSum += pwr; powerCount++; if (pwr > maxPower) maxPower = pwr; }
+    if (tmp !== null) { tempSum  += tmp; tempCount++;                                       }
+  }
+
+  // ── Track points — GPS-valid records only ─────────────────────────────────
+  // Records without GPS (before satellite lock, brief outages) are excluded:
+  // including them would corrupt distance (jump to 0°,0°) and speed values.
+  // The HR zone calculation in HeartRateZones.tsx integrates time between
+  // consecutive points; with GPS-only the pre-lock period (~20-60 s) is absent,
+  // but the resulting zone error is <1% for typical 1h+ activities.
+  const gpsRecords = records.filter(r => isValidGPS(r.position_lat, r.position_long));
+
+  if (gpsRecords.length === 0) {
+    throw new Error('Aucune coordonnée GPS valide dans ce fichier FIT (activité intérieure ?).');
+  }
+
+  const points: GPXTrackPoint[] = [];
+  let accumulatedDistance = 0;
+
+  for (let i = 0; i < gpsRecords.length; i++) {
+    const r   = gpsRecords[i];
+    const lat = r.position_lat  as number;
+    const lon = r.position_long as number;
+    const ele = r.enhanced_altitude ?? r.altitude ?? null;
     const time = r.timestamp ?? null;
-    const hr   = r.heart_rate != null && r.heart_rate  > 0 ? r.heart_rate  : null;
-    const cad  = r.cadence    != null && r.cadence     > 0 ? r.cadence     : null;
-    const pwr  = r.power      != null && r.power       > 0 ? r.power       : null;
-    const temp = r.temperature ?? null;
+    const hr  = r.heart_rate != null && r.heart_rate > 0 ? r.heart_rate : null;
+    const cad = r.cadence    != null && r.cadence    > 0 ? r.cadence    : null;
+    const pwr = r.power      != null && r.power      > 0 ? r.power      : null;
+    const tmp = r.temperature ?? null;
 
-    if (hr   !== null) { hrSum    += hr;   hrCount++;    if (hr   > maxHr)    maxHr    = hr;   }
-    if (cad  !== null) { cadSum   += cad;  cadCount++;   if (cad  > maxCad)   maxCad   = cad;  }
-    if (pwr  !== null) { powerSum += pwr;  powerCount++; if (pwr  > maxPower) maxPower = pwr;  }
-    if (temp !== null) { tempSum  += temp; tempCount++;                                         }
-
-    if (i > 0 && lat !== null && lon !== null) {
-      const prev = points[i - 1];
-      if (prev.lat !== 0 || prev.lon !== 0) {
-        accumulatedDistance += calculateDistance(prev.lat, prev.lon, lat, lon);
-      }
+    if (i > 0) {
+      accumulatedDistance += calculateDistance(
+        points[i - 1].lat, points[i - 1].lon, lat, lon,
+      );
     }
 
     points.push({
-      lat: lat ?? 0,
-      lon: lon ?? 0,
-      ele,
-      time,
-      hr,
-      cad,
-      power: pwr,
-      temp,
+      lat, lon, ele, time,
+      hr, cad, power: pwr, temp: tmp,
       distFromStart: accumulatedDistance,
-      speed: 0,
-      rawSpeed: 0,
-      grade: null,
+      speed: 0, rawSpeed: 0, grade: null,
     });
   }
 
