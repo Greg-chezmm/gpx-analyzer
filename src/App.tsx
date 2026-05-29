@@ -326,6 +326,9 @@ function App() {
               {hasHeartRate ? (
                 <MetricCard icon={<Heart size={22} />} label="Cardio moyen"
                   value={enrichedActivity!.avgHeartRate!} unit=" bpm" colorVar="hr" />
+              ) : enrichedActivity!.activityType === 'cycling' ? (
+                <MetricCard icon={<Gauge size={22} />} label="Vitesse moyenne"
+                  value={(enrichedActivity!.avgSpeed * 3.6).toFixed(1)} unit=" km/h" colorVar="speed" />
               ) : (
                 <MetricCard icon={<Gauge size={22} />} label="Allure moyenne"
                   value={formatPace(enrichedActivity!.avgPace)} unit=" /km" colorVar="cad" />

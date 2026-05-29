@@ -56,7 +56,7 @@ export const SplitsBars: React.FC<SplitsBarsProps> = ({ splits, activityType }) 
           <span>Splits visuels</span>
         </h3>
         <div style={{ fontSize: "0.78rem", color: "var(--text-tertiary)" }}>
-          Barre haute = allure rapide · ligne pointillée = moyenne
+          {isCycling ? 'Barre haute = vitesse rapide' : 'Barre haute = allure rapide'} · ligne pointillée = moyenne
         </div>
       </div>
 

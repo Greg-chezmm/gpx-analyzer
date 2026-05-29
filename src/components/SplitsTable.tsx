@@ -45,7 +45,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
 
   // Generate Tab-Separated Values (TSV) format for spreadsheet copy-pasting
   const handleCopyTable = () => {
-    let tsv = "Km\tTemps\tAllure (min/km)\tVitesse moy. (km/h)\tV. max (km/h)\tD+ (m)\tD- (m)";
+    let tsv = `Km\tTemps\t${isCycling ? 'Vitesse moy. (km/h)' : 'Allure (min/km)'}\tVitesse moy. (km/h)\tV. max (km/h)\tD+ (m)\tD- (m)`;
     
     if (hasGrade) tsv += "\tPente moy. (%)";
     if (hasGAP) tsv += "\tGAP (min/km)";
@@ -59,7 +59,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
     splits.forEach(split => {
       tsv += `${split.number}\t`;
       tsv += `${formatDuration(split.duration)}\t`;
-      tsv += `${formatPace(split.avgPace)}\t`;
+      tsv += isCycling ? `${(split.avgSpeed * 3.6).toFixed(1)}\t` : `${formatPace(split.avgPace)}\t`;
       tsv += `${(split.avgSpeed * 3.6).toFixed(1)}\t`;
       tsv += `${(split.maxSpeed * 3.6).toFixed(1)}\t`;
       tsv += `${split.elevationGain}\t`;
@@ -127,10 +127,10 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
               </th>
               <th>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
-                  <Zap size={14} /> Allure
+                  <Zap size={14} /> {isCycling ? 'Vitesse' : 'Allure'}
                 </span>
               </th>
-              <th>V. moy.</th>
+              {!isCycling && <th>V. moy.</th>}
               <th>V. max</th>
               <th>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}>
@@ -206,11 +206,15 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                   {formatDuration(split.duration)}
                 </td>
                 <td className="numeric" style={{ fontWeight: "600", color: "var(--accent-secondary)" }}>
-                  {formatPace(split.avgPace)}
+                  {isCycling
+                    ? `${(split.avgSpeed * 3.6).toFixed(1)} km/h`
+                    : formatPace(split.avgPace)}
                 </td>
-                <td className="numeric">
-                  {split.avgSpeed ? (split.avgSpeed * 3.6).toFixed(1) : "0.0"} km/h
-                </td>
+                {!isCycling && (
+                  <td className="numeric">
+                    {split.avgSpeed ? (split.avgSpeed * 3.6).toFixed(1) : "0.0"} km/h
+                  </td>
+                )}
                 <td className="numeric" style={{ fontWeight: "600" }}>
                   {(split.maxSpeed * 3.6).toFixed(1)} km/h
                 </td>
