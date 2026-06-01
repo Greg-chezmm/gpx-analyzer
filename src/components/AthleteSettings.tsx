@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Settings, X } from "lucide-react";
+import type { Sex } from "../hooks/useUserSettings";
 
 interface AthleteSettingsProps {
   fcMax: number;     onFcMaxChange: (v: number) => void;
@@ -8,6 +9,7 @@ interface AthleteSettingsProps {
   ftp: number;       onFtpChange: (v: number) => void;
   weight: number;    onWeightChange: (v: number) => void;
   birthYear: number; onBirthYearChange: (v: number) => void;
+  sex: Sex;          onSexChange: (v: Sex) => void;
   isCycling?: boolean;
 }
 
@@ -117,6 +119,23 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
             </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
+            {/* Sexe — toggle binaire pour le calcul TRIMP Banister */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
+              <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)", fontWeight: 600 }}>Sexe</span>
+              <div style={{ display: "flex", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
+                {(['M', 'F'] as Sex[]).map(s => (
+                  <button key={s} type="button" onClick={() => props.onSexChange(s)}
+                    style={{
+                      width: "42px", height: "28px", border: "none", cursor: "pointer",
+                      fontSize: "0.82rem", fontWeight: 700,
+                      background: props.sex === s ? "var(--accent-primary)" : "var(--bg-primary)",
+                      color: props.sex === s ? "#fff" : "var(--text-secondary)",
+                    }}>
+                    {s === 'M' ? '♂' : '♀'}
+                  </button>
+                ))}
+              </div>
+            </div>
             {visible.map(f => <Stepper key={f.label} {...f} />)}
           </div>
         </div>

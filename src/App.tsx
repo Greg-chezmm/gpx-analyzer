@@ -46,7 +46,7 @@ const SPLIT_OPTIONS = [
 ];
 
 function App() {
-  const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear } = useUserSettings();
+  const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear, sex, setSex } = useUserSettings();
   const { isDark, toggleTheme } = useTheme();
 
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -92,8 +92,8 @@ function App() {
   );
 
   const trimp = useMemo(
-    () => (enrichedActivity ? calcTRIMP(enrichedActivity.points, fcMax, fcRest) : null),
-    [enrichedActivity, fcMax, fcRest]
+    () => (enrichedActivity ? calcTRIMP(enrichedActivity.points, fcMax, fcRest, sex) : null),
+    [enrichedActivity, fcMax, fcRest, sex]
   );
 
   const normalizedPower = useMemo(
@@ -223,6 +223,7 @@ function App() {
             ftp={ftp}           onFtpChange={setFtp}
             weight={weight}     onWeightChange={setWeight}
             birthYear={birthYear} onBirthYearChange={setBirthYear}
+            sex={sex}           onSexChange={setSex}
             isCycling={enrichedActivity?.activityType === 'cycling'}
           />
           <button type="button" className="btn btn-outline"

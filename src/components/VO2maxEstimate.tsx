@@ -114,7 +114,7 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate, suunto
       </div>
 
       <div style={{ fontSize: "0.71rem", color: "var(--text-tertiary)", borderTop: "1px solid var(--border-color)", paddingTop: "0.6rem", marginTop: "0.25rem" }}>
-        Méthode sous-maximale : formule ACSM running + Karvonen HRR · Valeur plus fiable sur effort régulier ≥ 20 min à 50–85% HRR
+        Méthode sous-maximale : formule ACSM running + Karvonen HRR · Segment le plus stable détecté : {estimate.windowMin} min
       </div>
     </div>
   );

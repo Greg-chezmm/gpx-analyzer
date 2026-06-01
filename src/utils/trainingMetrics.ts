@@ -1,4 +1,5 @@
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
+import type { Sex } from '../hooks/useUserSettings';
 import { karvonenBounds } from './session';
 import { gapFactor } from './splits';
 
@@ -65,7 +66,9 @@ export function calcTRIMP(
   points: GPXTrackPoint[],
   fcMax: number,
   fcRest: number,
+  sex: Sex = 'M',
 ): TRIMPResult | null {
+  // Karvonen bounds — same zones as HeartRateZones display so times match
   const bounds = karvonenBounds(fcMax, fcRest);
   const zoneTime = [0, 0, 0, 0, 0]; // seconds
   let hrSum = 0, totalTime = 0;
@@ -76,7 +79,10 @@ export function calcTRIMP(
     const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
     if (dt <= 0 || dt > 60) continue;
     const avgHr = (curr.hr + prev.hr) / 2;
-    const z = avgHr >= bounds[4] ? 4 : avgHr >= bounds[3] ? 3 : avgHr >= bounds[2] ? 2 : avgHr >= bounds[1] ? 1 : 0;
+    const z = avgHr >= bounds[4] ? 4
+            : avgHr >= bounds[3] ? 3
+            : avgHr >= bounds[2] ? 2
+            : avgHr >= bounds[1] ? 1 : 0;
     zoneTime[z] += dt;
     hrSum += avgHr * dt;
     totalTime += dt;
@@ -87,9 +93,13 @@ export function calcTRIMP(
   const WEIGHTS = [1, 2, 3, 4, 5];
   const edwards = zoneTime.reduce((s, t, i) => s + (t / 60) * WEIGHTS[i], 0);
 
+  // Banister: TRIMP = T × ΔFC × k,  k = a×e^(b×ΔFC)
+  // Hommes: a=0.64, b=1.92 — Femmes: a=0.86, b=1.67  (Banister 1991)
   const avgHR = hrSum / totalTime;
-  const hrr = Math.max(0, Math.min(1, (avgHR - fcRest) / (fcMax - fcRest)));
-  const banister = Math.round((totalTime / 60) * hrr * Math.exp(1.92 * hrr));
+  const dfc = Math.max(0, Math.min(1, (avgHR - fcRest) / (fcMax - fcRest)));
+  const a = sex === 'F' ? 0.86 : 0.64;
+  const b = sex === 'F' ? 1.67 : 1.92;
+  const banister = Math.round((totalTime / 60) * dfc * a * Math.exp(b * dfc));
 
   return {
     edwards: Math.round(edwards),
@@ -131,6 +141,7 @@ export interface VO2maxEstimate {
   confidence: 'high' | 'medium' | 'low';
   hrrPct: number;         // avg HRR% used
   gapSpeedKmh: number;    // equivalent flat speed used
+  windowMin: number;      // duration of the stable segment used (minutes)
 }
 
 export function estimateVO2max(
@@ -139,53 +150,89 @@ export function estimateVO2max(
   fcRest: number,
 ): VO2maxEstimate | null {
   if (activity.activityType === 'cycling') return null;
+
   const pts = activity.points.filter(
     (p: GPXTrackPoint) => p.hr !== null && p.speed !== null && p.speed > 1.5 && p.time !== null
   );
   if (pts.length < 60) return null;
 
-  // Use middle 60% to skip warmup/cooldown
-  const tStart = pts[0].time!.getTime();
-  const tEnd   = pts[pts.length - 1].time!.getTime();
-  const tRange = tEnd - tStart;
-  const steady = pts.filter((p: GPXTrackPoint) => {
-    const pct = (p.time!.getTime() - tStart) / tRange;
-    return pct >= 0.2 && pct <= 0.8;
-  });
-  if (steady.length < 30) return null;
-
-  // Average GAP speed (m/s)
-  const avgGapSpd = steady.reduce((s: number, p: GPXTrackPoint) => {
+  const gapSpeeds = pts.map((p: GPXTrackPoint) => {
     const gf = p.grade !== null ? gapFactor(p.grade) : 1;
-    return s + p.speed! * gf;
-  }, 0) / steady.length;
+    return p.speed! * gf;
+  });
 
-  const vMMin = avgGapSpd * 60; // m/min
+  // Prefix sums for O(1) window mean/variance
+  const m = pts.length;
+  const prefHR   = new Float64Array(m + 1);
+  const prefHR2  = new Float64Array(m + 1);
+  const prefGap  = new Float64Array(m + 1);
+  const prefGap2 = new Float64Array(m + 1);
+  for (let k = 0; k < m; k++) {
+    prefHR[k + 1]  = prefHR[k]  + pts[k].hr!;
+    prefHR2[k + 1] = prefHR2[k] + pts[k].hr! ** 2;
+    prefGap[k + 1]  = prefGap[k]  + gapSpeeds[k];
+    prefGap2[k + 1] = prefGap2[k] + gapSpeeds[k] ** 2;
+  }
 
-  // ACSM running VO2 formula (flat equivalent)
-  const vo2 = 0.2 * vMMin + 3.5;
+  const winStats = (i: number, j: number) => {
+    const n = j - i + 1;
+    const mHR  = (prefHR[j + 1]  - prefHR[i])  / n;
+    const mGap = (prefGap[j + 1] - prefGap[i]) / n;
+    const varHR  = (prefHR2[j + 1]  - prefHR2[i])  / n - mHR  ** 2;
+    const varGap = (prefGap2[j + 1] - prefGap2[i]) / n - mGap ** 2;
+    return {
+      mHR, mGap,
+      cvHR:  Math.sqrt(Math.max(0, varHR))  / mHR,
+      cvGap: Math.sqrt(Math.max(0, varGap)) / mGap,
+    };
+  };
 
-  // Average HRR%
-  const avgHR = steady.reduce((s: number, p: GPXTrackPoint) => s + p.hr!, 0) / steady.length;
+  // Two-pointer: find most stable window of at least minMs duration.
+  // Score = 2×CV(HR) + CV(GAP) — HR stability weighted more because
+  // speed noise is smoothed upstream while HR reacts to effort changes.
+  const findBestWindow = (minMs: number) => {
+    let j = 0;
+    let bestScore = Infinity, bestI = -1, bestJ = -1;
+    for (let i = 0; i < m; i++) {
+      while (j < m - 1 && pts[j].time!.getTime() - pts[i].time!.getTime() < minMs) j++;
+      if (pts[j].time!.getTime() - pts[i].time!.getTime() < minMs) continue;
+      if (j - i < 20) continue;
+      const { cvHR, cvGap } = winStats(i, j);
+      const score = 2 * cvHR + cvGap;
+      if (score < bestScore) { bestScore = score; bestI = i; bestJ = j; }
+    }
+    return bestI >= 0 ? { i: bestI, j: bestJ } : null;
+  };
+
+  // Always use the best 10-min window for the estimate — it has the lowest CV.
+  // A 20-min window covers more time and accumulates more drift, so its CV is
+  // typically higher; using it would lower confidence without improving accuracy.
+  const win10 = findBestWindow(10 * 60_000);
+  if (!win10) return null;
+
+  const { i: bestI, j: bestJ } = win10;
+  const { mHR: avgHR, mGap: avgGapSpd, cvHR, cvGap } = winStats(bestI, bestJ);
+
   const hrrPct = (avgHR - fcRest) / (fcMax - fcRest);
   if (hrrPct < 0.35 || hrrPct > 0.97) return null;
 
+  const vo2    = 0.2 * (avgGapSpd * 60) + 3.5;
   const vo2max = vo2 / hrrPct;
 
-  // Confidence: based on duration and HR steadiness
-  const hrCV = Math.sqrt(
-    steady.reduce((s: number, p: GPXTrackPoint) => s + (p.hr! - avgHR) ** 2, 0) / steady.length
-  ) / avgHR;
-  const durationMin = tRange / 60_000;
+  const windowMin = Math.round((pts[bestJ].time!.getTime() - pts[bestI].time!.getTime()) / 60_000);
+
+  // For 'high': also require a stable 20-min window to exist
+  const win20exists = cvHR < 0.05 ? findBestWindow(20 * 60_000) !== null : false;
 
   const confidence: 'high' | 'medium' | 'low' =
-    durationMin >= 30 && hrCV < 0.06 && hrrPct >= 0.5 && hrrPct <= 0.87 ? 'high' :
-    durationMin >= 15 && hrCV < 0.12 ? 'medium' : 'low';
+    win20exists && cvHR < 0.05 && cvGap < 0.10 && hrrPct >= 0.5 && hrrPct <= 0.87 ? 'high' :
+    cvHR < 0.12 ? 'medium' : 'low';
 
   return {
-    value: Math.round(vo2max * 10) / 10,
+    value:        Math.round(vo2max * 10) / 10,
     confidence,
-    hrrPct: Math.round(hrrPct * 100),
-    gapSpeedKmh: Math.round(avgGapSpd * 3.6 * 10) / 10,
+    hrrPct:       Math.round(hrrPct * 100),
+    gapSpeedKmh:  Math.round(avgGapSpd * 3.6 * 10) / 10,
+    windowMin,
   };
 }
