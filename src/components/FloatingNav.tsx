@@ -1,11 +1,12 @@
 import React from "react";
-import { Map, TrendingUp, Heart, BarChart2 } from "lucide-react";
+import { Map, TrendingUp, Heart, BarChart2, Activity } from "lucide-react";
 
 const NAV_ITEMS = [
-  { id: "nav-map",    label: "Carte",       icon: <Map size={14} /> },
-  { id: "nav-charts", label: "Graphiques",  icon: <TrendingUp size={14} /> },
-  { id: "nav-zones",  label: "Zones FC",    icon: <Heart size={14} /> },
-  { id: "nav-splits", label: "Splits",      icon: <BarChart2 size={14} /> },
+  { id: "nav-map",     label: "Carte",      icon: <Map size={14} /> },
+  { id: "nav-charts",  label: "Graphiques", icon: <TrendingUp size={14} /> },
+  { id: "nav-zones",   label: "Zones FC",   icon: <Heart size={14} /> },
+  { id: "nav-splits",  label: "Splits",     icon: <BarChart2 size={14} /> },
+  { id: "nav-balance", label: "Charge",     icon: <Activity size={14} /> },
 ] as const;
 
 export const FloatingNav: React.FC<{ visible: boolean }> = ({ visible }) => {

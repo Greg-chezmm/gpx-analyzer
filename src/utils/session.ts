@@ -5,10 +5,11 @@ import type { GPXTrackPoint } from './gpxCore';
 export type SessionType =
   | 'Récupération'
   | 'Endurance aérobie'
+  | 'Sortie longue'
   | 'Aérobie / Tempo'
   | 'Seuil'
-  | 'VO2max'
-  | 'Fractionné';
+  | 'Fractionné'
+  | 'VO2max';
 
 export interface SessionClassification {
   type: SessionType;
@@ -38,9 +39,12 @@ export function classifySession(
   points: GPXTrackPoint[],
   fcMax: number,
   fcRest: number,
-  vma: number, // km/h
+  vma: number,          // km/h
+  durationMin?: number, // total moving time
+  intervalCount?: number,
 ): SessionClassification {
   const bounds = karvonenBounds(fcMax, fcRest);
+  const hasIntervals = (intervalCount ?? 0) >= 3;
 
   // Try HR-based classification first
   const zoneTime = [0, 0, 0, 0, 0];
@@ -58,24 +62,27 @@ export function classifySession(
   }
 
   if (totalHrTime > 60) {
-    const pcts = zoneTime.map(t => totalHrTime > 0 ? (t / totalHrTime) * 100 : 0);
+    const pcts = zoneTime.map(t => (t / totalHrTime) * 100);
     let type: SessionType;
     let color: string;
     let emoji: string;
     let description: string;
 
-    if (pcts[4] >= 10 || pcts[3] + pcts[4] >= 25) {
-      // Significant Z5 or lots of Z4+Z5 → could be fractionné if intervals detected
-      if (pcts[4] >= 15) {
-        type = 'VO2max'; color = '#ef4444'; emoji = '🔴';
-        description = `${pcts[4].toFixed(0)}% en Z5 — effort maximal`;
-      } else {
-        type = 'Seuil'; color = '#f97316'; emoji = '🟠';
-        description = `${(pcts[3] + pcts[4]).toFixed(0)}% en Z4-Z5 — travail au seuil`;
-      }
-    } else if (pcts[2] >= 30) {
+    if (pcts[4] >= 15) {
+      type = 'VO2max'; color = '#ef4444'; emoji = '🔴';
+      description = `${pcts[4].toFixed(0)}% en Z5 — effort maximal`;
+    } else if (hasIntervals && pcts[3] + pcts[4] >= 8) {
+      type = 'Fractionné'; color = '#f97316'; emoji = '🟠';
+      description = `${intervalCount} répétitions détectées — ${(pcts[3]+pcts[4]).toFixed(0)}% en Z4-Z5`;
+    } else if (pcts[3] + pcts[4] >= 25) {
+      type = 'Seuil'; color = '#f97316'; emoji = '🟠';
+      description = `${(pcts[3] + pcts[4]).toFixed(0)}% en Z4-Z5 — travail au seuil`;
+    } else if (pcts[2] >= 25) {
       type = 'Aérobie / Tempo'; color = '#fbbf24'; emoji = '🟡';
       description = `${pcts[2].toFixed(0)}% en Z3 — allure soutenue`;
+    } else if ((durationMin ?? 0) >= 90 && pcts[0] + pcts[1] >= 60) {
+      type = 'Sortie longue'; color = '#34d399'; emoji = '🟢';
+      description = `${Math.round(durationMin!)} min · ${(pcts[0]+pcts[1]).toFixed(0)}% en Z1-Z2`;
     } else if (pcts[1] >= 40) {
       type = 'Endurance aérobie'; color = '#34d399'; emoji = '🟢';
       description = `${pcts[1].toFixed(0)}% en Z2 — endurance fondamentale`;
@@ -89,7 +96,7 @@ export function classifySession(
 
   // Fallback: speed-based classification
   const vmaMs = vma / 3.6;
-  const speedTime = [0, 0, 0, 0, 0]; // <50%, 50-65%, 65-80%, 80-90%, >90% VMA
+  const speedTime = [0, 0, 0, 0, 0];
   let totalSpeedTime = 0;
 
   for (let i = 1; i < points.length; i++) {
@@ -115,12 +122,18 @@ export function classifySession(
   if (sPcts[4] >= 10) {
     type = 'VO2max'; color = '#ef4444'; emoji = '🔴';
     description = `${sPcts[4].toFixed(0)}% au-dessus de 90% VMA`;
+  } else if (hasIntervals && sPcts[3] + sPcts[4] >= 8) {
+    type = 'Fractionné'; color = '#f97316'; emoji = '🟠';
+    description = `${intervalCount} répétitions · ${(sPcts[3]+sPcts[4]).toFixed(0)}% au-dessus de 80% VMA`;
   } else if (sPcts[3] >= 20) {
     type = 'Seuil'; color = '#f97316'; emoji = '🟠';
     description = `${sPcts[3].toFixed(0)}% entre 80–90% VMA`;
   } else if (sPcts[2] >= 35) {
     type = 'Aérobie / Tempo'; color = '#fbbf24'; emoji = '🟡';
     description = `${sPcts[2].toFixed(0)}% entre 65–80% VMA`;
+  } else if ((durationMin ?? 0) >= 90 && sPcts[0] + sPcts[1] >= 60) {
+    type = 'Sortie longue'; color = '#34d399'; emoji = '🟢';
+    description = `${Math.round(durationMin!)} min — sortie longue`;
   } else if (sPcts[1] >= 40) {
     type = 'Endurance aérobie'; color = '#34d399'; emoji = '🟢';
     description = `Vitesse prédominante entre 50–65% VMA`;

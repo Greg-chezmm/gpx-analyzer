@@ -53,6 +53,52 @@ export function calcCardiacDrift(activity: GPXActivity): CardiacDrift | null {
   };
 }
 
+// ─── TSB / CTL / ATL — Training Stress Balance ───────────────────────────────
+
+export interface TSBDay {
+  date:  string;
+  trimp: number;
+  atl:   number;
+  ctl:   number;
+  tsb:   number;
+}
+
+export interface TSBResult {
+  atl:       number;
+  ctl:       number;
+  tsb:       number;
+  chartData: TSBDay[]; // last 90 days
+}
+
+export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
+  if (history.length === 0) return { atl: 0, ctl: 0, tsb: 0, chartData: [] };
+
+  const LA = 2 / (7  + 1);  // ATL — 7-day decay
+  const LF = 2 / (42 + 1);  // CTL — 42-day decay
+
+  const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
+  const trimpMap = new Map<string, number>();
+  for (const e of sorted) trimpMap.set(e.date, (trimpMap.get(e.date) ?? 0) + e.trimp);
+
+  const today = new Date().toISOString().slice(0, 10);
+  let atl = 0, ctl = 0;
+  const all: TSBDay[] = [];
+
+  const d = new Date(sorted[0].date);
+  const end = new Date(today);
+  while (d <= end) {
+    const ds = d.toISOString().slice(0, 10);
+    const t = trimpMap.get(ds) ?? 0;
+    atl = t * LA + (1 - LA) * atl;
+    ctl = t * LF + (1 - LF) * ctl;
+    all.push({ date: ds, trimp: t, atl: Math.round(atl * 10) / 10, ctl: Math.round(ctl * 10) / 10, tsb: Math.round((ctl - atl) * 10) / 10 });
+    d.setDate(d.getDate() + 1);
+  }
+
+  const last = all[all.length - 1] ?? { atl: 0, ctl: 0, tsb: 0 };
+  return { atl: last.atl, ctl: last.ctl, tsb: last.tsb, chartData: all.slice(-90) };
+}
+
 // ─── TRIMP — Training Impulse ─────────────────────────────────────────────────
 
 export interface TRIMPResult {

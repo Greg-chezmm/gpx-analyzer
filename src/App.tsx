@@ -1,15 +1,16 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   parseGPX, calculateSplits, detectIntervals, parseSuuntoWindows,
   detectClimbs, classifySession, calcCardiacDrift,
   parseSuuntoBaroSamples, enrichWithBaroAlt,
-  calcTRIMP, calcNormalizedPower, estimateVO2max,
+  calcTRIMP, calcNormalizedPower, estimateVO2max, calcTSB,
   type GPXActivity, type GPXLap, type SuuntoSessionHeader, type BaroSample,
 } from "./utils/gpxParser";
 import { parseFIT } from "./utils/fitParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
 import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
+import { useTrainingHistory } from "./hooks/useTrainingHistory";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
 import { ActivityMap } from "./components/ActivityMap";
@@ -22,6 +23,7 @@ import { ClimbAnalysis } from "./components/ClimbAnalysis";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
+import { TrainingBalance } from "./components/TrainingBalance";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { VO2maxEstimate } from "./components/VO2maxEstimate";
 import { VDOTPredictor } from "./components/VDOTPredictor";
@@ -48,6 +50,7 @@ const SPLIT_OPTIONS = [
 function App() {
   const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear, sex, setSex } = useUserSettings();
   const { isDark, toggleTheme } = useTheme();
+  const { history, addEntry, clearHistory } = useTrainingHistory();
 
   const [activity, setActivity] = useState<GPXActivity | null>(null);
   const [laps, setLaps] = useState<GPXLap[] | null>(null);
@@ -82,8 +85,12 @@ function App() {
   );
 
   const session = useMemo(
-    () => (enrichedActivity ? classifySession(enrichedActivity.points, fcMax, fcRest, vma) : null),
-    [enrichedActivity, fcMax, fcRest, vma]
+    () => enrichedActivity ? classifySession(
+      enrichedActivity.points, fcMax, fcRest, vma,
+      enrichedActivity.movingTime / 60,
+      intervals?.filter(iv => iv.type === 'effort').length ?? 0,
+    ) : null,
+    [enrichedActivity, fcMax, fcRest, vma, intervals]
   );
 
   const drift = useMemo(
@@ -95,6 +102,17 @@ function App() {
     () => (enrichedActivity ? calcTRIMP(enrichedActivity.points, fcMax, fcRest, sex) : null),
     [enrichedActivity, fcMax, fcRest, sex]
   );
+
+  // Auto-save current activity to training history when TRIMP is available
+  useEffect(() => {
+    if (!trimp || !enrichedActivity) return;
+    const date = enrichedActivity.startTime
+      ? enrichedActivity.startTime.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    addEntry({ date, trimp: trimp.edwards, name: enrichedActivity.name ?? fileName });
+  }, [trimp, enrichedActivity]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tsbResult = useMemo(() => calcTSB(history), [history]);
 
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
@@ -434,6 +452,9 @@ function App() {
 
             {/* Charge d'entraînement TRIMP */}
             {trimp && <TrainingLoad trimp={trimp} />}
+
+            {/* TSB / CTL / ATL — historique multi-séances */}
+            <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
 
             {/* VO2max estimation (running only) */}
             {vo2maxEst && (
