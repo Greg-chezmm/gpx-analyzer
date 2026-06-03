@@ -7,7 +7,7 @@ import type { ActivityIndexEntry } from '../utils/driveStorage';
 
 interface DriveSyncButtonProps {
   drive: DriveHandle;
-  onLoad: (data: ArrayBuffer | string, name: string) => void;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
 }
 
 export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
@@ -20,7 +20,7 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
     try {
       const data = await drive.loadFile(entry.fileId, entry.fileName);
       setOpen(false);
-      onLoad(data, entry.fileName);
+      onLoad(data, entry.fileName, entry.name);
     } catch {
       alert('Impossible de charger le fichier depuis Drive.');
     } finally {
@@ -122,7 +122,7 @@ export function DriveSaveButton({ drive, onSave, alreadySaved }: DriveSaveButton
 
 interface DriveActivityListProps {
   drive: DriveHandle;
-  onLoad: (data: ArrayBuffer | string, name: string) => void;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
 }
 
 export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
@@ -135,7 +135,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
     setLoadingId(entry.fileId);
     try {
       const data = await drive.loadFile(entry.fileId, entry.fileName);
-      onLoad(data, entry.fileName);
+      onLoad(data, entry.fileName, entry.name);
     } catch {
       alert('Impossible de charger le fichier depuis Drive.');
     } finally {

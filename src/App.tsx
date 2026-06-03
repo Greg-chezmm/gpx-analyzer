@@ -76,6 +76,7 @@ function App() {
   const skipDriveHistorySync = useRef(false);
   const skipSettingsSync = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const driveCustomNameRef = useRef<string>('');
 
   // Enrich GPS elevation with barometric altitude when JSON is loaded
   const enrichedActivity = useMemo(() => {
@@ -170,7 +171,9 @@ function App() {
   // Reverse geocode start point when activity changes
   useEffect(() => {
     setLocationName(null);
-    setCustomActivityName('');
+    // Restore Drive custom name if the activity was loaded from Drive; otherwise clear
+    setCustomActivityName(driveCustomNameRef.current);
+    driveCustomNameRef.current = '';
     if (!enrichedActivity?.points?.length) return;
     const pt = enrichedActivity.points[0];
     if (!pt.lat || !pt.lon) return;
@@ -213,7 +216,8 @@ function App() {
     [enrichedActivity, fcMax, fcRest]
   );
 
-  const handleActivityLoaded = (data: string | ArrayBuffer, name: string) => {
+  const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string) => {
+    driveCustomNameRef.current = customName || '';
     const cleanName = name.replace(/\.[^/.]+$/, "");
     const isFit = name.toLowerCase().endsWith(".fit");
     setIsLoading(true);
