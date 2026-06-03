@@ -128,13 +128,14 @@ h1, h2, h3, h4, h5, h6 {
    5. HEADER
 ═══════════════════════════════════════════════════════════════ */
 .header {
-  height: var(--header-height);
+  min-height: var(--header-height);
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
-  padding: 0 2rem;
+  padding: 0.5rem 2rem;
   position: sticky;
   top: 0;
   z-index: 1000;
@@ -793,10 +794,8 @@ h1, h2, h3, h4, h5, h6 {
 ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
   .header {
-    height: auto;
     min-height: 56px;
     padding: 0.5rem 1rem;
-    flex-wrap: wrap;
     gap: 0.4rem;
   }
 
