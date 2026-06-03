@@ -55,8 +55,91 @@ function fmtPace(sPerKm: number): string {
 
 interface TooltipState {
   entries: TrainingEntry[];
-  svgX: number;
-  svgY: number;
+  svgX: number;   // SVG coord — used for the vertical guide highlight
+  anchorX: number; // clientX — for HTML tooltip positioning
+  anchorY: number; // clientY — for HTML tooltip positioning
+}
+
+const TT_WIDTH = 200; // px, fixed-width HTML tooltip
+
+function HtmlTooltip({ tooltip }: { tooltip: TooltipState }) {
+  const { entries, anchorX, anchorY } = tooltip;
+  if (entries.length === 0) return null;
+
+  const isMulti = entries.length > 1;
+  const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entries[0].date));
+
+  const blocks = entries.map(e => {
+    const title = e.name.length > 28 ? e.name.slice(0, 26) + '…' : e.name;
+    const typeLabel = e.activityType === 'cycling' ? '🚴 Vélo' : e.activityType === 'running' ? '🏃 Course' : '';
+    const details: string[] = [];
+    if (e.distance && e.duration) details.push(`${(e.distance / 1000).toFixed(1)} km · ${fmtDur(e.duration)}`);
+    if (e.elevationGain && e.elevationGain > 0) details.push(`D+ ${Math.round(e.elevationGain)} m`);
+    if (e.activityType === 'cycling' && e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
+    else if (e.avgPace) details.push(`Allure ${fmtPace(e.avgPace)} /km`);
+    else if (e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
+    if (e.avgHeartRate) details.push(`FC moy. ${e.avgHeartRate} bpm`);
+    details.push(`TRIMP ${e.trimp.toFixed(0)}`);
+    return { title, typeLabel, details };
+  });
+
+  // Position: above cursor, horizontally centered, clamped to viewport
+  const left = Math.max(8, Math.min(anchorX - TT_WIDTH / 2, window.innerWidth - TT_WIDTH - 8));
+  const top = anchorY - 12; // anchor at bottom of tooltip, 12px above cursor
+
+  return (
+    <div style={{
+      position: 'fixed',
+      left,
+      top,
+      transform: 'translateY(-100%)',
+      zIndex: 10000,
+      width: TT_WIDTH,
+      background: 'var(--bg-secondary)',
+      border: '1px solid var(--border-color)',
+      borderRadius: '6px',
+      padding: '7px 9px',
+      pointerEvents: 'none',
+      boxShadow: 'var(--shadow-lg)',
+      fontSize: '0.7rem',
+      lineHeight: 1.45,
+    }}>
+      {/* Multi-session date header */}
+      {isMulti && (
+        <div style={{ fontWeight: 700, fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+          {dateStr} · {entries.length} séances
+        </div>
+      )}
+
+      {blocks.map((b, idx) => (
+        <React.Fragment key={idx}>
+          {idx > 0 && (
+            <div style={{ borderTop: '1px solid var(--border-color)', margin: '5px 0' }} />
+          )}
+          {/* Name */}
+          <div style={{ fontWeight: 700, fontSize: '0.72rem', color: 'var(--text-primary)', marginBottom: '1px' }}>
+            {b.title}
+          </div>
+          {/* Date + type (single entry only) */}
+          {!isMulti && (
+            <div style={{ color: 'var(--text-tertiary)', marginBottom: '2px' }}>
+              {dateStr}{b.typeLabel ? ` · ${b.typeLabel}` : ''}
+            </div>
+          )}
+          {/* Type badge (multi entry) */}
+          {isMulti && b.typeLabel && (
+            <div style={{ color: 'var(--text-tertiary)', marginBottom: '2px', fontSize: '0.66rem' }}>
+              {b.typeLabel}
+            </div>
+          )}
+          {/* Detail lines */}
+          {b.details.map((line, li) => (
+            <div key={li} style={{ color: 'var(--text-secondary)' }}>{line}</div>
+          ))}
+        </React.Fragment>
+      ))}
+    </div>
+  );
 }
 
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
@@ -71,7 +154,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const ML = 36, MT = 8, MB = 22, MR = 8;
   const VW = 560, VH = 140;
   const cw = VW - ML - MR;
-  const ch = VH - MT - MB - 12; // extra space for dots row
+  const ch = VH - MT - MB - 12;
   const n = data.length;
 
   const allVals = data.flatMap(d => [d.ctl, d.atl, d.tsb]);
@@ -82,7 +165,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const toX = (i: number) => ML + (n > 1 ? (i / (n - 1)) * cw : cw / 2);
   const toY = (v: number) => MT + ch - ((v - minV) / range) * ch;
   const zeroY = toY(0);
-  const dotsY = VH - MB - 6; // y position of session dots
+  const dotsY = VH - MB - 6;
 
   const path = (key: 'ctl' | 'atl' | 'tsb') =>
     data.map((d, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d[key]).toFixed(1)}`).join(' ');
@@ -96,7 +179,6 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
     }
   });
 
-  // Training days with their history entries for tooltip
   const trainingDots = data
     .map((d, i) => ({ ...d, i }))
     .filter(d => d.trimp > 0)
@@ -104,133 +186,6 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
       ...d,
       entries: history.filter(e => e.date === d.date),
     }));
-
-  // Tooltip rendering inside SVG
-  const renderTooltip = () => {
-    if (!tooltip || tooltip.entries.length === 0) return null;
-
-    const TW = 192;
-    const PAD = 8;
-    const LINE_H = 12;
-    const TITLE_H = 13; // name text baseline offset from block top
-    const SEP_H = 10;   // vertical space for separator between entries
-    const isMulti = tooltip.entries.length > 1;
-
-    // Build data for each entry
-    const blocks = tooltip.entries.map(e => {
-      const title = e.name.length > 26 ? e.name.slice(0, 24) + '…' : e.name;
-      const typeLabel = e.activityType === 'cycling' ? '🚴 Vélo' : e.activityType === 'running' ? '🏃 Course' : '';
-      const details: string[] = [];
-      if (e.distance && e.duration) details.push(`${(e.distance / 1000).toFixed(1)} km  ·  ${fmtDur(e.duration)}`);
-      if (e.elevationGain && e.elevationGain > 0) details.push(`D+  ${e.elevationGain} m`);
-      if (e.activityType === 'cycling' && e.avgSpeed) details.push(`Vitesse  ${e.avgSpeed.toFixed(1)} km/h`);
-      else if (e.avgPace) details.push(`Allure  ${fmtPace(e.avgPace)} /km`);
-      else if (e.avgSpeed) details.push(`Vitesse  ${e.avgSpeed.toFixed(1)} km/h`);
-      if (e.avgHeartRate) details.push(`FC moy.  ${e.avgHeartRate} bpm`);
-      details.push(`TRIMP  ${e.trimp.toFixed(0)}`);
-      return { title, typeLabel, details };
-    });
-
-    // Single entry: date shown as second line; multi: date header once on top
-    const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(tooltip.entries[0].date));
-    const DATE_HEADER_H = isMulti ? LINE_H + 4 : 0;
-
-    // Calculate total height
-    let TH = PAD + DATE_HEADER_H;
-    blocks.forEach((b, idx) => {
-      TH += TITLE_H; // name line
-      if (!isMulti) TH += LINE_H; // date+type line for single entry
-      TH += b.details.length * LINE_H;
-      if (idx < blocks.length - 1) TH += SEP_H;
-    });
-    TH += PAD;
-
-    const rawX = tooltip.svgX - TW / 2;
-    const x = Math.min(Math.max(rawX, ML), VW - MR - TW);
-    const rawY = tooltip.svgY - TH - 4;
-    const y = Math.max(MT, rawY);
-
-    const elements: React.ReactNode[] = [];
-    let yOff = PAD;
-
-    if (isMulti) {
-      // Date header for multi-session day
-      elements.push(
-        <text key="date-hdr" x={x + PAD} y={y + yOff + 9} fontSize="8.5" fontWeight="700" fill="var(--text-secondary)">
-          {dateStr} · {tooltip.entries.length} séances
-        </text>
-      );
-      yOff += DATE_HEADER_H;
-    }
-
-    blocks.forEach((b, idx) => {
-      // Name
-      elements.push(
-        <text key={`name-${idx}`} x={x + PAD} y={y + yOff + TITLE_H} fontSize="9.5" fontWeight="700" fill="var(--text-primary)">
-          {b.title}
-        </text>
-      );
-      yOff += TITLE_H;
-
-      if (!isMulti) {
-        // Date + type on same line for single entry
-        elements.push(
-          <text key="date-single" x={x + PAD} y={y + yOff + LINE_H} fontSize="8" fill="var(--text-secondary)">
-            {dateStr}{b.typeLabel ? `  ·  ${b.typeLabel}` : ''}
-          </text>
-        );
-        yOff += LINE_H;
-      } else if (b.typeLabel) {
-        // Type badge for multi-entry (no date, already shown above)
-        elements.push(
-          <text key={`type-${idx}`} x={x + PAD} y={y + yOff + LINE_H} fontSize="7.5" fill="var(--text-tertiary)">
-            {b.typeLabel}
-          </text>
-        );
-        yOff += LINE_H;
-      }
-
-      // Detail lines
-      b.details.forEach((line, li) => {
-        elements.push(
-          <text key={`d-${idx}-${li}`} x={x + PAD} y={y + yOff + LINE_H * (li + 1)} fontSize="8" fill="var(--text-secondary)">
-            {line}
-          </text>
-        );
-      });
-      yOff += b.details.length * LINE_H;
-
-      // Separator between entries
-      if (idx < blocks.length - 1) {
-        yOff += SEP_H / 2;
-        elements.push(
-          <line key={`sep-${idx}`}
-            x1={x + PAD} y1={y + yOff}
-            x2={x + TW - PAD} y2={y + yOff}
-            stroke="var(--border-color)" strokeWidth="0.6"
-          />
-        );
-        yOff += SEP_H / 2;
-      }
-    });
-
-    return (
-      <g style={{ pointerEvents: 'none' }}>
-        <rect x={x} y={y} width={TW} height={TH}
-          rx={5} ry={5}
-          fill="var(--bg-secondary)" stroke="var(--border-color)" strokeWidth="0.75"
-        />
-        {elements}
-        {/* Connector line from tooltip to dot */}
-        <line
-          x1={tooltip.svgX} y1={y + TH}
-          x2={tooltip.svgX} y2={tooltip.svgY - 5}
-          stroke="var(--border-color)" strokeWidth="1"
-          strokeDasharray="2,2"
-        />
-      </g>
-    );
-  };
 
   return (
     <div className="card animate-slide-up" id="nav-balance">
@@ -294,14 +249,14 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             return (
               <g key={d.date}
                 style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setTooltip({ entries: d.entries, svgX: cx, svgY: dotsY })}
+                onMouseEnter={(e) => setTooltip({ entries: d.entries, svgX: cx, anchorX: e.clientX, anchorY: e.clientY })}
               >
-                {/* Vertical guide line */}
+                {/* Vertical guide line — brightens on hover */}
                 <line
                   x1={cx} y1={MT}
                   x2={cx} y2={dotsY - 9}
                   stroke={dotColor} strokeWidth="0.75"
-                  strokeDasharray="2,3" strokeOpacity={isActive ? 0.7 : 0.3}
+                  strokeDasharray="2,3" strokeOpacity={isActive ? 0.8 : 0.3}
                 />
                 {/* Session dot — stacked rings if multiple sessions */}
                 {hasMulti ? (
@@ -323,11 +278,11 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           {xLabels.map(({ i, label }) => (
             <text key={label + i} x={toX(i)} y={VH - 4} textAnchor="middle" fontSize="9" fill="var(--text-tertiary)">{label}</text>
           ))}
-
-          {/* Tooltip — rendered last to appear on top */}
-          {renderTooltip()}
         </svg>
       )}
+
+      {/* HTML tooltip — position:fixed breaks out of any SVG/card stacking context */}
+      {tooltip && <HtmlTooltip tooltip={tooltip} />}
 
       {/* Legend */}
       <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap", marginTop: "0.5rem" }}>
