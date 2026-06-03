@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { TrendingUp, Eye } from "lucide-react";
+import { TrendingUp, Eye, Maximize2, Minimize2 } from "lucide-react";
 
 interface ChartViewerProps {
   points: GPXTrackPoint[];
@@ -40,13 +40,21 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   activityType,
 }) => {
   const [activeTab, setActiveTab] = useState<ChartType>("elevation");
+  const [expanded, setExpanded] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
 
   const svgWidth = 600;
-  const svgHeight = 260;
+  const svgHeight = expanded ? 480 : 260;
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const plotWidth = svgWidth - padding.left - padding.right;
   const plotHeight = svgHeight - padding.top - padding.bottom;
+
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setExpanded(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expanded]);
 
   const limits = useMemo(() => {
     if (points.length === 0) return { maxDist: 0, minEle: 0, maxEle: 0, maxSpeed: 0, minHr: 0, maxHr: 0, maxCad: 0, minPace: 180, maxPace: 420 };
@@ -229,7 +237,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       hrTicks: step4(limits.minHr, limits.maxHr).map(v => ({ y: getYH(v), label: String(Math.round(v)) })),
       getYP, getYH, paceParams, hrParams,
     };
-  }, [activeTab, points, hasHeartRate, limits]);
+  }, [activeTab, points, hasHeartRate, limits, plotHeight]);
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     if (!svgRef.current || points.length === 0) return;
@@ -272,7 +280,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       const val = yMin + step * i;
       return { value: val, y: getY(val), label: formatY ? formatY(val) : val.toFixed(0) };
     });
-  }, [chartParams, limits, activeTab]);
+  }, [chartParams, limits, activeTab, plotHeight]);
 
   const xTicks = useMemo(() => {
     const step = limits.maxDist / 5;
@@ -282,12 +290,37 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const hoveredPoint = hoveredPointIndex !== null ? points[hoveredPointIndex] : null;
 
   return (
-    <div className="card animate-slide-up" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <>
+    {expanded && (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 1199, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+        onClick={() => setExpanded(false)}
+      />
+    )}
+    <div className="card animate-slide-up" style={{
+      display: "flex", flexDirection: "column", height: "100%",
+      ...(expanded ? {
+        position: 'fixed', inset: '0.75rem', zIndex: 1200,
+        height: 'auto', boxShadow: 'var(--shadow-xl)',
+      } : {}),
+    }}>
       <div className="panel-header" style={{ flexWrap: "wrap", gap: "0.75rem" }}>
         <h3 className="panel-title">
           <TrendingUp size={18} style={{ color: "var(--accent-secondary)" }} />
           <span>📈 Profils d'Entraînement</span>
         </h3>
+
+        <button type="button" onClick={() => setExpanded(e => !e)}
+          title={expanded ? 'Réduire' : 'Agrandir'}
+          style={{
+            background: 'none', border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.4rem',
+            cursor: 'pointer', color: 'var(--text-secondary)',
+            display: 'flex', alignItems: 'center', flexShrink: 0,
+          }}
+        >
+          {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
 
         <div className="chart-tabs">
           <button type="button" className={`chart-tab ${activeTab === "elevation" ? "active" : ""}`} onClick={() => setActiveTab("elevation")}>Altitude</button>
@@ -506,5 +539,6 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
         )}
       </div>
     </div>
+    </>
   );
 };

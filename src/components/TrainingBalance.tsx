@@ -146,7 +146,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
 
     const rawX = tooltip.svgX - TW / 2;
     const x = Math.min(Math.max(rawX, ML), VW - MR - TW);
-    const rawY = tooltip.svgY - TH - 10;
+    const rawY = tooltip.svgY - TH - 4;
     const y = Math.max(MT, rawY);
 
     return (
@@ -175,10 +175,12 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             {extra}
           </text>
         )}
-        {/* Arrow */}
-        <polygon
-          points={`${tooltip.svgX - 5},${y + TH} ${tooltip.svgX + 5},${y + TH} ${tooltip.svgX},${y + TH + 6}`}
-          fill="var(--bg-secondary)" stroke="var(--border-color)" strokeWidth="0.75"
+        {/* Connector line from tooltip to dot */}
+        <line
+          x1={tooltip.svgX} y1={y + TH}
+          x2={tooltip.svgX} y2={tooltip.svgY - 5}
+          stroke="var(--border-color)" strokeWidth="1"
+          strokeDasharray="2,2"
         />
       </g>
     );
