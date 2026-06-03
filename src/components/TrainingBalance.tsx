@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Activity, Trash2 } from "lucide-react";
 import type { TSBResult } from "../utils/trainingMetrics";
 import type { TrainingEntry } from "../hooks/useTrainingHistory";
@@ -39,18 +39,39 @@ function KPI({ label, value, sub, color }: { label: string; value: string; sub: 
   );
 }
 
+function fmtDur(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h${m.toString().padStart(2, '0')}`;
+  const ss = Math.floor(s % 60);
+  return `${m}:${ss.toString().padStart(2, '0')}`;
+}
+
+function fmtPace(sPerKm: number): string {
+  const m = Math.floor(sPerKm / 60);
+  const s = Math.round(sPerKm % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+interface TooltipState {
+  entries: TrainingEntry[];
+  svgX: number;
+  svgY: number;
+}
+
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+
   if (history.length === 0) return null;
 
   const { label: tsbLbl, color: tsbColor } = tsbLabel(tsb.tsb);
   const { label: ctlLbl, color: ctlColor } = ctlLabel(tsb.ctl);
   const data = tsb.chartData;
 
-  // SVG chart
   const ML = 36, MT = 8, MB = 22, MR = 8;
-  const VW = 560, VH = 130;
+  const VW = 560, VH = 140;
   const cw = VW - ML - MR;
-  const ch = VH - MT - MB;
+  const ch = VH - MT - MB - 12; // extra space for dots row
   const n = data.length;
 
   const allVals = data.flatMap(d => [d.ctl, d.atl, d.tsb]);
@@ -61,11 +82,11 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const toX = (i: number) => ML + (n > 1 ? (i / (n - 1)) * cw : cw / 2);
   const toY = (v: number) => MT + ch - ((v - minV) / range) * ch;
   const zeroY = toY(0);
+  const dotsY = VH - MB - 6; // y position of session dots
 
   const path = (key: 'ctl' | 'atl' | 'tsb') =>
     data.map((d, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d[key]).toFixed(1)}`).join(' ');
 
-  // X-axis labels: first of each month visible in data
   const xLabels: { i: number; label: string }[] = [];
   data.forEach((d, i) => {
     if (d.date.slice(8) === '01' || i === 0) {
@@ -75,8 +96,93 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
     }
   });
 
-  // Training day dots (only days with trimp > 0)
-  const trainingDots = data.filter(d => d.trimp > 0);
+  // Training days with their history entries for tooltip
+  const trainingDots = data
+    .map((d, i) => ({ ...d, i }))
+    .filter(d => d.trimp > 0)
+    .map(d => ({
+      ...d,
+      entries: history.filter(e => e.date === d.date),
+    }));
+
+  // Tooltip rendering inside SVG
+  const renderTooltip = () => {
+    if (!tooltip || tooltip.entries.length === 0) return null;
+
+    const TW = 182;
+    const PAD = 8;
+    const LINE_H = 12;
+
+    // Build lines for the first (or only) entry
+    const e = tooltip.entries[0];
+    const titleLine = e.name.length > 24 ? e.name.slice(0, 22) + '…' : e.name;
+    const dateLine = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(e.date))
+      + (e.activityType ? (e.activityType === 'cycling' ? ' · Vélo' : ' · Course') : '');
+
+    const detailLines: string[] = [];
+    if (e.distance && e.duration) {
+      detailLines.push(`${(e.distance / 1000).toFixed(1)} km  ·  ${fmtDur(e.duration)}`);
+    }
+    if (e.elevationGain && e.elevationGain > 0) {
+      detailLines.push(`D+  ${e.elevationGain} m`);
+    }
+    if (e.activityType === 'cycling' && e.avgSpeed) {
+      detailLines.push(`Vitesse  ${e.avgSpeed.toFixed(1)} km/h`);
+    } else if (e.avgPace) {
+      detailLines.push(`Allure  ${fmtPace(e.avgPace)} /km`);
+    } else if (e.avgSpeed) {
+      detailLines.push(`Vitesse  ${e.avgSpeed.toFixed(1)} km/h`);
+    }
+    if (e.avgHeartRate) {
+      detailLines.push(`FC moy.  ${e.avgHeartRate} bpm`);
+    }
+    detailLines.push(`TRIMP  ${e.trimp.toFixed(0)}`);
+
+    // Extra entries same day
+    const extra = tooltip.entries.length > 1 ? `+${tooltip.entries.length - 1} autre(s) séance(s)` : null;
+
+    const totalLines = 2 + detailLines.length + (extra ? 1 : 0);
+    const TH = PAD * 2 + 13 + LINE_H + totalLines * LINE_H;
+
+    const rawX = tooltip.svgX - TW / 2;
+    const x = Math.min(Math.max(rawX, ML), VW - MR - TW);
+    const rawY = tooltip.svgY - TH - 10;
+    const y = Math.max(MT, rawY);
+
+    return (
+      <g style={{ pointerEvents: 'none' }}>
+        <rect x={x} y={y} width={TW} height={TH}
+          rx={5} ry={5}
+          fill="var(--bg-secondary)" stroke="var(--border-color)" strokeWidth="0.75"
+        />
+        {/* Name */}
+        <text x={x + PAD} y={y + PAD + 9} fontSize="9.5" fontWeight="700" fill="var(--text-primary)">
+          {titleLine}
+        </text>
+        {/* Date + type */}
+        <text x={x + PAD} y={y + PAD + 9 + LINE_H} fontSize="8" fill="var(--text-secondary)">
+          {dateLine}
+        </text>
+        {/* Detail lines */}
+        {detailLines.map((line, li) => (
+          <text key={li} x={x + PAD} y={y + PAD + 9 + LINE_H * (2 + li)} fontSize="8" fill="var(--text-secondary)">
+            {line}
+          </text>
+        ))}
+        {/* Extra sessions */}
+        {extra && (
+          <text x={x + PAD} y={y + PAD + 9 + LINE_H * (2 + detailLines.length)} fontSize="7.5" fill="var(--text-tertiary)" fontStyle="italic">
+            {extra}
+          </text>
+        )}
+        {/* Arrow */}
+        <polygon
+          points={`${tooltip.svgX - 5},${y + TH} ${tooltip.svgX + 5},${y + TH} ${tooltip.svgX},${y + TH + 6}`}
+          fill="var(--bg-secondary)" stroke="var(--border-color)" strokeWidth="0.75"
+        />
+      </g>
+    );
+  };
 
   return (
     <div className="card animate-slide-up" id="nav-balance">
@@ -106,7 +212,10 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
 
       {/* SVG chart */}
       {n >= 2 && (
-        <svg viewBox={`0 0 ${VW} ${VH}`} style={{ width: "100%", display: "block", overflow: "visible" }}>
+        <svg viewBox={`0 0 ${VW} ${VH}`}
+          style={{ width: "100%", display: "block", overflow: "visible" }}
+          onMouseLeave={() => setTooltip(null)}
+        >
           {/* Grid */}
           {[0, 25, 50, 75, 100].filter(v => v >= minV && v <= maxV).map(v => (
             <g key={v}>
@@ -117,21 +226,49 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           {/* Zero line */}
           <line x1={ML} y1={zeroY} x2={VW - MR} y2={zeroY} stroke="var(--border-color)" strokeWidth="1" strokeDasharray="3,3" />
 
-          {/* Lines */}
+          {/* CTL / ATL / TSB lines */}
           <path d={path('ctl')} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" />
           <path d={path('atl')} fill="none" stroke="#f97316" strokeWidth="2" strokeLinejoin="round" />
           <path d={path('tsb')} fill="none" stroke={tsbColor} strokeWidth="1.5" strokeLinejoin="round" strokeDasharray="4,2" />
 
-          {/* Training day ticks */}
-          {trainingDots.map((d, idx) => {
-            const i = data.indexOf(d);
-            return <line key={idx} x1={toX(i)} y1={VH - MB} x2={toX(i)} y2={VH - MB + 4} stroke="var(--text-tertiary)" strokeWidth="1" />;
+          {/* Dots row separator */}
+          <line x1={ML} y1={dotsY - 8} x2={VW - MR} y2={dotsY - 8}
+            stroke="var(--border-color)" strokeWidth="0.4" />
+
+          {/* Session vertical lines + dots */}
+          {trainingDots.map((d) => {
+            const cx = toX(d.i);
+            const isCycling = d.entries[0]?.activityType === 'cycling';
+            const dotColor = isCycling ? '#34d399' : '#818cf8';
+            const isActive = tooltip?.svgX === cx;
+            return (
+              <g key={d.date}>
+                {/* Vertical guide line */}
+                <line
+                  x1={cx} y1={MT}
+                  x2={cx} y2={dotsY - 9}
+                  stroke={dotColor} strokeWidth="0.75"
+                  strokeDasharray="2,3" strokeOpacity={isActive ? 0.7 : 0.3}
+                />
+                {/* Session dot */}
+                <circle
+                  cx={cx} cy={dotsY} r={isActive ? 5 : 4}
+                  fill={dotColor}
+                  stroke="var(--bg-secondary)" strokeWidth="1.5"
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setTooltip({ entries: d.entries, svgX: cx, svgY: dotsY })}
+                />
+              </g>
+            );
           })}
 
           {/* X labels */}
           {xLabels.map(({ i, label }) => (
             <text key={label + i} x={toX(i)} y={VH - 4} textAnchor="middle" fontSize="9" fill="var(--text-tertiary)">{label}</text>
           ))}
+
+          {/* Tooltip — rendered last to appear on top */}
+          {renderTooltip()}
         </svg>
       )}
 
@@ -147,6 +284,13 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             {label}
           </div>
         ))}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.72rem", color: "var(--text-tertiary)" }}>
+          <svg width="20" height="10" viewBox="0 0 20 10">
+            <circle cx="5" cy="5" r="3.5" fill="#818cf8" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+            <circle cx="15" cy="5" r="3.5" fill="#34d399" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+          </svg>
+          Course / Vélo
+        </div>
       </div>
 
       {n < 14 && (

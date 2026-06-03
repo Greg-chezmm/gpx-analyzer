@@ -8,9 +8,11 @@ import {
 } from "./utils/gpxParser";
 import { parseFIT } from "./utils/fitParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
+import { reverseGeocode } from "./utils/geocoding";
 import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
 import { useTrainingHistory } from "./hooks/useTrainingHistory";
+import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
 import { ActivityMap } from "./components/ActivityMap";
@@ -32,10 +34,12 @@ import { FloatingNav } from "./components/FloatingNav";
 import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
+import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./components/DriveSync";
+import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { generateSummary } from "./utils/generateSummary";
 
 import {
-  Activity, Timer, TrendingUp, Heart, Trash2, Map,
+  Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
   Calendar, Gauge, Layers, Sun, Moon, Loader2, Sparkles,
 } from "lucide-react";
 
@@ -50,7 +54,8 @@ const SPLIT_OPTIONS = [
 function App() {
   const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear, sex, setSex } = useUserSettings();
   const { isDark, toggleTheme } = useTheme();
-  const { history, addEntry, clearHistory } = useTrainingHistory();
+  const { history, addEntry, updateEntry, replaceHistory, clearHistory } = useTrainingHistory();
+  const drive = useGoogleDrive();
 
   const [activity, setActivity] = useState<GPXActivity | null>(null);
   const [laps, setLaps] = useState<GPXLap[] | null>(null);
@@ -61,7 +66,13 @@ function App() {
   const [splitDistance, setSplitDistance] = useState(1000);
   const [isLoading, setIsLoading] = useState(false);
   const [showAISummary, setShowAISummary] = useState(false);
+  const [rawFileData, setRawFileData] = useState<string | ArrayBuffer | null>(null);
+  const [savedToDrive, setSavedToDrive] = useState(false);
+  const [customActivityName, setCustomActivityName] = useState<string>('');
+  const [locationName, setLocationName] = useState<string | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
+  const skipDriveHistorySync = useRef(false);
 
   // Enrich GPS elevation with barometric altitude when JSON is loaded
   const enrichedActivity = useMemo(
@@ -109,10 +120,57 @@ function App() {
     const date = enrichedActivity.startTime
       ? enrichedActivity.startTime.toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
-    addEntry({ date, trimp: trimp.edwards, name: enrichedActivity.name ?? fileName });
+    addEntry({
+      date,
+      trimp: trimp.edwards,
+      name: displayName,
+      activityType: enrichedActivity.activityType,
+      distance: enrichedActivity.totalDistance,
+      duration: enrichedActivity.movingTime,
+      elevationGain: enrichedActivity.elevationGain,
+      avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
+      avgSpeed: enrichedActivity.avgSpeed * 3.6,
+      avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
+    });
   }, [trimp, enrichedActivity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tsbResult = useMemo(() => calcTSB(history), [history]);
+
+  // Reverse geocode start point when activity changes
+  useEffect(() => {
+    setLocationName(null);
+    setCustomActivityName('');
+    if (!enrichedActivity?.points?.length) return;
+    const pt = enrichedActivity.points[0];
+    if (!pt.lat || !pt.lon) return;
+    setLocationLoading(true);
+    reverseGeocode(pt.lat, pt.lon)
+      .then(loc => setLocationName(loc))
+      .finally(() => setLocationLoading(false));
+  }, [enrichedActivity]);
+
+  // Sync Drive → localStorage on connect (merge remote + local, remote fills gaps)
+  useEffect(() => {
+    if (drive.status !== 'connected') return;
+    let cancelled = false;
+    skipDriveHistorySync.current = true;
+    drive.loadHistory().then(remote => {
+      if (cancelled) return;
+      if (remote.length === 0) { skipDriveHistorySync.current = false; return; }
+      const seen = new Map<string, { date: string; trimp: number; name: string }>();
+      [...remote, ...history].forEach(e => seen.set(`${e.date}|${e.name}`, e));
+      const merged = Array.from(seen.values()).sort((a, b) => a.date.localeCompare(b.date));
+      replaceHistory(merged);
+      setTimeout(() => { skipDriveHistorySync.current = false; }, 0);
+    }).catch(() => { skipDriveHistorySync.current = false; });
+    return () => { cancelled = true; };
+  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sync localStorage → Drive on history change (skip when change came from Drive)
+  useEffect(() => {
+    if (drive.status !== 'connected' || skipDriveHistorySync.current || history.length === 0) return;
+    drive.saveHistory(history).catch(() => {});
+  }, [history]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
@@ -141,6 +199,8 @@ function App() {
         setFileName(name);
         setHoveredPointIndex(null);
         setSplitDistance(1000);
+        setRawFileData(data);
+        setSavedToDrive(false);
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
       }
@@ -183,6 +243,52 @@ function App() {
     setFileName("");
     setHoveredPointIndex(null);
     setSplitDistance(1000);
+    setRawFileData(null);
+    setSavedToDrive(false);
+  };
+
+  const displayName = customActivityName || enrichedActivity?.name || fileName;
+
+  const handleRename = (newName: string) => {
+    if (!enrichedActivity) return;
+    const date = enrichedActivity.startTime
+      ? enrichedActivity.startTime.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const oldName = customActivityName || enrichedActivity.name || fileName;
+    setCustomActivityName(newName);
+    updateEntry(date, oldName, { name: newName });
+    setSavedToDrive(false); // allow re-save to Drive with new name
+  };
+
+  const handleSaveToDrive = async () => {
+    if (!rawFileData || !enrichedActivity) return;
+    const date = enrichedActivity.startTime
+      ? enrichedActivity.startTime.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    const intensityFactor = normalizedPower && ftp > 0 ? normalizedPower / ftp : null;
+    const tss = intensityFactor
+      ? Math.round((enrichedActivity.movingTime * normalizedPower! * intensityFactor) / (ftp * 3600) * 100)
+      : undefined;
+    await drive.save(rawFileData, fileName, {
+      name: displayName,
+      date,
+      distance: enrichedActivity.totalDistance,
+      duration: enrichedActivity.movingTime,
+      activityType: enrichedActivity.activityType,
+      elevationGain: enrichedActivity.elevationGain,
+      fileName,
+      avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
+      trimp: trimp?.edwards,
+      trimpBanister: trimp?.banister,
+      vo2max: vo2maxEst?.value,
+      vo2maxConfidence: vo2maxEst?.confidence,
+      sessionType: session?.type,
+      normalizedPower: normalizedPower ?? undefined,
+      tss,
+      driftPct: drift?.decoupling,
+      avgCadence: enrichedActivity.avgCadence ?? undefined,
+    });
+    setSavedToDrive(true);
   };
 
   const formatDate = (date: Date | null): string => {
@@ -204,6 +310,10 @@ function App() {
         </div>
 
         <div className="header-actions">
+          <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} />
+          {enrichedActivity && (
+            <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
+          )}
           {activity && (
             <>
               <input ref={jsonInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleJsonLoaded} />
@@ -304,13 +414,20 @@ function App() {
             </div>
 
             <Dropzone onActivityLoaded={handleActivityLoaded} onLoadSample={handleLoadSample} />
+            <DriveActivityList drive={drive} onLoad={handleActivityLoaded} />
           </div>
         ) : (
           <>
             {/* Activity title + session badge */}
             <div className="card animate-slide-up activity-header">
-              <div>
-                <h2 className="activity-title">{enrichedActivity!.name}</h2>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <ActivityNameEditor
+                  name={displayName}
+                  location={locationName}
+                  locationLoading={locationLoading}
+                  date={enrichedActivity!.startTime}
+                  onSave={handleRename}
+                />
                 <div className="activity-meta">
                   <span style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
                     <Calendar size={14} />
@@ -347,7 +464,7 @@ function App() {
 
             {/* Primary KPI grid */}
             <div className="dashboard-grid">
-              <MetricCard icon={<Map size={22} />} label="Distance totale"
+              <MetricCard icon={<MapIcon size={22} />} label="Distance totale"
                 value={(enrichedActivity!.totalDistance / 1000).toFixed(2)} unit=" km" colorVar="speed" />
               <MetricCard icon={<Timer size={22} />} label="Temps en mouvement"
                 value={formatDuration(enrichedActivity!.movingTime)} colorVar="time" />

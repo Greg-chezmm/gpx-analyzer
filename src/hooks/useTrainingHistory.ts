@@ -1,9 +1,17 @@
 import { useState, useCallback } from 'react';
 
 export interface TrainingEntry {
-  date: string;    // YYYY-MM-DD
-  trimp: number;   // Edwards TRIMP
+  date: string;          // YYYY-MM-DD
+  trimp: number;         // Edwards TRIMP
   name: string;
+  // Optional enriched fields (populated from v2 onwards)
+  activityType?: string;
+  distance?: number;     // metres
+  duration?: number;     // seconds (movingTime)
+  elevationGain?: number;
+  avgPace?: number;      // s/km
+  avgSpeed?: number;     // km/h
+  avgHeartRate?: number;
 }
 
 const KEY = 'gpx_training_history';
@@ -24,16 +32,45 @@ export function useTrainingHistory() {
   const addEntry = useCallback((entry: TrainingEntry) => {
     if (!entry.date || entry.trimp <= 0) return;
     setHistory(prev => {
-      // Deduplicate: same date + same name = same activity
-      if (prev.some(e => e.date === entry.date && e.name === entry.name)) return prev;
+      const existingIdx = prev.findIndex(e => e.date === entry.date && e.name === entry.name);
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - MAX_DAYS);
       const cutoffStr = cutoff.toISOString().slice(0, 10);
-      const next = [...prev.filter(e => e.date >= cutoffStr), entry]
-        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let next: TrainingEntry[];
+      if (existingIdx >= 0) {
+        // Always update — keeps metrics in sync when the user reloads an activity
+        next = [...prev];
+        next[existingIdx] = { ...prev[existingIdx], ...entry };
+      } else {
+        next = [...prev.filter(e => e.date >= cutoffStr), entry];
+      }
+      next = next.sort((a, b) => a.date.localeCompare(b.date));
       localStorage.setItem(KEY, JSON.stringify(next));
       return next;
     });
+  }, []);
+
+  const updateEntry = useCallback((date: string, oldName: string, updates: Partial<TrainingEntry>) => {
+    setHistory(prev => {
+      const idx = prev.findIndex(e => e.date === date && e.name === oldName);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      next[idx] = { ...next[idx], ...updates };
+      localStorage.setItem(KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const replaceHistory = useCallback((entries: TrainingEntry[]) => {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - MAX_DAYS);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const sorted = [...entries]
+      .filter(e => e.date >= cutoffStr)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    localStorage.setItem(KEY, JSON.stringify(sorted));
+    setHistory(sorted);
   }, []);
 
   const clearHistory = useCallback(() => {
@@ -41,5 +78,5 @@ export function useTrainingHistory() {
     setHistory([]);
   }, []);
 
-  return { history, addEntry, clearHistory };
+  return { history, addEntry, updateEntry, replaceHistory, clearHistory };
 }
