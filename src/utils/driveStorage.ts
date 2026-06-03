@@ -216,3 +216,27 @@ export async function fetchTrainingHistory(token: string): Promise<DriveTraining
   const data = await loadJsonFile<DriveTrainingEntry[]>(token, folderId, HISTORY_NAME);
   return data ?? [];
 }
+
+// ── User settings ─────────────────────────────────────────────────────
+
+export interface DriveUserSettings {
+  fcMax: number;
+  fcRest: number;
+  vma: number;
+  ftp: number;
+  weight: number;
+  birthYear: number;
+  sex: string;
+}
+
+const SETTINGS_NAME = 'user-settings.json';
+
+export async function saveUserSettings(token: string, settings: DriveUserSettings): Promise<void> {
+  const folderId = await getOrCreateFolder(token);
+  await saveJsonFile(token, folderId, SETTINGS_NAME, settings);
+}
+
+export async function fetchUserSettings(token: string): Promise<DriveUserSettings | null> {
+  const folderId = await getOrCreateFolder(token);
+  return loadJsonFile<DriveUserSettings>(token, folderId, SETTINGS_NAME);
+}

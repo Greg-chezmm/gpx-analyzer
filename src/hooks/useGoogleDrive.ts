@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   uploadActivity, fetchActivityList, fetchActivityFile,
   saveTrainingHistory, fetchTrainingHistory,
-  type ActivityIndexEntry, type DriveTrainingEntry,
+  saveUserSettings, fetchUserSettings,
+  type ActivityIndexEntry, type DriveTrainingEntry, type DriveUserSettings,
 } from '../utils/driveStorage';
 
 declare global {
@@ -35,6 +36,8 @@ export interface DriveHandle {
   refresh(): Promise<void>;
   saveHistory(history: DriveTrainingEntry[]): Promise<void>;
   loadHistory(): Promise<DriveTrainingEntry[]>;
+  saveSettings(settings: DriveUserSettings): Promise<void>;
+  loadSettings(): Promise<DriveUserSettings | null>;
 }
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
@@ -142,5 +145,15 @@ export function useGoogleDrive(): DriveHandle {
     try { return await fetchTrainingHistory(token); } catch { return []; }
   }, [token]);
 
-  return { status, history, isSaving, signIn, signOut, save, loadFile, refresh, saveHistory, loadHistory };
+  const saveSettings = useCallback(async (settings: DriveUserSettings) => {
+    if (!token) return;
+    try { await saveUserSettings(token, settings); } catch { /* silently fail */ }
+  }, [token]);
+
+  const loadSettings = useCallback(async (): Promise<DriveUserSettings | null> => {
+    if (!token) return null;
+    try { return await fetchUserSettings(token); } catch { return null; }
+  }, [token]);
+
+  return { status, history, isSaving, signIn, signOut, save, loadFile, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
 }

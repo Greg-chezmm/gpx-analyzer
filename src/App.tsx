@@ -73,6 +73,8 @@ function App() {
   const [locationLoading, setLocationLoading] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
   const skipDriveHistorySync = useRef(false);
+  const skipSettingsSync = useRef(false);
+  const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Enrich GPS elevation with barometric altitude when JSON is loaded
   const enrichedActivity = useMemo(
@@ -135,6 +137,33 @@ function App() {
   }, [trimp, enrichedActivity]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tsbResult = useMemo(() => calcTSB(history), [history]);
+
+  // Load settings from Drive on connect, apply to local state
+  useEffect(() => {
+    if (drive.status !== 'connected') return;
+    skipSettingsSync.current = true;
+    drive.loadSettings().then(remote => {
+      if (!remote) { skipSettingsSync.current = false; return; }
+      if (remote.fcMax   > 0)   setFcMax(remote.fcMax);
+      if (remote.fcRest  > 0)   setFcRest(remote.fcRest);
+      if (remote.vma     > 0)   setVma(remote.vma);
+      if (remote.ftp     > 0)   setFtp(remote.ftp);
+      if (remote.weight  > 0)   setWeight(remote.weight);
+      if (remote.birthYear > 0) setBirthYear(remote.birthYear);
+      if (remote.sex === 'M' || remote.sex === 'F') setSex(remote.sex);
+      setTimeout(() => { skipSettingsSync.current = false; }, 200);
+    }).catch(() => { skipSettingsSync.current = false; });
+  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Save settings to Drive when any value changes (debounced 800ms)
+  useEffect(() => {
+    if (drive.status !== 'connected' || skipSettingsSync.current) return;
+    if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
+    settingsSaveTimer.current = setTimeout(() => {
+      drive.saveSettings({ fcMax, fcRest, vma, ftp, weight, birthYear, sex });
+    }, 800);
+    return () => { if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current); };
+  }, [fcMax, fcRest, vma, ftp, weight, birthYear, sex]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reverse geocode start point when activity changes
   useEffect(() => {
