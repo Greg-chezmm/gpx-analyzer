@@ -203,9 +203,10 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
       activityType = 'cycling';
     }
   }
-  // Fallback: speed-based detection (> ~25 km/h = cycling)
+  // Fallback: speed-based detection
+  // avgSpeed > 4.2 m/s (15 km/h) OR maxSpeed > 9 m/s (32 km/h) → cycling
   if (activityType === 'unknown' && avgSpeed > 0) {
-    activityType = avgSpeed > 6.9 ? 'cycling' : 'running';
+    activityType = (avgSpeed > 4.2 || maxSpeed > 9.0) ? 'cycling' : 'running';
   }
 
   return {

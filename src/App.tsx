@@ -40,7 +40,7 @@ import { generateSummary } from "./utils/generateSummary";
 
 import {
   Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
-  Calendar, Gauge, Layers, Sun, Moon, Loader2, Sparkles,
+  Calendar, Gauge, Layers, Sun, Moon, Loader2, Sparkles, ArrowLeftRight,
 } from "lucide-react";
 
 const SPLIT_OPTIONS = [
@@ -69,6 +69,7 @@ function App() {
   const [rawFileData, setRawFileData] = useState<string | ArrayBuffer | null>(null);
   const [savedToDrive, setSavedToDrive] = useState(false);
   const [customActivityName, setCustomActivityName] = useState<string>('');
+  const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const jsonInputRef = useRef<HTMLInputElement>(null);
@@ -77,10 +78,11 @@ function App() {
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Enrich GPS elevation with barometric altitude when JSON is loaded
-  const enrichedActivity = useMemo(
-    () => (activity && baroSamples.length > 0 ? enrichWithBaroAlt(activity, baroSamples) : activity),
-    [activity, baroSamples]
-  );
+  const enrichedActivity = useMemo(() => {
+    const base = activity && baroSamples.length > 0 ? enrichWithBaroAlt(activity, baroSamples) : activity;
+    if (!base || !overrideActivityType) return base;
+    return { ...base, activityType: overrideActivityType };
+  }, [activity, baroSamples, overrideActivityType]);
 
   const splits = useMemo(
     () => (enrichedActivity ? calculateSplits(enrichedActivity, splitDistance) : []),
@@ -230,6 +232,7 @@ function App() {
         setSplitDistance(1000);
         setRawFileData(data);
         setSavedToDrive(false);
+        setOverrideActivityType(null);
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
       }
@@ -464,6 +467,27 @@ function App() {
                   </span>
                   <span>•</span>
                   <span>Fichier : {fileName}</span>
+                  <span>•</span>
+                  <button
+                    type="button"
+                    title="Changer le type d'activité"
+                    onClick={() => setOverrideActivityType(
+                      enrichedActivity!.activityType === 'cycling' ? 'running' : 'cycling'
+                    )}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "0.3rem",
+                      padding: "0.15rem 0.55rem", fontSize: "0.78rem", fontWeight: 600,
+                      borderRadius: "var(--radius-full)", cursor: "pointer",
+                      border: `1px solid ${overrideActivityType ? "var(--accent-primary)" : "var(--border-color)"}`,
+                      color: overrideActivityType ? "var(--accent-primary)" : "var(--text-secondary)",
+                      background: overrideActivityType ? "color-mix(in srgb, var(--accent-primary) 8%, transparent)" : "transparent",
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    <span>{enrichedActivity!.activityType === 'cycling' ? '🚴' : '🏃'}</span>
+                    <span>{enrichedActivity!.activityType === 'cycling' ? 'Vélo' : 'Course'}</span>
+                    <ArrowLeftRight size={10} />
+                  </button>
                 </div>
               </div>
 
