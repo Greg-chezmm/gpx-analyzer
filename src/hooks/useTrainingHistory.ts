@@ -32,14 +32,21 @@ export function useTrainingHistory() {
   const addEntry = useCallback((entry: TrainingEntry) => {
     if (!entry.date || entry.trimp <= 0) return;
     setHistory(prev => {
-      const existingIdx = prev.findIndex(e => e.date === entry.date && e.name === entry.name);
+      // Match by physical identity (duration+distance) when available — stable across renames
+      const existingIdx = prev.findIndex(e => {
+        if (entry.duration && entry.distance && e.duration && e.distance) {
+          return e.date === entry.date &&
+                 Math.round(e.duration) === Math.round(entry.duration) &&
+                 Math.round(e.distance) === Math.round(entry.distance);
+        }
+        return e.date === entry.date && e.name === entry.name;
+      });
       const cutoff = new Date();
       cutoff.setDate(cutoff.getDate() - MAX_DAYS);
       const cutoffStr = cutoff.toISOString().slice(0, 10);
 
       let next: TrainingEntry[];
       if (existingIdx >= 0) {
-        // Always update — keeps metrics in sync when the user reloads an activity
         next = [...prev];
         next[existingIdx] = { ...prev[existingIdx], ...entry };
       } else {

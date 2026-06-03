@@ -11,7 +11,7 @@ import { generateSampleGPX } from "./utils/sampleGPX";
 import { reverseGeocode } from "./utils/geocoding";
 import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
-import { useTrainingHistory } from "./hooks/useTrainingHistory";
+import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHistory";
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
@@ -119,7 +119,8 @@ function App() {
     [enrichedActivity, fcMax, fcRest, sex]
   );
 
-  // Auto-save current activity to training history when TRIMP is available
+  // Auto-save current activity to training history when TRIMP is available.
+  // customActivityName in deps ensures the entry is updated when the user renames.
   useEffect(() => {
     if (!trimp || !enrichedActivity) return;
     const date = enrichedActivity.startTime
@@ -137,7 +138,7 @@ function App() {
       avgSpeed: enrichedActivity.avgSpeed * 3.6,
       avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
     });
-  }, [trimp, enrichedActivity]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trimp, enrichedActivity, customActivityName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tsbResult = useMemo(() => calcTSB(history), [history]);
 
@@ -191,8 +192,24 @@ function App() {
     drive.loadHistory().then(remote => {
       if (cancelled) return;
       if (remote.length === 0) { skipDriveHistorySync.current = false; return; }
-      const seen = new Map<string, { date: string; trimp: number; name: string }>();
-      [...remote, ...history].forEach(e => seen.set(`${e.date}|${e.name}`, e));
+      // Dedup by physical identity (date+duration+distance) to survive renames;
+      // fallback to date+name for old entries without those fields.
+      const mergeKey = (e: TrainingEntry | { date: string; trimp: number; name: string; duration?: number; distance?: number }) =>
+        (e.duration && e.distance)
+          ? `${e.date}|${Math.round(e.duration)}|${Math.round(e.distance)}`
+          : `${e.date}|${e.name}`;
+      const seen = new Map<string, TrainingEntry>();
+      [...remote, ...history].forEach(e => {
+        const key = mergeKey(e);
+        const ex = seen.get(key);
+        if (!ex) { seen.set(key, e as TrainingEntry); return; }
+        // Prefer the entry with a custom name (not raw suuntoapp- format) or more fields
+        const exIsSuunto = /^suuntoapp-/i.test(ex.name);
+        const newIsSuunto = /^suuntoapp-/i.test(e.name);
+        if (exIsSuunto && !newIsSuunto) seen.set(key, e as TrainingEntry);
+        else if (!exIsSuunto && newIsSuunto) { /* keep existing */ }
+        else if (Object.keys(e).length > Object.keys(ex).length) seen.set(key, e as TrainingEntry);
+      });
       const merged = Array.from(seen.values()).sort((a, b) => a.date.localeCompare(b.date));
       replaceHistory(merged);
       setTimeout(() => { skipDriveHistorySync.current = false; }, 0);
