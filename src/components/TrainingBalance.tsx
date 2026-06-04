@@ -83,16 +83,23 @@ function HtmlTooltip({ tooltip }: { tooltip: TooltipState }) {
     return { title, typeLabel, details };
   });
 
-  // Position: above cursor, horizontally centered, clamped to viewport
+  // Estimate height to decide above vs below
+  const estH = 28 + (isMulti ? 22 : 0) + entries.length * 88 + Math.max(0, entries.length - 1) * 10;
+  const HEADER_CLEARANCE = 70; // sticky header ≈ 64px
+  const spaceAbove = anchorY - HEADER_CLEARANCE;
+  const showBelow = spaceAbove < estH + 8;
+
   const left = Math.max(8, Math.min(anchorX - TT_WIDTH / 2, window.innerWidth - TT_WIDTH - 8));
-  const top = anchorY - 12; // anchor at bottom of tooltip, 12px above cursor
+  const rawTop = showBelow ? anchorY + 10 : anchorY - 10;
+  const top = showBelow
+    ? Math.min(rawTop, window.innerHeight - estH - 8)   // clamp bottom
+    : Math.max(HEADER_CLEARANCE, rawTop - estH);         // clamp top
 
   return (
     <div style={{
       position: 'fixed',
       left,
       top,
-      transform: 'translateY(-100%)',
       zIndex: 10000,
       width: TT_WIDTH,
       background: 'var(--bg-secondary)',
@@ -103,6 +110,7 @@ function HtmlTooltip({ tooltip }: { tooltip: TooltipState }) {
       boxShadow: 'var(--shadow-lg)',
       fontSize: '0.7rem',
       lineHeight: 1.45,
+      boxSizing: 'border-box',
     }}>
       {/* Multi-session date header */}
       {isMulti && (
@@ -249,20 +257,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             return (
               <g key={d.date}
                 style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => {
-                  // Convert SVG dot coordinates to viewport coordinates for precise positioning
-                  const svg = (e.currentTarget as SVGGElement).ownerSVGElement;
-                  if (!svg) return;
-                  const rect = svg.getBoundingClientRect();
-                  const scaleX = rect.width / VW;
-                  const scaleY = rect.height / VH;
-                  setTooltip({
-                    entries: d.entries,
-                    svgX: cx,
-                    anchorX: rect.left + cx * scaleX,
-                    anchorY: rect.top + dotsY * scaleY,
-                  });
-                }}
+                onMouseEnter={(e) => setTooltip({ entries: d.entries, svgX: cx, anchorX: e.clientX, anchorY: e.clientY })}
               >
                 {/* Vertical guide line — brightens on hover */}
                 <line
