@@ -75,17 +75,17 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}>
-      {/* Input row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 0, width: '100%' }}>
+      {/* Input + action buttons */}
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: '0.4rem', width: '100%' }}>
         <input
           ref={inputRef}
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={handleKey}
           style={{
-            flex: 1, padding: '0.4rem 0.65rem',
-            fontSize: '1.05rem', fontWeight: 700,
+            flex: 1, padding: '0.5rem 0.65rem',
+            fontSize: '1rem', fontWeight: 700, /* 16px — évite le zoom automatique iOS */
             fontFamily: 'var(--font-heading)',
             background: 'var(--bg-primary)', color: 'var(--text-primary)',
             border: '1.5px solid var(--accent-primary)',
@@ -93,32 +93,34 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
             minWidth: 0,
           }}
         />
-        <button type="button" onClick={save} title="Valider"
+        <button type="button" onClick={save} title="Valider (Entrée)"
           style={{
-            padding: '0.4rem 0.5rem', borderRadius: 'var(--radius-sm)',
+            padding: '0.5rem 0.65rem', borderRadius: 'var(--radius-sm)',
             background: 'var(--accent-primary)', border: 'none',
-            color: '#fff', cursor: 'pointer', display: 'flex',
+            color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center',
+            flexShrink: 0,
           }}
         >
-          <Check size={15} />
+          <Check size={16} />
         </button>
-        <button type="button" onClick={cancel} title="Annuler"
+        <button type="button" onClick={cancel} title="Annuler (Échap)"
           style={{
-            padding: '0.4rem 0.5rem', borderRadius: 'var(--radius-sm)',
+            padding: '0.5rem 0.65rem', borderRadius: 'var(--radius-sm)',
             background: 'transparent', border: '1px solid var(--border-color)',
-            color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex',
+            color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center',
+            flexShrink: 0,
           }}
         >
-          <X size={15} />
+          <X size={16} />
         </button>
       </div>
 
-      {/* Chips row */}
+      {/* Chips — insertion rapide lieu / date */}
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>Insérer :</span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>Insérer :</span>
 
         {locationLoading ? (
-          <span style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
             <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} />
             Localisation…
           </span>
@@ -126,14 +128,14 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
           <button type="button" onClick={() => insertChip(location)}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.3rem',
-              padding: '0.2rem 0.6rem', fontSize: '0.78rem',
+              padding: '0.3rem 0.7rem', fontSize: '0.78rem',
               background: 'color-mix(in srgb, var(--accent-primary) 10%, transparent)',
               border: '1px solid color-mix(in srgb, var(--accent-primary) 35%, transparent)',
               color: 'var(--accent-primary)', borderRadius: 'var(--radius-full)',
-              cursor: 'pointer', fontWeight: 600,
+              cursor: 'pointer', fontWeight: 600, touchAction: 'manipulation',
             }}
           >
-            <MapPin size={11} />
+            <MapPin size={12} />
             {location}
           </button>
         ) : null}
@@ -142,14 +144,14 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
           <button type="button" onClick={() => insertChip(fmtDate(date))}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.3rem',
-              padding: '0.2rem 0.6rem', fontSize: '0.78rem',
+              padding: '0.3rem 0.7rem', fontSize: '0.78rem',
               background: 'color-mix(in srgb, var(--accent-secondary) 10%, transparent)',
               border: '1px solid color-mix(in srgb, var(--accent-secondary) 35%, transparent)',
               color: 'var(--accent-secondary)', borderRadius: 'var(--radius-full)',
-              cursor: 'pointer', fontWeight: 600,
+              cursor: 'pointer', fontWeight: 600, touchAction: 'manipulation',
             }}
           >
-            <Calendar size={11} />
+            <Calendar size={12} />
             {fmtDate(date)}
           </button>
         )}
@@ -162,11 +164,11 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
               inputRef.current?.focus();
             }}
             style={{
-              padding: '0.2rem 0.6rem', fontSize: '0.78rem',
+              padding: '0.3rem 0.7rem', fontSize: '0.78rem',
               background: 'var(--bg-primary)',
               border: '1px solid var(--border-color)',
               color: 'var(--text-secondary)', borderRadius: 'var(--radius-full)',
-              cursor: 'pointer',
+              cursor: 'pointer', touchAction: 'manipulation',
             }}
           >
             Les deux

@@ -249,7 +249,20 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             return (
               <g key={d.date}
                 style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => setTooltip({ entries: d.entries, svgX: cx, anchorX: e.clientX, anchorY: e.clientY })}
+                onMouseEnter={(e) => {
+                  // Convert SVG dot coordinates to viewport coordinates for precise positioning
+                  const svg = (e.currentTarget as SVGGElement).ownerSVGElement;
+                  if (!svg) return;
+                  const rect = svg.getBoundingClientRect();
+                  const scaleX = rect.width / VW;
+                  const scaleY = rect.height / VH;
+                  setTooltip({
+                    entries: d.entries,
+                    svgX: cx,
+                    anchorX: rect.left + cx * scaleX,
+                    anchorY: rect.top + dotsY * scaleY,
+                  });
+                }}
               >
                 {/* Vertical guide line — brightens on hover */}
                 <line
