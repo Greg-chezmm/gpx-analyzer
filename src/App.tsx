@@ -515,7 +515,7 @@ function App() {
               {/* Session classification badge */}
               {session && (
                 <div style={{
-                  display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.35rem",
+                  display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.35rem",
                 }}>
                   <div style={{
                     display: "inline-flex", alignItems: "center", gap: "0.5rem",
