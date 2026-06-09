@@ -9,9 +9,11 @@ interface ChartViewerProps {
   hasHeartRate: boolean;
   hasCadence: boolean;
   activityType: 'running' | 'cycling' | 'unknown';
+  fcMax?: number;
+  fcRest?: number;
 }
 
-type ChartType = "elevation" | "speed" | "pace" | "hr" | "cad" | "dual";
+type ChartType = "elevation" | "speed" | "pace" | "hr" | "cad" | "dual" | "cardiac";
 
 interface ChartParams {
   getValue: (pt: GPXTrackPoint) => number;
@@ -31,6 +33,8 @@ function fmtPace(secPerKm: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+const CARDIAC_REF_HRR = 0.65;
+
 export const ChartViewer: React.FC<ChartViewerProps> = ({
   points,
   hoveredPointIndex,
@@ -38,6 +42,8 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   hasHeartRate,
   hasCadence,
   activityType,
+  fcMax = 195,
+  fcRest = 52,
 }) => {
   const [activeTab, setActiveTab] = useState<ChartType>("elevation");
   const [expanded, setExpanded] = useState(false);
@@ -80,6 +86,21 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     const minPace = paces.length > 0 ? Math.max(60, Math.min(...paces) - 5) : 180;
     const maxPace = paces.length > 0 ? Math.min(900, Math.max(...paces) + 15) : 420;
 
+    const reserve = fcMax - fcRest;
+    const cardiacPaces = reserve > 0
+      ? points
+          .filter(p => p.hr && p.speed && p.speed > 0.5)
+          .map(p => {
+            const hrr = (p.hr! - fcRest) / reserve;
+            if (hrr < 0.2 || hrr > 0.99) return null;
+            return (1000 / p.speed!) * (CARDIAC_REF_HRR / hrr);
+          })
+          .filter((v): v is number => v !== null && v > 30 && v < 1800)
+      : [];
+    const cpSorted = [...cardiacPaces].sort((a, b) => a - b);
+    const cpLow  = cpSorted.length > 0 ? cpSorted[Math.floor(cpSorted.length * 0.05)] : 60;
+    const cpHigh = cpSorted.length > 0 ? cpSorted[Math.floor(cpSorted.length * 0.95)] : 900;
+
     return {
       maxDist,
       minEle: Math.max(0, minEle - 10),
@@ -90,8 +111,10 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       maxCad: maxCad + 10,
       minPace,
       maxPace,
+      minCardiacPace: Math.max(30, cpLow - 5),
+      maxCardiacPace: Math.min(1800, cpHigh + 15),
     };
-  }, [points]);
+  }, [points, fcMax, fcRest]);
 
   const chartParams = useMemo((): ChartParams => {
     switch (activeTab) {
@@ -128,6 +151,23 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           yMin: 0, yMax: limits.maxCad * cadMult,
         };
       }
+      case "cardiac": {
+        const reserve = Math.max(1, fcMax - fcRest);
+        return {
+          getValue: (pt) => {
+            if (!pt.hr || !pt.speed || pt.speed < 0.3) return (limits as Record<string, number>).maxCardiacPace ?? 900;
+            const hrr = (pt.hr - fcRest) / reserve;
+            if (hrr < 0.2) return (limits as Record<string, number>).maxCardiacPace ?? 900;
+            return (1000 / pt.speed) * (CARDIAC_REF_HRR / hrr);
+          },
+          label: "Allure cardiaque", unit: " /km",
+          color: "var(--color-cardiac)", colorClass: "cardiac",
+          yMin: (limits as Record<string, number>).minCardiacPace ?? 60,
+          yMax: (limits as Record<string, number>).maxCardiacPace ?? 900,
+          invertY: true,
+          formatY: fmtPace,
+        };
+      }
       case "dual":
         // Dual uses its own rendering; return HR params as placeholder
         return {
@@ -145,7 +185,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           yMin: limits.minEle, yMax: limits.maxEle,
         };
     }
-  }, [activeTab, limits, activityType]);
+  }, [activeTab, limits, activityType, fcMax, fcRest]);
 
   const getX = (dist: number) => {
     if (limits.maxDist === 0) return padding.left;
@@ -339,6 +379,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           {hasHeartRate && activityType !== 'cycling' && (
             <button type="button" className={`chart-tab ${activeTab === "dual" ? "active" : ""}`} onClick={() => setActiveTab("dual")}>Allure + FC</button>
           )}
+          {hasHeartRate && activityType !== 'cycling' && (
+            <button type="button" className={`chart-tab ${activeTab === "cardiac" ? "active" : ""}`} onClick={() => setActiveTab("cardiac")} style={{ color: activeTab === "cardiac" ? undefined : "var(--color-cardiac)" }}>Allure cardiaque</button>
+          )}
         </div>
       </div>
 
@@ -370,6 +413,10 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
               <linearGradient id="cad-gradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-cad)" stopOpacity="0.4" />
                 <stop offset="100%" stopColor="var(--color-cad)" stopOpacity="0.0" />
+              </linearGradient>
+              <linearGradient id="cardiac-gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-cardiac)" stopOpacity="0.35" />
+                <stop offset="100%" stopColor="var(--color-cardiac)" stopOpacity="0.0" />
               </linearGradient>
             </defs>
 
@@ -449,6 +496,13 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
                 valLabel = hoveredPoint.speed && hoveredPoint.speed > 0.1
                   ? fmtPace(1000 / hoveredPoint.speed) + ' /km'
                   : '--';
+              } else if (activeTab === 'cardiac') {
+                if (hoveredPoint.hr && hoveredPoint.speed && hoveredPoint.speed > 0.3) {
+                  const hrr = (hoveredPoint.hr - fcRest) / Math.max(1, fcMax - fcRest);
+                  valLabel = hrr >= 0.2 ? fmtPace((1000 / hoveredPoint.speed) * (CARDIAC_REF_HRR / hrr)) + ' /km' : '--';
+                } else {
+                  valLabel = '--';
+                }
               } else if (activeTab === 'speed' && activityType !== 'cycling') {
                 const s = hoveredPoint.speed ?? 0;
                 valLabel = s ? `${fmtPace(1000 / s)} /km` : '--';

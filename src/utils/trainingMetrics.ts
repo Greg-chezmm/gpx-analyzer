@@ -154,6 +154,39 @@ export function calcTRIMP(
   };
 }
 
+// ─── Allure cardiaque ─────────────────────────────────────────────────────────
+
+// Allure normalisée par l'effort cardiaque (HRR%).
+// Formule : allure_cardiaque = allure_réelle × (HRR_ref / HRR_actuel)
+// HRR_ref = 65% (seuil aérobie Z2/Z3 de référence).
+// Interprétation : si HRR > 65%, on travaille plus que la référence
+// → allure cardiaque plus rapide (on "vaut mieux" que ce que la vitesse brute montre).
+
+const CARDIAC_REF_HRR = 0.65;
+
+export interface CardiacPaceResult {
+  avgCardiacPace: number | null; // s/km — moyenne pondérée sur la séance
+}
+
+export function calcCardiacPace(
+  points: GPXTrackPoint[],
+  fcMax: number,
+  fcRest: number,
+): CardiacPaceResult {
+  const reserve = fcMax - fcRest;
+  if (reserve <= 0) return { avgCardiacPace: null };
+
+  const paces: number[] = [];
+  for (const p of points) {
+    if (!p.hr || !p.speed || p.speed < 0.5) continue;
+    const hrr = (p.hr - fcRest) / reserve;
+    if (hrr < 0.2 || hrr > 0.99) continue;
+    paces.push((1000 / p.speed) * (CARDIAC_REF_HRR / hrr));
+  }
+  if (paces.length < 10) return { avgCardiacPace: null };
+  return { avgCardiacPace: paces.reduce((a, b) => a + b, 0) / paces.length };
+}
+
 // ─── Normalized Power ─────────────────────────────────────────────────────────
 
 export function calcNormalizedPower(points: GPXTrackPoint[]): number | null {

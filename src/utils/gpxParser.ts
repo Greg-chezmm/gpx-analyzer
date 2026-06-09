@@ -6,3 +6,4 @@ export * from './intervals';
 export * from './climbs';
 export * from './session';
 export * from './trainingMetrics';
+export * from './hillRepeats';

@@ -28,6 +28,7 @@
   --color-ele-light:   #ecfdf5;
   --color-cad:         #7c3aed;
   --color-cad-light:   #f5f3ff;
+  --color-cardiac:     #a78bfa;
   --color-time:        #ea580c;
   --color-time-light:  #fff7ed;
 
@@ -587,8 +588,12 @@ h1, h2, h3, h4, h5, h6 {
 .chart-area-elevation { fill: url(#ele-gradient); }
 .chart-line-speed     { stroke: var(--color-speed); stroke-width: 2.5; fill: none; }
 .chart-area-speed     { fill: url(#speed-gradient); }
-.chart-line-hr        { stroke: var(--color-hr);    stroke-width: 2.5; fill: none; }
+.chart-line-hr        { stroke: var(--color-hr);      stroke-width: 2.5; fill: none; }
 .chart-area-hr        { fill: url(#hr-gradient); }
+.chart-line-cad       { stroke: var(--color-cad);     stroke-width: 2.5; fill: none; }
+.chart-area-cad       { fill: url(#cad-gradient); }
+.chart-line-cardiac   { stroke: var(--color-cardiac); stroke-width: 2.5; fill: none; }
+.chart-area-cardiac   { fill: url(#cardiac-gradient); }
 
 /* ═══════════════════════════════════════════════════════════════
    17. SPLITS TABLE

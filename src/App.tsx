@@ -4,6 +4,7 @@ import {
   detectClimbs, classifySession, calcCardiacDrift,
   parseSuuntoBaroSamples, enrichWithBaroAlt,
   calcTRIMP, calcNormalizedPower, estimateVO2max, calcTSB,
+  calcCardiacPace, detectHillRepeats,
   type GPXActivity, type GPXLap, type SuuntoSessionHeader, type BaroSample,
 } from "./utils/gpxParser";
 import { parseFIT } from "./utils/fitParser";
@@ -22,6 +23,7 @@ import { HeartRateZones } from "./components/HeartRateZones";
 import { IntervalAnalysis } from "./components/IntervalAnalysis";
 import { LapTable } from "./components/LapTable";
 import { ClimbAnalysis } from "./components/ClimbAnalysis";
+import { HillRepeats } from "./components/HillRepeats";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
@@ -231,6 +233,20 @@ function App() {
   const vo2maxEst = useMemo(
     () => (enrichedActivity ? estimateVO2max(enrichedActivity, fcMax, fcRest) : null),
     [enrichedActivity, fcMax, fcRest]
+  );
+
+  const cardiacPaceResult = useMemo(
+    () => (enrichedActivity && enrichedActivity.avgHeartRate != null && enrichedActivity.activityType !== 'cycling'
+      ? calcCardiacPace(enrichedActivity.points, fcMax, fcRest)
+      : null),
+    [enrichedActivity, fcMax, fcRest]
+  );
+
+  const hillRepeats = useMemo(
+    () => (enrichedActivity?.activityType === 'running' && climbs.length >= 2
+      ? detectHillRepeats(climbs, enrichedActivity)
+      : []),
+    [climbs, enrichedActivity]
   );
 
   const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string) => {
@@ -565,6 +581,14 @@ function App() {
                     {formatPace(enrichedActivity!.avgPace)} /km
                   </strong>
                 </div>
+                {cardiacPaceResult?.avgCardiacPace != null && enrichedActivity!.activityType !== 'cycling' && (
+                  <div className="card kpi-item">
+                    <span className="kpi-label" title="Allure normalisée à 65% de réserve cardiaque">Allure cardiaque</span>
+                    <strong className="kpi-value" style={{ color: "var(--color-cardiac)" }}>
+                      {formatPace(cardiacPaceResult.avgCardiacPace)} /km
+                    </strong>
+                  </div>
+                )}
                 <div className="card kpi-item">
                   <span className="kpi-label">Vitesse moyenne</span>
                   <strong className="kpi-value" style={{ color: "var(--color-speed)" }}>
@@ -610,6 +634,8 @@ function App() {
                     hasHeartRate={hasHeartRate}
                     hasCadence={enrichedActivity!.avgCadence !== null}
                     activityType={enrichedActivity!.activityType}
+                    fcMax={fcMax}
+                    fcRest={fcRest}
                   />
                 </div>
               </ErrorBoundary>
@@ -682,6 +708,11 @@ function App() {
             {/* Climb analysis */}
             {climbs.length > 0 && (
               <ClimbAnalysis climbs={climbs} points={enrichedActivity!.points} />
+            )}
+
+            {/* Hill repeats — running only, ≥2 séries détectées */}
+            {hillRepeats.length > 0 && (
+              <HillRepeats series={hillRepeats} />
             )}
 
             {/* Splits — with configurable distance */}
