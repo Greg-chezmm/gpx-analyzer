@@ -3,6 +3,7 @@ import {
   uploadActivity, fetchActivityList, fetchActivityFile,
   saveTrainingHistory, fetchTrainingHistory,
   saveUserSettings, fetchUserSettings,
+  deleteActivity as deleteActivityStorage,
   type ActivityIndexEntry, type DriveTrainingEntry, type DriveUserSettings,
 } from '../utils/driveStorage';
 
@@ -33,6 +34,7 @@ export interface DriveHandle {
   signOut(): void;
   save(rawData: string | ArrayBuffer, fileName: string, meta: Omit<ActivityIndexEntry, 'fileId'>): Promise<void>;
   loadFile(fileId: string, fileName: string): Promise<ArrayBuffer | string>;
+  deleteActivity(fileId: string | null, entry: Pick<ActivityIndexEntry, 'date' | 'name'>): Promise<void>;
   refresh(): Promise<void>;
   saveHistory(history: DriveTrainingEntry[]): Promise<void>;
   loadHistory(): Promise<DriveTrainingEntry[]>;
@@ -155,5 +157,14 @@ export function useGoogleDrive(): DriveHandle {
     try { return await fetchUserSettings(token); } catch { return null; }
   }, [token]);
 
-  return { status, history, isSaving, signIn, signOut, save, loadFile, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
+  const deleteActivity = useCallback(async (
+    fileId: string | null,
+    entry: Pick<ActivityIndexEntry, 'date' | 'name'>,
+  ) => {
+    if (!token) return;
+    await deleteActivityStorage(token, fileId, entry);
+    await refresh();
+  }, [token, refresh]);
+
+  return { status, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
 }

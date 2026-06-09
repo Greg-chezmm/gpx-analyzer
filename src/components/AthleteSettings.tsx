@@ -11,6 +11,9 @@ interface AthleteSettingsProps {
   birthYear: number; onBirthYearChange: (v: number) => void;
   sex: Sex;          onSexChange: (v: Sex) => void;
   isCycling?: boolean;
+  // Controlled mode (triggered from burger menu — no button rendered)
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
 }
 
 interface FieldDef {
@@ -61,8 +64,15 @@ function Stepper({ label, value, min, max, step, unit, onChange }: FieldDef) {
 }
 
 export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => {
-  const [open, setOpen] = useState(false);
+  const isControlled = props.open !== undefined;
+  const [localOpen, setLocalOpen] = useState(false);
+  const open = isControlled ? props.open! : localOpen;
   const ref = useRef<HTMLDivElement>(null);
+
+  const setOpen = (v: boolean) => {
+    if (!isControlled) setLocalOpen(v);
+    props.onOpenChange?.(v);
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -71,7 +81,7 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fields: FieldDef[] = [
     { label: "FC max",    value: props.fcMax,     min: 100, max: 230, step: 1,   unit: "bpm", onChange: props.onFcMaxChange },
@@ -88,23 +98,29 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
     return true;
   });
 
+  const panelPos = isControlled
+    ? { position: "fixed" as const, top: "64px", right: "16px" }
+    : { position: "absolute" as const, top: "calc(100% + 8px)", right: 0 };
+
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        type="button"
-        className="btn btn-outline"
-        onClick={() => setOpen(v => !v)}
-        title="Paramètres athlète"
-        style={{ padding: "0.5rem 0.75rem", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
-      >
-        <Settings size={16} />
-        <span className="btn-text">Profil</span>
-      </button>
+    <div ref={ref} style={{ position: isControlled ? "static" : "relative" }}>
+      {!isControlled && (
+        <button
+          type="button"
+          className="btn btn-outline"
+          onClick={() => setOpen(!open)}
+          title="Paramètres athlète"
+          style={{ padding: "0.5rem 0.75rem", fontSize: "0.9rem", display: "flex", alignItems: "center", gap: "0.4rem" }}
+        >
+          <Settings size={16} />
+          <span className="btn-text">Profil</span>
+        </button>
+      )}
 
       {open && (
         <div style={{
-          position: "absolute", top: "calc(100% + 8px)", right: 0,
-          zIndex: 2000, minWidth: "260px",
+          ...panelPos,
+          zIndex: 2100, minWidth: "260px",
           background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
           borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-xl)",
           padding: "1rem",

@@ -240,3 +240,40 @@ export async function fetchUserSettings(token: string): Promise<DriveUserSetting
   const folderId = await getOrCreateFolder(token);
   return loadJsonFile<DriveUserSettings>(token, folderId, SETTINGS_NAME);
 }
+
+// ── Delete activity ────────────────────────────────────────────────────
+
+export async function deleteActivity(
+  token: string,
+  fileId: string | null,
+  entry: Pick<ActivityIndexEntry, 'date' | 'name'>,
+): Promise<void> {
+  const folderId = await getOrCreateFolder(token);
+
+  // 1. Supprimer le fichier Drive si l'id existe
+  if (fileId) {
+    try {
+      await req(`${BASE}/drive/v3/files/${fileId}`, token, { method: 'DELETE' });
+    } catch {
+      // Déjà supprimé ou inaccessible — on continue
+    }
+  }
+
+  // 2. Retirer de activities-index.json
+  const { id: indexId, data: index } = await loadIndex(token, folderId);
+  index.activities = index.activities.filter(
+    a => !(a.date === entry.date && a.name === entry.name)
+  );
+  await saveIndex(token, folderId, indexId, index);
+
+  // 3. Retirer de training-history.json
+  const history = await loadJsonFile<DriveTrainingEntry[]>(token, folderId, HISTORY_NAME);
+  if (history) {
+    const filtered = history.filter(
+      h => !(h.date === entry.date && h.name === entry.name)
+    );
+    if (filtered.length !== history.length) {
+      await saveJsonFile(token, folderId, HISTORY_NAME, filtered);
+    }
+  }
+}

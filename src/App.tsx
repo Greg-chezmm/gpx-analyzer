@@ -37,13 +37,14 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
 import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./components/DriveSync";
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
+import { HeaderMenu } from "./components/HeaderMenu";
 import { generateSummary } from "./utils/generateSummary";
 import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
 import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 
 import {
-  Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
-  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight, GitMerge, X, Download,
+  Activity, Timer, TrendingUp, Heart, Map as MapIcon,
+  Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge,
 } from "lucide-react";
 
 const SPLIT_OPTIONS = [
@@ -71,6 +72,7 @@ function App() {
   const [customActivityName, setCustomActivityName] = useState<string>('');
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -371,6 +373,19 @@ function App() {
 
   return (
     <div className="app-container">
+      {/* Panneau profil athlète — déclenché depuis le burger, position:fixed indépendante du header */}
+      <AthleteSettingsButton
+        fcMax={fcMax}       onFcMaxChange={setFcMax}
+        fcRest={fcRest}     onFcRestChange={setFcRest}
+        vma={vma}           onVmaChange={setVma}
+        ftp={ftp}           onFtpChange={setFtp}
+        weight={weight}     onWeightChange={setWeight}
+        birthYear={birthYear} onBirthYearChange={setBirthYear}
+        sex={sex}           onSexChange={setSex}
+        isCycling={enrichedActivity?.activityType === 'cycling'}
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+      />
       <header className="header">
         <div className="logo-container">
           <div className="logo-icon"><Activity size={22} /></div>
@@ -399,60 +414,22 @@ function App() {
               <span className="btn-text">Résumé IA</span>
             </button>
           )}
-          <AthleteSettingsButton
-            fcMax={fcMax}       onFcMaxChange={setFcMax}
-            fcRest={fcRest}     onFcRestChange={setFcRest}
-            vma={vma}           onVmaChange={setVma}
-            ftp={ftp}           onFtpChange={setFtp}
-            weight={weight}     onWeightChange={setWeight}
-            birthYear={birthYear} onBirthYearChange={setBirthYear}
-            sex={sex}           onSexChange={setSex}
-            isCycling={enrichedActivity?.activityType === 'cycling'}
+          <input
+            ref={mergeInputRef}
+            type="file"
+            accept=".fit,.gpx"
+            style={{ display: "none" }}
+            onChange={handleMergeFile}
           />
-          <button type="button" className="btn btn-outline"
-            onClick={toggleTheme}
-            title={isDark ? "Mode clair" : "Mode sombre"}
-            style={{ padding: "0.5rem 0.75rem", fontSize: "0.9rem" }}
-          >
-            {isDark ? <Sun size={16} /> : <Moon size={16} />}
-          </button>
-          {activity && (
-            <>
-              <button type="button" className="btn btn-outline"
-                onClick={() => downloadGPX(enrichedActivity!, intervals)}
-                style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
-                title="Télécharger l'activité en GPX (avec intervalles)"
-              >
-                <Download size={15} />
-                <span className="btn-text">GPX</span>
-              </button>
-              <button type="button" className="btn btn-outline"
-                onClick={() => mergeInputRef.current?.click()}
-                style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
-                title="Ajouter un second segment (batterie épuisée)"
-              >
-                <GitMerge size={15} />
-                <span className="btn-text">Ajouter segment</span>
-              </button>
-              <input
-                ref={mergeInputRef}
-                type="file"
-                accept=".fit,.gpx"
-                style={{ display: "none" }}
-                onChange={handleMergeFile}
-              />
-              <button type="button" className="btn btn-outline" onClick={handleReset}
-                style={{
-                  padding: "0.5rem 1rem", fontSize: "0.9rem",
-                  borderColor: "var(--color-hr)", color: "var(--color-hr)",
-                  backgroundColor: "rgba(225,29,72,0.02)",
-                }}
-              >
-                <Trash2 size={15} />
-                <span className="btn-text">Fermer le fichier</span>
-              </button>
-            </>
-          )}
+          <HeaderMenu
+            isDark={isDark}
+            onToggleTheme={toggleTheme}
+            onOpenSettings={() => setSettingsOpen(true)}
+            hasActivity={!!activity}
+            onExportGPX={() => downloadGPX(enrichedActivity!, intervals)}
+            onMerge={() => mergeInputRef.current?.click()}
+            onReset={handleReset}
+          />
         </div>
       </header>
 

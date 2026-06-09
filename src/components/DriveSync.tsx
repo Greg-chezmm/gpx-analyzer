@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History } from 'lucide-react';
+import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2 } from 'lucide-react';
 import type { DriveHandle } from '../hooks/useGoogleDrive';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 
@@ -127,8 +127,12 @@ interface DriveActivityListProps {
 
 export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
 
   if (drive.status !== 'connected' || drive.history.length === 0) return null;
+
+  const entryKey = (entry: ActivityIndexEntry, i: number) => entry.fileId ?? `${entry.date}-${i}`;
 
   const handleLoad = async (entry: ActivityIndexEntry) => {
     if (!entry.fileId) return;
@@ -143,6 +147,18 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
     }
   };
 
+  const handleDelete = async (entry: ActivityIndexEntry, key: string) => {
+    setDeletingKey(key);
+    setConfirmKey(null);
+    try {
+      await drive.deleteActivity(entry.fileId, { date: entry.date, name: entry.name });
+    } catch {
+      alert('Impossible de supprimer l\'activité.');
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
   return (
     <div style={{ marginTop: '2rem', width: '100%', maxWidth: '680px' }}>
       <h3 style={{
@@ -153,56 +169,114 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
         <History size={14} /> Activités récentes · Drive
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-        {drive.history.slice(0, 8).map((entry, i) => (
-          <button key={entry.fileId ?? i} type="button"
-            disabled={!entry.fileId || loadingId !== null}
-            onClick={() => handleLoad(entry)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.75rem',
-              padding: '0.75rem 1rem', textAlign: 'left',
+        {drive.history.slice(0, 8).map((entry, i) => {
+          const key = entryKey(entry, i);
+          const isConfirming = confirmKey === key;
+          const isDeleting = deletingKey === key;
+          return (
+            <div key={key} style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
               background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-color)', cursor: entry.fileId ? 'pointer' : 'default',
-              opacity: loadingId === entry.fileId ? 0.6 : 1,
-              transition: 'border-color 0.15s, background 0.15s',
-            }}
-            onMouseEnter={e => {
-              if (entry.fileId) {
-                (e.currentTarget as HTMLElement).style.borderColor = '#1a73e8';
-                (e.currentTarget as HTMLElement).style.background = 'rgba(26,115,232,0.04)';
-              }
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)';
-              (e.currentTarget as HTMLElement).style.background = 'var(--bg-secondary)';
-            }}
-          >
-            <span style={{ fontSize: '1.1rem' }}>
-              {entry.activityType === 'cycling' ? '🚴' : '🏃'}
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontWeight: 600, fontSize: '0.9rem',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                color: 'var(--text-primary)',
-              }}>
-                {entry.name}
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
-                {' · '}
-                {(entry.distance / 1000).toFixed(1)} km
-                {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
-                {entry.trimp ? ` · TRIMP ${Math.round(entry.trimp)}` : ''}
+              border: `1px solid ${isConfirming ? '#ef4444' : 'var(--border-color)'}`,
+              transition: 'border-color 0.15s',
+            }}>
+              <button type="button"
+                disabled={!entry.fileId || loadingId !== null || isDeleting}
+                onClick={() => handleLoad(entry)}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  padding: '0.75rem 1rem', textAlign: 'left',
+                  background: 'transparent', border: 'none',
+                  cursor: entry.fileId ? 'pointer' : 'default',
+                  opacity: loadingId === entry.fileId || isDeleting ? 0.6 : 1,
+                  borderRadius: 'var(--radius-md) 0 0 var(--radius-md)',
+                  minWidth: 0,
+                }}
+                onMouseEnter={e => {
+                  if (entry.fileId && !isDeleting) {
+                    (e.currentTarget as HTMLElement).style.background = 'rgba(26,115,232,0.04)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLElement).style.background = 'transparent';
+                }}
+              >
+                <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                  {entry.activityType === 'cycling' ? '🚴' : '🏃'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontWeight: 600, fontSize: '0.9rem',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    color: 'var(--text-primary)',
+                  }}>
+                    {entry.name}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                    {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
+                    {' · '}
+                    {(entry.distance / 1000).toFixed(1)} km
+                    {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
+                    {entry.trimp ? ` · TRIMP ${Math.round(entry.trimp)}` : ''}
+                  </div>
+                </div>
+                {loadingId === entry.fileId
+                  ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#1a73e8', flexShrink: 0 }} />
+                  : entry.fileId
+                    ? <Download size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                    : null
+                }
+              </button>
+
+              {/* Delete zone */}
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                {isConfirming ? (
+                  <>
+                    <button type="button"
+                      onClick={() => handleDelete(entry, key)}
+                      title="Confirmer la suppression"
+                      style={{
+                        padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700,
+                        background: '#ef4444', color: '#fff', border: 'none',
+                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                      }}
+                    >
+                      Supprimer
+                    </button>
+                    <button type="button"
+                      onClick={() => setConfirmKey(null)}
+                      title="Annuler"
+                      style={{
+                        padding: '0.3rem 0.5rem', fontSize: '0.75rem',
+                        background: 'transparent', color: 'var(--text-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                      }}
+                    >
+                      Annuler
+                    </button>
+                  </>
+                ) : isDeleting ? (
+                  <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
+                ) : (
+                  <button type="button"
+                    onClick={e => { e.stopPropagation(); setConfirmKey(key); }}
+                    title="Supprimer de Drive"
+                    style={{
+                      padding: '0.35rem', background: 'transparent', border: 'none',
+                      cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)',
+                      display: 'flex', alignItems: 'center',
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             </div>
-            {loadingId === entry.fileId
-              ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#1a73e8', flexShrink: 0 }} />
-              : entry.fileId
-                ? <Download size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
-                : null
-            }
-          </button>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -218,6 +292,23 @@ interface DriveHistoryPanelProps {
 }
 
 function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPanelProps) {
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
+  const entryKey = (entry: ActivityIndexEntry, i: number) => entry.fileId ?? `${entry.date}-${i}`;
+
+  const handleDelete = async (entry: ActivityIndexEntry, key: string) => {
+    setDeletingKey(key);
+    setConfirmKey(null);
+    try {
+      await drive.deleteActivity(entry.fileId, { date: entry.date, name: entry.name });
+    } catch {
+      alert('Impossible de supprimer l\'activité.');
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
   return (
     <div
       style={{
@@ -281,54 +372,113 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {drive.history.map((entry, i) => (
-                <button key={entry.fileId ?? i} type="button"
-                  disabled={!entry.fileId || loadingId !== null}
-                  onClick={() => entry.fileId && onLoad(entry)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: '0.75rem',
-                    padding: '0.9rem 1rem', textAlign: 'left',
+              {drive.history.map((entry, i) => {
+                const key = entryKey(entry, i);
+                const isConfirming = confirmKey === key;
+                const isDeleting = deletingKey === key;
+                return (
+                  <div key={key} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
                     background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    cursor: entry.fileId ? 'pointer' : 'default',
-                    opacity: loadingId === entry.fileId ? 0.6 : 1,
+                    border: `1px solid ${isConfirming ? '#ef4444' : 'var(--border-color)'}`,
                     transition: 'border-color 0.15s',
-                  }}
-                >
-                  <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
-                    {entry.activityType === 'cycling' ? '🚴' : '🏃'}
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {entry.name}
-                    </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                      {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
-                      {' · '}
-                      {(entry.distance / 1000).toFixed(1)} km
-                      {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
-                    </div>
-                    {(entry.avgHeartRate || entry.trimp) && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>
-                        {entry.avgHeartRate ? `FC moy. ${entry.avgHeartRate} bpm` : ''}
-                        {entry.avgHeartRate && entry.trimp ? ' · ' : ''}
-                        {entry.trimp ? `TRIMP ${Math.round(entry.trimp)}` : ''}
+                  }}>
+                    <button type="button"
+                      disabled={!entry.fileId || loadingId !== null || isDeleting}
+                      onClick={() => entry.fileId && onLoad(entry)}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        padding: '0.9rem 1rem', textAlign: 'left',
+                        background: 'transparent', border: 'none',
+                        cursor: entry.fileId ? 'pointer' : 'default',
+                        opacity: loadingId === entry.fileId || isDeleting ? 0.6 : 1,
+                        borderRadius: 'var(--radius-md) 0 0 var(--radius-md)',
+                        minWidth: 0,
+                      }}
+                    >
+                      <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                        {entry.activityType === 'cycling' ? '🚴' : '🏃'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {entry.name}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                          {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
+                          {' · '}
+                          {(entry.distance / 1000).toFixed(1)} km
+                          {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
+                        </div>
+                        {(entry.avgHeartRate || entry.trimp) && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>
+                            {entry.avgHeartRate ? `FC moy. ${entry.avgHeartRate} bpm` : ''}
+                            {entry.avgHeartRate && entry.trimp ? ' · ' : ''}
+                            {entry.trimp ? `TRIMP ${Math.round(entry.trimp)}` : ''}
+                          </div>
+                        )}
                       </div>
-                    )}
+                      <div style={{ flexShrink: 0 }}>
+                        {loadingId === entry.fileId
+                          ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#1a73e8' }} />
+                          : entry.fileId
+                            ? <Download size={14} style={{ color: 'var(--text-tertiary)' }} />
+                            : null
+                        }
+                      </div>
+                    </button>
+
+                    {/* Delete zone */}
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                      {isConfirming ? (
+                        <>
+                          <button type="button"
+                            onClick={() => handleDelete(entry, key)}
+                            title="Confirmer la suppression"
+                            style={{
+                              padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700,
+                              background: '#ef4444', color: '#fff', border: 'none',
+                              borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                            }}
+                          >
+                            Supprimer
+                          </button>
+                          <button type="button"
+                            onClick={() => setConfirmKey(null)}
+                            title="Annuler"
+                            style={{
+                              padding: '0.3rem 0.5rem', fontSize: '0.75rem',
+                              background: 'transparent', color: 'var(--text-secondary)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                            }}
+                          >
+                            Annuler
+                          </button>
+                        </>
+                      ) : isDeleting ? (
+                        <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
+                      ) : (
+                        <button type="button"
+                          onClick={e => { e.stopPropagation(); setConfirmKey(key); }}
+                          title="Supprimer de Drive"
+                          style={{
+                            padding: '0.35rem', background: 'transparent', border: 'none',
+                            cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)',
+                            display: 'flex', alignItems: 'center',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ flexShrink: 0 }}>
-                    {loadingId === entry.fileId
-                      ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#1a73e8' }} />
-                      : entry.fileId
-                        ? <Download size={14} style={{ color: 'var(--text-tertiary)' }} />
-                        : null
-                    }
-                  </div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
