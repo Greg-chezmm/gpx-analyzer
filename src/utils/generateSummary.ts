@@ -2,6 +2,7 @@ import type {
   GPXActivity, GPXSplit, GPXInterval, ClimbSegment,
   TRIMPResult, VO2maxEstimate, CardiacDrift,
 } from "./gpxParser";
+import type { FitSummary } from "./gpxCore";
 import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
 
@@ -19,6 +20,7 @@ interface SummaryOptions {
   trimp: TRIMPResult | null;
   vo2max: VO2maxEstimate | null;
   drift: CardiacDrift | null;
+  fitSummary?: FitSummary | null;
 }
 
 function hrZoneBounds(fcMax: number, fcRest: number) {
@@ -58,7 +60,7 @@ function zoneStats(points: GPXActivity["points"], fcMax: number, fcRest: number)
 
 export function generateSummary(opts: SummaryOptions): string {
   const { activity, splits, climbs, intervals, fcMax, fcRest, vma, weight, birthYear,
-          sessionType, trimp, vo2max, drift } = opts;
+          sessionType, trimp, vo2max, drift, fitSummary } = opts;
 
   const isCycling = activity.activityType === "cycling";
   const lines: string[] = [];
@@ -121,6 +123,23 @@ export function generateSummary(opts: SummaryOptions): string {
       const severity = drift.decoupling < 5 ? "faible" : drift.decoupling < 9 ? "modérée" : "élevée";
       push(`• Dérive cardiaque : ${drift.decoupling.toFixed(1)}% (${severity}) — EF1 ${drift.ef1.toFixed(2)} → EF2 ${drift.ef2.toFixed(2)}`);
     }
+    sep();
+  }
+
+  // ── Bilan FIT montre ─────────────────────────────────────────────────────────
+  if (fitSummary) {
+    const teLabels = ["Aucun effet", "Maintien", "Amélioration", "Optimisation", "Surcompensation"];
+    const feelLabels: Record<number, string> = { 1: "Très difficile", 2: "Difficile", 3: "Normal", 4: "Bon", 5: "Excellent" };
+    push("⌚ DONNÉES MONTRE (FIT)");
+    if (fitSummary.trainingEffect != null) {
+      const teIdx = Math.min(4, Math.floor(fitSummary.trainingEffect));
+      push(`• Training Effect : ${fitSummary.trainingEffect.toFixed(1)} — ${teLabels[teIdx]}`);
+    }
+    if (fitSummary.estimatedVO2max != null) push(`• VO2max estimé montre : ${fitSummary.estimatedVO2max.toFixed(1)} mL/kg/min`);
+    if (fitSummary.recoveryTimeH != null) push(`• Récupération recommandée : ${fitSummary.recoveryTimeH}h`);
+    if (fitSummary.peakEpoc != null) push(`• EPOC : ${fitSummary.peakEpoc.toFixed(1)} mL/kg`);
+    if (fitSummary.feeling != null) push(`• Ressenti athlète : ${fitSummary.feeling}/5 — ${feelLabels[Math.round(fitSummary.feeling)] ?? ""}`);
+    if (fitSummary.tss != null) push(`• TSS montre : ${fitSummary.tss.toFixed(1)}`);
     sep();
   }
 

@@ -1,11 +1,10 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import {
-  parseGPX, calculateSplits, detectIntervals, parseSuuntoWindows,
+  parseGPX, calculateSplits, detectIntervals,
   detectClimbs, classifySession, calcCardiacDrift,
-  parseSuuntoBaroSamples, enrichWithBaroAlt,
   calcTRIMP, calcNormalizedPower, estimateVO2max, calcTSB,
   calcCardiacPace, detectHillRepeats,
-  type GPXActivity, type GPXLap, type SuuntoSessionHeader, type BaroSample,
+  type GPXActivity,
 } from "./utils/gpxParser";
 import { parseFIT } from "./utils/fitParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
@@ -21,9 +20,9 @@ import { ChartViewer } from "./components/ChartViewer";
 import { SplitsTable, formatDuration, formatPace } from "./components/SplitsTable";
 import { HeartRateZones } from "./components/HeartRateZones";
 import { IntervalAnalysis } from "./components/IntervalAnalysis";
-import { LapTable } from "./components/LapTable";
 import { ClimbAnalysis } from "./components/ClimbAnalysis";
 import { HillRepeats } from "./components/HillRepeats";
+import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
@@ -42,7 +41,7 @@ import { generateSummary } from "./utils/generateSummary";
 
 import {
   Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
-  Calendar, Gauge, Layers, Sun, Moon, Loader2, Sparkles, ArrowLeftRight,
+  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight,
 } from "lucide-react";
 
 const SPLIT_OPTIONS = [
@@ -60,9 +59,6 @@ function App() {
   const drive = useGoogleDrive();
 
   const [activity, setActivity] = useState<GPXActivity | null>(null);
-  const [laps, setLaps] = useState<GPXLap[] | null>(null);
-  const [suuntoHeader, setSuuntoHeader] = useState<SuuntoSessionHeader | null>(null);
-  const [baroSamples, setBaroSamples] = useState<BaroSample[]>([]);
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
   const [fileName, setFileName] = useState<string>("");
   const [splitDistance, setSplitDistance] = useState(1000);
@@ -74,7 +70,6 @@ function App() {
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
-  const jsonInputRef = useRef<HTMLInputElement>(null);
   const skipDriveHistorySync = useRef(false);
   const skipSettingsSync = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -82,20 +77,21 @@ function App() {
 
   // Enrich GPS elevation with barometric altitude when JSON is loaded
   const enrichedActivity = useMemo(() => {
-    const base = activity && baroSamples.length > 0 ? enrichWithBaroAlt(activity, baroSamples) : activity;
-    if (!base || !overrideActivityType) return base;
-    return { ...base, activityType: overrideActivityType };
-  }, [activity, baroSamples, overrideActivityType]);
+    if (!activity || !overrideActivityType) return activity;
+    return { ...activity, activityType: overrideActivityType };
+  }, [activity, overrideActivityType]);
 
   const splits = useMemo(
     () => (enrichedActivity ? calculateSplits(enrichedActivity, splitDistance) : []),
     [enrichedActivity, splitDistance]
   );
 
-  const intervals = useMemo(
-    () => (enrichedActivity ? detectIntervals(enrichedActivity) : null),
-    [enrichedActivity]
-  );
+  const intervals = useMemo(() => {
+    if (!enrichedActivity) return null;
+    // Prefer watch laps (structured workout / manual lap) over speed-based detection
+    if (enrichedActivity.fitLaps?.length) return enrichedActivity.fitLaps;
+    return detectIntervals(enrichedActivity);
+  }, [enrichedActivity]);
 
   const climbs = useMemo(
     () => (enrichedActivity ? detectClimbs(enrichedActivity) : []),
@@ -261,9 +257,6 @@ function App() {
           ? await parseFIT(data, cleanName)
           : parseGPX(data as string, cleanName);
         setActivity(parsed);
-        setLaps(null);
-        setSuuntoHeader(null);
-        setBaroSamples([]);
         setFileName(name);
         setHoveredPointIndex(null);
         setSplitDistance(1000);
@@ -277,38 +270,10 @@ function App() {
     }, 30));
   };
 
-  const handleJsonLoaded = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const text = ev.target?.result as string;
-        const { laps: parsed, header } = parseSuuntoWindows(text);
-        const baro = parseSuuntoBaroSamples(text);
-        setLaps(parsed);
-        setSuuntoHeader(header);
-        setBaroSamples(baro);
-        if (header.fcMaxBpm && header.fcMaxBpm !== fcMax) {
-          if (window.confirm(`Le fichier Suunto indique une FC max de ${header.fcMaxBpm} bpm (valeur actuelle : ${fcMax} bpm). Mettre à jour ?`)) {
-            setFcMax(header.fcMaxBpm);
-          }
-        }
-      } catch (err: unknown) {
-        alert(err instanceof Error ? err.message : "Erreur de lecture du fichier JSON Suunto.");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = "";
-  };
-
   const handleLoadSample = () => handleActivityLoaded(generateSampleGPX(), "Exemple_Course_Paris.gpx");
 
   const handleReset = () => {
     setActivity(null);
-    setLaps(null);
-    setSuuntoHeader(null);
-    setBaroSamples([]);
     setFileName("");
     setHoveredPointIndex(null);
     setSplitDistance(1000);
@@ -382,22 +347,6 @@ function App() {
           <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} />
           {enrichedActivity && (
             <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
-          )}
-          {activity && (
-            <>
-              <input ref={jsonInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleJsonLoaded} />
-              <button type="button" className="btn btn-outline" onClick={() => jsonInputRef.current?.click()}
-                style={{
-                  padding: "0.5rem 1rem", fontSize: "0.9rem",
-                  borderColor: laps ? "var(--color-ele)" : "var(--border-color)",
-                  color: laps ? "var(--color-ele)" : "var(--text-secondary)",
-                  backgroundColor: laps ? "rgba(5,150,105,0.04)" : "transparent",
-                }}
-              >
-                <Layers size={15} />
-                <span className="btn-text">{laps ? `${laps.filter(l => l.intervalType === 'Interval').length} rép. chargées` : "Laps Suunto (.json)"}</span>
-              </button>
-            </>
           )}
           {enrichedActivity && (
             <button type="button" className="btn btn-outline"
@@ -673,13 +622,18 @@ function App() {
             {/* TSB / CTL / ATL — historique multi-séances */}
             <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
 
-            {/* VO2max estimation (running only) */}
-            {vo2maxEst && (
-              <VO2maxEstimate
-                estimate={vo2maxEst}
-                suuntoVO2max={suuntoHeader?.vo2max ?? null}
+            {/* Bilan FIT — TE, VO2max montre, récupération, EPOC, feeling, zones */}
+            {enrichedActivity!.fitSummary && (
+              <FitSummary
+                fit={enrichedActivity!.fitSummary}
+                fcMax={fcMax}
+                vo2maxEst={vo2maxEst}
+                trimp={trimp}
               />
             )}
+
+            {/* VO2max estimation (running only) */}
+            {vo2maxEst && <VO2maxEstimate estimate={vo2maxEst} />}
 
             {/* VDOT predictions — Jack Daniels (running only, fiabilité ≥ moyenne) */}
             {vo2maxEst && <VDOTPredictor estimate={vo2maxEst} />}
@@ -697,12 +651,12 @@ function App() {
 
             {/* Interval analysis (auto-detected from GPX) */}
             {intervals && intervals.length > 0 && (
-              <IntervalAnalysis intervals={intervals} activityType={enrichedActivity!.activityType} />
-            )}
-
-            {/* Suunto laps from JSON */}
-            {laps && laps.length > 0 && (
-              <LapTable laps={laps} activity={enrichedActivity!} header={suuntoHeader} />
+              <IntervalAnalysis
+                intervals={intervals}
+                activityType={enrichedActivity!.activityType}
+                points={enrichedActivity!.points}
+                source={enrichedActivity!.fitLaps?.length ? 'fit' : 'detected'}
+              />
             )}
 
             {/* Climb analysis */}
@@ -712,7 +666,7 @@ function App() {
 
             {/* Hill repeats — running only, ≥2 séries détectées */}
             {hillRepeats.length > 0 && (
-              <HillRepeats series={hillRepeats} />
+              <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
             )}
 
             {/* Splits — with configurable distance */}
@@ -764,6 +718,7 @@ function App() {
             fcMax, fcRest, vma, weight, birthYear,
             sessionType: session?.type ?? null,
             trimp,
+            fitSummary: enrichedActivity.fitSummary ?? null,
             vo2max: vo2maxEst,
             drift,
           })}

@@ -1,9 +1,10 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — fit-file-parser has no official TS types
 import FitParser from 'fit-file-parser';
-import type { GPXActivity, GPXTrackPoint } from './gpxCore';
+import type { GPXActivity, GPXTrackPoint, FitSummary } from './gpxCore';
 import { calculateDistance } from './gpxCore';
 import { enrichPoints, computeTrackStats } from './trackProcessing';
+import type { GPXInterval } from './intervals';
 
 // ─── Internal FIT types ──────────────────────────────────────────────────────
 
@@ -27,11 +28,37 @@ interface FitSession {
   start_time?: Date;
   total_elapsed_time?: number;
   total_distance?: number;
+  total_training_effect?: number;
+  estimated_vo2_max?: number;
+  recovery_time?: number;
+  peak_epoc?: number;
+  feeling?: number;
+  training_stress_score?: number;
+  time_in_hr_zone?: number[];
+}
+
+interface FitLap {
+  timestamp?: Date;
+  start_time?: Date;
+  total_elapsed_time?: number;
+  total_distance?: number;
+  avg_speed?: number;
+  max_speed?: number;
+  avg_heart_rate?: number | null;
+  max_heart_rate?: number | null;
+  avg_cadence?: number | null;
+  avg_power?: number | null;
+  max_power?: number | null;
+  total_ascent?: number | null;
+  total_descent?: number | null;
+  lap_trigger?: string;
+  event?: string;
 }
 
 interface FitData {
   records?: FitRecord[];
   sessions?: FitSession[];
+  laps?: FitLap[];
 }
 
 // ─── Main entry point ─────────────────────────────────────────────────────────
@@ -61,6 +88,85 @@ export function parseFIT(buffer: ArrayBuffer, defaultName = "Activité FIT"): Pr
       }
     });
   });
+}
+
+// ─── FIT laps → GPXInterval[] ─────────────────────────────────────────────────
+// Only laps triggered by fitness_equipment (structured workout) or manual (lap button).
+// Autolap (distance/time) produces many identical laps and is intentionally excluded.
+
+const STRUCTURED_TRIGGERS = new Set(['fitness_equipment', 'manual']);
+
+function closestPointIndex(points: GPXTrackPoint[], time: Date): number {
+  const target = time.getTime();
+  let best = 0, bestDiff = Infinity;
+  for (let i = 0; i < points.length; i++) {
+    const t = points[i].time?.getTime();
+    if (t == null) continue;
+    const diff = Math.abs(t - target);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  return best;
+}
+
+function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterval[] | null {
+  const meaningful = laps.filter(l =>
+    STRUCTURED_TRIGGERS.has(l.lap_trigger ?? '') &&
+    (l.total_elapsed_time ?? 0) > 10 &&
+    (l.total_distance ?? 0) > 50 &&
+    l.start_time != null &&
+    l.timestamp != null
+  );
+
+  if (meaningful.length < 2) return null;
+
+  // Classify effort vs recovery by HR (universally applicable: high HR = effort)
+  const hrs = meaningful.map(l => l.avg_heart_rate ?? null).filter((h): h is number => h !== null);
+  const medianHR = hrs.length > 0
+    ? [...hrs].sort((a, b) => a - b)[Math.floor(hrs.length / 2)]
+    : null;
+
+  const intervals: GPXInterval[] = [];
+  let effortNum = 0, recoveryNum = 0;
+
+  for (let i = 0; i < meaningful.length; i++) {
+    const lap = meaningful[i];
+    const hr = lap.avg_heart_rate ?? null;
+
+    let type: 'effort' | 'recovery';
+    if (medianHR !== null && hr !== null) {
+      type = hr >= medianHR ? 'effort' : 'recovery';
+    } else {
+      // No HR data — alternate starting with effort
+      type = i % 2 === 0 ? 'effort' : 'recovery';
+    }
+
+    const dur = lap.total_elapsed_time ?? 0;
+    const dist = lap.total_distance ?? 0;
+    const avgSpd = dur > 0 && dist > 0 ? dist / dur : (lap.avg_speed ?? 0);
+    const num = type === 'effort' ? ++effortNum : ++recoveryNum;
+
+    intervals.push({
+      number: num,
+      type,
+      startTime: lap.start_time!,
+      endTime: lap.timestamp!,
+      duration: dur,
+      distance: dist,
+      avgSpeed: avgSpd,
+      maxSpeed: lap.max_speed ?? 0,
+      avgPace: avgSpd > 0 ? 1000 / avgSpd : 0,
+      avgHeartRate: hr,
+      maxHeartRate: lap.max_heart_rate ?? null,
+      avgCadence: lap.avg_cadence ?? null,
+      avgPower: lap.avg_power ?? null,
+      totalAscent: lap.total_ascent ?? null,
+      totalDescent: lap.total_descent ?? null,
+      startPointIndex: closestPointIndex(points, lap.start_time!),
+      endPointIndex: closestPointIndex(points, lap.timestamp!),
+    });
+  }
+
+  return intervals.length >= 2 ? intervals : null;
 }
 
 // ─── Conversion FIT → GPXActivity ─────────────────────────────────────────────
@@ -163,6 +269,24 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     activityType = 'running';
   }
 
+  // ── FIT laps — intervals de séance structurée ou bouton lap ─────────────────
+  const fitLaps = fitLapsToIntervals(data.laps ?? [], points) ?? undefined;
+
+  // ── FIT session summary — données propriétaires montre ──────────────────────
+  const fitSummary: FitSummary | undefined = session ? {
+    trainingEffect:  session.total_training_effect  ?? null,
+    estimatedVO2max: session.estimated_vo2_max      ?? null,
+    recoveryTimeH:   session.recovery_time != null
+      ? Math.round(session.recovery_time / 3600 * 2) / 2  // arrondi à 0.5h
+      : null,
+    peakEpoc:        session.peak_epoc != null
+      ? Math.round(session.peak_epoc * 10) / 10
+      : null,
+    feeling:         session.feeling     ?? null,
+    tss:             session.training_stress_score ?? null,
+    timeInHrZone:    Array.isArray(session.time_in_hr_zone) ? session.time_in_hr_zone : null,
+  } : undefined;
+
   return {
     name,
     startTime,
@@ -184,5 +308,7 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     maxPower:       powerCount > 0 ? maxPower                          : null,
     avgTemp:        tempCount  > 0 ? Math.round((tempSum / tempCount) * 10) / 10 : null,
     activityType,
+    fitSummary,
+    fitLaps,
   };
 }

@@ -4,7 +4,6 @@ import type { VO2maxEstimate as VO2maxData } from "../utils/gpxParser";
 
 interface VO2maxEstimateProps {
   estimate: VO2maxData;
-  suuntoVO2max?: number | null;
 }
 
 interface VO2Level { label: string; color: string; min: number; max: number }
@@ -27,12 +26,11 @@ const CONFIDENCE_LABELS = {
   low:    { label: "Faible",  color: "#f97316" },
 };
 
-export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate, suuntoVO2max }) => {
+export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
   const lvl = getLevel(estimate.value);
   const MAX_DISPLAY = 80;
   const gaugeW = Math.min(100, (estimate.value / MAX_DISPLAY) * 100);
   const conf = CONFIDENCE_LABELS[estimate.confidence];
-  const diff = suuntoVO2max != null ? Math.round((estimate.value - suuntoVO2max) * 10) / 10 : null;
 
   return (
     <div className="card animate-slide-up">
@@ -71,19 +69,6 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate, suunto
             Vitesse moy. : {estimate.speedKmh} km/h · HRR moy. : {estimate.hrrPct}%
           </div>
         </div>
-        {suuntoVO2max != null && (
-          <div style={{ paddingBottom: "0.5rem" }}>
-            <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", fontWeight: 600 }}>Suunto VO2max</div>
-            <div style={{ fontFamily: "var(--font-heading)", fontWeight: 800, fontSize: "1.75rem", color: "#a78bfa" }}>
-              {suuntoVO2max}
-            </div>
-            {diff !== null && (
-              <div style={{ fontSize: "0.78rem", color: diff >= 0 ? "#34d399" : "#f97316", fontWeight: 600 }}>
-                {diff >= 0 ? "+" : ""}{diff} vs Suunto
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Scale bar */}

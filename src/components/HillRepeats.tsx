@@ -1,10 +1,13 @@
 import React, { useState } from "react";
 import { Repeat, ChevronDown, ChevronUp } from "lucide-react";
 import type { HillRepeatSeries, HillRepetition } from "../utils/hillRepeats";
+import type { GPXTrackPoint } from "../utils/gpxParser";
 import { formatDuration, formatPace } from "./SplitsTable";
+import { HillRepeatMapModal } from "./HillRepeatMapModal";
 
 interface HillRepeatsProps {
   series: HillRepeatSeries[];
+  points: GPXTrackPoint[];
 }
 
 function FatigueBadge({ pct }: { pct: number | null }) {
@@ -25,10 +28,23 @@ function FatigueBadge({ pct }: { pct: number | null }) {
   );
 }
 
-function RepRow({ rep, hasHR, isLast }: { rep: HillRepetition; hasHR: boolean; isLast: boolean }) {
-  const isBest = rep.avgPace > 0;
+interface RepRowProps {
+  rep: HillRepetition;
+  hasHR: boolean;
+  isLast: boolean;
+  onClick: () => void;
+}
+
+function RepRow({ rep, hasHR, isLast, onClick }: RepRowProps) {
   return (
-    <tr style={{ borderBottom: isLast ? "none" : "1px solid var(--border-color)" }}>
+    <tr
+      onClick={onClick}
+      title="Cliquer pour voir sur la carte"
+      style={{
+        borderBottom: isLast ? "none" : "1px solid var(--border-color)",
+        cursor: "pointer",
+      }}
+    >
       <td style={{ padding: "0.45rem 0.75rem", fontWeight: 700, color: "var(--accent-primary)", fontSize: "0.85rem" }}>
         {rep.repIndex + 1}
       </td>
@@ -42,7 +58,7 @@ function RepRow({ rep, hasHR, isLast }: { rep: HillRepetition; hasHR: boolean; i
         {formatDuration(Math.round(rep.duration))}
       </td>
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-speed)", fontWeight: 600 }}>
-        {isBest ? formatPace(rep.avgPace) + " /km" : "—"}
+        {rep.avgPace > 0 ? formatPace(rep.avgPace) + " /km" : "—"}
       </td>
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
         {Math.round(rep.vam)} m/h
@@ -65,7 +81,12 @@ function RepRow({ rep, hasHR, isLast }: { rep: HillRepetition; hasHR: boolean; i
   );
 }
 
-function SeriesPanel({ s }: { s: HillRepeatSeries }) {
+interface SeriesPanelProps {
+  s: HillRepeatSeries;
+  onRepClick: (rep: HillRepetition, seriesId: number) => void;
+}
+
+function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
   const [open, setOpen] = useState(true);
   const hasHR = s.avgHR !== null;
 
@@ -74,7 +95,6 @@ function SeriesPanel({ s }: { s: HillRepeatSeries }) {
       border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)",
       overflow: "hidden", marginBottom: "0.75rem",
     }}>
-      {/* En-tête série */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
@@ -108,7 +128,13 @@ function SeriesPanel({ s }: { s: HillRepeatSeries }) {
             </thead>
             <tbody>
               {s.reps.map((rep, i) => (
-                <RepRow key={rep.startIndex} rep={rep} hasHR={hasHR} isLast={i === s.reps.length - 1} />
+                <RepRow
+                  key={rep.startIndex}
+                  rep={rep}
+                  hasHR={hasHR}
+                  isLast={i === s.reps.length - 1}
+                  onClick={() => onRepClick(rep, s.id)}
+                />
               ))}
             </tbody>
           </table>
@@ -118,8 +144,9 @@ function SeriesPanel({ s }: { s: HillRepeatSeries }) {
   );
 }
 
-export const HillRepeats: React.FC<HillRepeatsProps> = ({ series }) => {
+export const HillRepeats: React.FC<HillRepeatsProps> = ({ series, points }) => {
   const totalReps = series.reduce((a, s) => a + s.repCount, 0);
+  const [selected, setSelected] = useState<{ rep: HillRepetition; seriesId: number } | null>(null);
 
   return (
     <div className="card animate-slide-up" style={{ marginTop: "1rem" }}>
@@ -134,8 +161,23 @@ export const HillRepeats: React.FC<HillRepeatsProps> = ({ series }) => {
       </div>
 
       <div style={{ marginTop: "0.75rem" }}>
-        {series.map(s => <SeriesPanel key={s.id} s={s} />)}
+        {series.map(s => (
+          <SeriesPanel
+            key={s.id}
+            s={s}
+            onRepClick={(rep, seriesId) => setSelected({ rep, seriesId })}
+          />
+        ))}
       </div>
+
+      {selected && (
+        <HillRepeatMapModal
+          rep={selected.rep}
+          seriesId={selected.seriesId}
+          points={points}
+          onClose={() => setSelected(null)}
+        />
+      )}
     </div>
   );
 };

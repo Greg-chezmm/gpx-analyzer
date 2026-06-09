@@ -14,6 +14,9 @@ export interface GPXInterval {
   avgHeartRate: number | null;
   maxHeartRate: number | null;
   avgCadence: number | null;
+  avgPower?: number | null;
+  totalAscent?: number | null;
+  totalDescent?: number | null;
   startPointIndex: number;
   endPointIndex: number;
 }

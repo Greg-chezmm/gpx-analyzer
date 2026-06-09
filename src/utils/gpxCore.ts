@@ -15,6 +15,16 @@ export interface GPXTrackPoint {
   grade: number | null;   // slope %
 }
 
+export interface FitSummary {
+  trainingEffect: number | null;  // 0–5
+  estimatedVO2max: number | null; // mL/kg/min (estimation montre)
+  recoveryTimeH: number | null;   // heures
+  peakEpoc: number | null;        // mL/kg
+  feeling: number | null;         // 1–5
+  tss: number | null;             // Training Stress Score natif montre
+  timeInHrZone: number[] | null;  // secondes [Z1..Z5], zones % FCmax montre
+}
+
 export interface GPXActivity {
   name: string;
   startTime: Date | null;
@@ -36,6 +46,8 @@ export interface GPXActivity {
   maxPower: number | null;
   avgTemp: number | null;
   activityType: 'running' | 'cycling' | 'unknown';
+  fitSummary?: FitSummary;
+  fitLaps?: import('./intervals').GPXInterval[];
 }
 
 // Calculate distance between two GPS coordinates using Haversine formula
