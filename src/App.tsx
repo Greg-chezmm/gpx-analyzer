@@ -39,10 +39,11 @@ import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./component
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { generateSummary } from "./utils/generateSummary";
 import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
+import { downloadGPX } from "./utils/gpxExporter";
 
 import {
   Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
-  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight, GitMerge, X,
+  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight, GitMerge, X, Download,
 } from "lucide-react";
 
 const SPLIT_OPTIONS = [
@@ -412,6 +413,14 @@ function App() {
           </button>
           {activity && (
             <>
+              <button type="button" className="btn btn-outline"
+                onClick={() => downloadGPX(enrichedActivity!, intervals)}
+                style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
+                title="Télécharger l'activité en GPX (avec intervalles)"
+              >
+                <Download size={15} />
+                <span className="btn-text">GPX</span>
+              </button>
               <button type="button" className="btn btn-outline"
                 onClick={() => mergeInputRef.current?.click()}
                 style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
