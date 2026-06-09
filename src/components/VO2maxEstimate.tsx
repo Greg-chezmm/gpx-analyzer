@@ -68,7 +68,7 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate, suunto
             {lvl.label}
           </div>
           <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.4rem" }}>
-            Allure GAP : {estimate.gapSpeedKmh} km/h · HRR moy. : {estimate.hrrPct}%
+            Vitesse moy. : {estimate.speedKmh} km/h · HRR moy. : {estimate.hrrPct}%
           </div>
         </div>
         {suuntoVO2max != null && (
@@ -114,7 +114,7 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate, suunto
       </div>
 
       <div style={{ fontSize: "0.71rem", color: "var(--text-tertiary)", borderTop: "1px solid var(--border-color)", paddingTop: "0.6rem", marginTop: "0.25rem" }}>
-        Méthode sous-maximale : formule ACSM running + Karvonen HRR · Segment le plus stable détecté : {estimate.windowMin} min
+        Méthode sous-maximale : ACSM terrain plat (HRR ≥ 55%) + Karvonen · Segment le plus stable : {estimate.windowMin} min
       </div>
     </div>
   );

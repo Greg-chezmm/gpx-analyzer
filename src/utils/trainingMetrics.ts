@@ -186,7 +186,7 @@ export interface VO2maxEstimate {
   value: number;          // mL/kg/min
   confidence: 'high' | 'medium' | 'low';
   hrrPct: number;         // avg HRR% used
-  gapSpeedKmh: number;    // equivalent flat speed used
+  speedKmh: number;       // actual flat speed of the segment used
   windowMin: number;      // duration of the stable segment used (minutes)
 }
 
@@ -202,40 +202,38 @@ export function estimateVO2max(
   );
   if (pts.length < 60) return null;
 
-  const gapSpeeds = pts.map((p: GPXTrackPoint) => {
-    const gf = p.grade !== null ? gapFactor(p.grade) : 1;
-    return p.speed! * gf;
-  });
-
-  // Prefix sums for O(1) window mean/variance
+  // Prefix sums for O(1) window mean/variance + average absolute grade
   const m = pts.length;
-  const prefHR   = new Float64Array(m + 1);
-  const prefHR2  = new Float64Array(m + 1);
-  const prefGap  = new Float64Array(m + 1);
-  const prefGap2 = new Float64Array(m + 1);
+  const prefHR        = new Float64Array(m + 1);
+  const prefHR2       = new Float64Array(m + 1);
+  const prefSpd       = new Float64Array(m + 1);
+  const prefSpd2      = new Float64Array(m + 1);
+  const prefAbsGrade  = new Float64Array(m + 1);
   for (let k = 0; k < m; k++) {
-    prefHR[k + 1]  = prefHR[k]  + pts[k].hr!;
-    prefHR2[k + 1] = prefHR2[k] + pts[k].hr! ** 2;
-    prefGap[k + 1]  = prefGap[k]  + gapSpeeds[k];
-    prefGap2[k + 1] = prefGap2[k] + gapSpeeds[k] ** 2;
+    prefHR[k + 1]       = prefHR[k]       + pts[k].hr!;
+    prefHR2[k + 1]      = prefHR2[k]      + pts[k].hr! ** 2;
+    prefSpd[k + 1]      = prefSpd[k]      + pts[k].speed!;
+    prefSpd2[k + 1]     = prefSpd2[k]     + pts[k].speed! ** 2;
+    prefAbsGrade[k + 1] = prefAbsGrade[k] + Math.abs(pts[k].grade ?? 0);
   }
 
   const winStats = (i: number, j: number) => {
     const n = j - i + 1;
     const mHR  = (prefHR[j + 1]  - prefHR[i])  / n;
-    const mGap = (prefGap[j + 1] - prefGap[i]) / n;
+    const mSpd = (prefSpd[j + 1] - prefSpd[i]) / n;
     const varHR  = (prefHR2[j + 1]  - prefHR2[i])  / n - mHR  ** 2;
-    const varGap = (prefGap2[j + 1] - prefGap2[i]) / n - mGap ** 2;
+    const varSpd = (prefSpd2[j + 1] - prefSpd2[i]) / n - mSpd ** 2;
+    const avgAbsGrade = (prefAbsGrade[j + 1] - prefAbsGrade[i]) / n;
     return {
-      mHR, mGap,
+      mHR, mSpd, avgAbsGrade,
       cvHR:  Math.sqrt(Math.max(0, varHR))  / mHR,
-      cvGap: Math.sqrt(Math.max(0, varGap)) / mGap,
+      cvSpd: Math.sqrt(Math.max(0, varSpd)) / mSpd,
     };
   };
 
-  // Two-pointer: find most stable window of at least minMs duration.
-  // Score = 2×CV(HR) + CV(GAP) — HR stability weighted more because
-  // speed noise is smoothed upstream while HR reacts to effort changes.
+  // Two-pointer: find most stable flat window of at least minMs duration.
+  // Score = 2×CV(HR) + CV(speed). Windows with avg |grade| > 5% are rejected:
+  // downhill GAP boost and uphill HR spike both corrupt the ACSM flat formula.
   const findBestWindow = (minMs: number) => {
     let j = 0;
     let bestScore = Infinity, bestI = -1, bestJ = -1;
@@ -243,42 +241,43 @@ export function estimateVO2max(
       while (j < m - 1 && pts[j].time!.getTime() - pts[i].time!.getTime() < minMs) j++;
       if (pts[j].time!.getTime() - pts[i].time!.getTime() < minMs) continue;
       if (j - i < 20) continue;
-      const { cvHR, cvGap } = winStats(i, j);
-      const score = 2 * cvHR + cvGap;
+      const { cvHR, cvSpd, avgAbsGrade } = winStats(i, j);
+      if (avgAbsGrade > 5) continue;
+      const score = 2 * cvHR + cvSpd;
       if (score < bestScore) { bestScore = score; bestI = i; bestJ = j; }
     }
     return bestI >= 0 ? { i: bestI, j: bestJ } : null;
   };
 
-  // Always use the best 10-min window for the estimate — it has the lowest CV.
-  // A 20-min window covers more time and accumulates more drift, so its CV is
-  // typically higher; using it would lower confidence without improving accuracy.
   const win10 = findBestWindow(10 * 60_000);
   if (!win10) return null;
 
   const { i: bestI, j: bestJ } = win10;
-  const { mHR: avgHR, mGap: avgGapSpd, cvHR, cvGap } = winStats(bestI, bestJ);
+  const { mHR: avgHR, mSpd: avgSpd, cvHR, cvSpd } = winStats(bestI, bestJ);
 
   const hrrPct = (avgHR - fcRest) / (fcMax - fcRest);
-  if (hrrPct < 0.35 || hrrPct > 0.97) return null;
+  // Below 0.55 HRR the linear extrapolation error explodes (×1.8 amplification);
+  // above 0.97 the athlete is essentially at max.
+  if (hrrPct < 0.55 || hrrPct > 0.97) return null;
 
-  const vo2    = 0.2 * (avgGapSpd * 60) + 3.5;
-  const vo2max = vo2 / hrrPct;
+  // Swain & Leutholtz (1997): resting VO2 (3.5 mL/kg/min) is constant,
+  // only net (exercise) VO2 scales with HRR%.
+  const vo2net = 0.2 * (avgSpd * 60);
+  const vo2max = vo2net / hrrPct + 3.5;
 
   const windowMin = Math.round((pts[bestJ].time!.getTime() - pts[bestI].time!.getTime()) / 60_000);
 
-  // For 'high': also require a stable 20-min window to exist
   const win20exists = cvHR < 0.05 ? findBestWindow(20 * 60_000) !== null : false;
 
   const confidence: 'high' | 'medium' | 'low' =
-    win20exists && cvHR < 0.05 && cvGap < 0.10 && hrrPct >= 0.5 && hrrPct <= 0.87 ? 'high' :
+    win20exists && cvHR < 0.05 && cvSpd < 0.10 && hrrPct >= 0.60 && hrrPct <= 0.87 ? 'high' :
     cvHR < 0.12 ? 'medium' : 'low';
 
   return {
-    value:        Math.round(vo2max * 10) / 10,
+    value:    Math.round(vo2max * 10) / 10,
     confidence,
-    hrrPct:       Math.round(hrrPct * 100),
-    gapSpeedKmh:  Math.round(avgGapSpd * 3.6 * 10) / 10,
+    hrrPct:   Math.round(hrrPct * 100),
+    speedKmh: Math.round(avgSpd * 3.6 * 10) / 10,
     windowMin,
   };
 }

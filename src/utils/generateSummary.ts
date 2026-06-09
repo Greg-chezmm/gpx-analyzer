@@ -115,7 +115,7 @@ export function generateSummary(opts: SummaryOptions): string {
     }
     if (vo2max) {
       const confLabel = vo2max.confidence === 'high' ? 'élevée' : vo2max.confidence === 'medium' ? 'moyenne' : 'faible';
-      push(`• VO2max estimé : ${vo2max.value} ml/kg/min (fiabilité ${confLabel}, vitesse GAP ~${vo2max.gapSpeedKmh.toFixed(1)} km/h)`);
+      push(`• VO2max estimé : ${vo2max.value} ml/kg/min (fiabilité ${confLabel}, vitesse ~${vo2max.speedKmh.toFixed(1)} km/h)`);
     }
     if (drift) {
       const severity = drift.decoupling < 5 ? "faible" : drift.decoupling < 9 ? "modérée" : "élevée";
