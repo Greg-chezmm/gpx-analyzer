@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef, useEffect } from "react";
+import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { TrendingUp, Eye, Maximize2, Minimize2 } from "lucide-react";
+import { TrendingUp, Eye, Maximize2, Minimize2, ZoomIn } from "lucide-react";
 
 interface ChartViewerProps {
   points: GPXTrackPoint[];
@@ -47,6 +47,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<ChartType>("elevation");
   const [expanded, setExpanded] = useState(false);
+  const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
+  const [selBox, setSelBox] = useState<{ x1: number; x2: number } | null>(null);
+  const dragAnchorX = useRef<number | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
   const svgWidth = 600;
@@ -54,6 +57,13 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const padding = { top: 20, right: 20, bottom: 40, left: 55 };
   const plotWidth = svgWidth - padding.left - padding.right;
   const plotHeight = svgHeight - padding.top - padding.bottom;
+
+  // Reset zoom when activity changes
+  useEffect(() => {
+    setZoomRange(null);
+    setSelBox(null);
+    dragAnchorX.current = null;
+  }, [points]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -63,7 +73,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   }, [expanded]);
 
   const limits = useMemo(() => {
-    if (points.length === 0) return { maxDist: 0, minEle: 0, maxEle: 0, maxSpeed: 0, minHr: 0, maxHr: 0, maxCad: 0, minPace: 180, maxPace: 420 };
+    if (points.length === 0) return { maxDist: 0, minEle: 0, maxEle: 0, maxSpeed: 0, minHr: 0, maxHr: 0, maxCad: 0, minPace: 180, maxPace: 420, minCardiacPace: 60, maxCardiacPace: 900 };
 
     const maxDist = points[points.length - 1].distFromStart;
 
@@ -155,21 +165,20 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
         const reserve = Math.max(1, fcMax - fcRest);
         return {
           getValue: (pt) => {
-            if (!pt.hr || !pt.speed || pt.speed < 0.3) return (limits as Record<string, number>).maxCardiacPace ?? 900;
+            if (!pt.hr || !pt.speed || pt.speed < 0.3) return limits.maxCardiacPace;
             const hrr = (pt.hr - fcRest) / reserve;
-            if (hrr < 0.2) return (limits as Record<string, number>).maxCardiacPace ?? 900;
+            if (hrr < 0.2) return limits.maxCardiacPace;
             return (1000 / pt.speed) * (CARDIAC_REF_HRR / hrr);
           },
           label: "Allure cardiaque", unit: " /km",
           color: "var(--color-cardiac)", colorClass: "cardiac",
-          yMin: (limits as Record<string, number>).minCardiacPace ?? 60,
-          yMax: (limits as Record<string, number>).maxCardiacPace ?? 900,
+          yMin: limits.minCardiacPace,
+          yMax: limits.maxCardiacPace,
           invertY: true,
           formatY: fmtPace,
         };
       }
       case "dual":
-        // Dual uses its own rendering; return HR params as placeholder
         return {
           getValue: (pt) => pt.hr || 0,
           label: "Allure + FC", unit: "",
@@ -187,10 +196,12 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     }
   }, [activeTab, limits, activityType, fcMax, fcRest]);
 
-  const getX = (dist: number) => {
-    if (limits.maxDist === 0) return padding.left;
-    return padding.left + (dist / limits.maxDist) * plotWidth;
-  };
+  const getX = useCallback((dist: number) => {
+    const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+    const range = zEnd - zStart;
+    if (range === 0 || limits.maxDist === 0) return padding.left;
+    return padding.left + ((dist - zStart) / range) * plotWidth;
+  }, [zoomRange, limits.maxDist, plotWidth]);
 
   const getY = (val: number, params: ChartParams = chartParams) => {
     const range = params.yMax - params.yMin;
@@ -203,19 +214,30 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const chartPaths = useMemo(() => {
     if (points.length === 0 || activeTab === 'dual') return { line: "", area: "" };
 
-    const samplingInterval = Math.max(1, Math.floor(points.length / 300));
+    const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+    const visiblePts = zoomRange
+      ? points.filter(p => p.distFromStart >= zStart && p.distFromStart <= zEnd)
+      : points;
+
+    const maxSamples = expanded ? 600 : 300;
+    const samplingInterval = Math.max(1, Math.floor(visiblePts.length / maxSamples));
     const pathPoints: [number, number][] = [];
 
-    for (let i = 0; i < points.length; i += samplingInterval) {
-      const pt = points[i];
-      // Skip null-elevation points so they don't draw a line down to y=0
+    for (let i = 0; i < visiblePts.length; i += samplingInterval) {
+      const pt = visiblePts[i];
       if (activeTab === 'elevation' && pt.ele === null) continue;
+      // Points sans FC/vitesse ignorés sur le graphique allure cardiaque
+      if (activeTab === 'cardiac' && (!pt.hr || !pt.speed || pt.speed < 0.3)) continue;
       pathPoints.push([getX(pt.distFromStart), getY(chartParams.getValue(pt))]);
     }
-    if (points.length > 1 && (points.length - 1) % samplingInterval !== 0) {
-      const last = points[points.length - 1];
-      if (!(activeTab === 'elevation' && last.ele === null)) {
-        pathPoints.push([getX(last.distFromStart), getY(chartParams.getValue(last))]);
+    // Toujours inclure le dernier point visible
+    if (visiblePts.length > 1) {
+      const last = visiblePts[visiblePts.length - 1];
+      if (!(activeTab === 'elevation' && last.ele === null) &&
+          !(activeTab === 'cardiac' && (!last.hr || !last.speed || last.speed < 0.3))) {
+        const lastCoord: [number, number] = [getX(last.distFromStart), getY(chartParams.getValue(last))];
+        const prev = pathPoints[pathPoints.length - 1];
+        if (!prev || prev[0] !== lastCoord[0]) pathPoints.push(lastCoord);
       }
     }
     if (pathPoints.length === 0) return { line: "", area: "" };
@@ -225,9 +247,8 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     const lastX = pathPoints[pathPoints.length - 1][0];
     const baseline = padding.top + plotHeight;
     return { line: linePath, area: `${linePath} L ${lastX} ${baseline} L ${firstX} ${baseline} Z` };
-  }, [points, chartParams, limits, plotHeight, activeTab]);
+  }, [points, chartParams, limits, plotHeight, activeTab, zoomRange, expanded, getX]);
 
-  // Dual-axis data (Allure + FC)
   const dualData = useMemo(() => {
     if (activeTab !== 'dual' || !hasHeartRate || points.length === 0) return null;
 
@@ -248,12 +269,16 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     const getYP = (v: number) => getY(v, paceParams);
     const getYH = (v: number) => getY(v, hrParams);
 
-    const stride = Math.max(1, Math.floor(points.length / 300));
+    const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+    const visiblePts = zoomRange
+      ? points.filter(p => p.distFromStart >= zStart && p.distFromStart <= zEnd)
+      : points;
+    const stride = Math.max(1, Math.floor(visiblePts.length / (expanded ? 600 : 300)));
     const pacePts: [number, number][] = [];
     const hrPts: [number, number][] = [];
 
-    for (let i = 0; i < points.length; i += stride) {
-      const pt = points[i];
+    for (let i = 0; i < visiblePts.length; i += stride) {
+      const pt = visiblePts[i];
       pacePts.push([getX(pt.distFromStart), getYP(paceParams.getValue(pt))]);
       if (pt.hr) hrPts.push([getX(pt.distFromStart), getYH(pt.hr)]);
     }
@@ -277,30 +302,54 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       hrTicks: step4(limits.minHr, limits.maxHr).map(v => ({ y: getYH(v), label: String(Math.round(v)) })),
       getYP, getYH, paceParams, hrParams,
     };
-  }, [activeTab, points, hasHeartRate, limits, plotHeight]);
+  }, [activeTab, points, hasHeartRate, limits, plotHeight, zoomRange, expanded, getX]);
+
+  // Convertit les coordonnées écran en unités SVG (viewBox="0 0 600 …" ≠ largeur réelle)
+  const toSvgX = (clientX: number, rect: DOMRect) =>
+    (clientX - rect.left) * (svgWidth / rect.width);
+
+  const handleMouseDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return;
+    const svgX = toSvgX(e.clientX, svgRef.current.getBoundingClientRect());
+    if (svgX >= padding.left && svgX <= padding.left + plotWidth) {
+      dragAnchorX.current = svgX;
+    }
+  };
 
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     if (!svgRef.current || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
-    let clientX = 0;
+    let rawClientX = 0;
     if ("touches" in e) {
       if (e.touches.length === 0) return;
-      clientX = e.touches[0].clientX;
+      rawClientX = e.touches[0].clientX;
     } else {
-      clientX = e.clientX;
+      rawClientX = e.clientX;
     }
-    const mouseX = clientX - rect.left;
-    if (mouseX >= padding.left && mouseX <= padding.left + plotWidth) {
-      const pct = (mouseX - padding.left) / plotWidth;
-      const targetDist = pct * limits.maxDist;
+    const svgX = toSvgX(rawClientX, rect);
+
+    // Drag selection (souris uniquement)
+    if (!("touches" in e) && dragAnchorX.current !== null) {
+      if (Math.abs(svgX - dragAnchorX.current) > 8) {
+        const x1 = Math.max(padding.left, Math.min(padding.left + plotWidth, Math.min(dragAnchorX.current, svgX)));
+        const x2 = Math.max(padding.left, Math.min(padding.left + plotWidth, Math.max(dragAnchorX.current, svgX)));
+        setSelBox({ x1, x2 });
+        return;
+      }
+    }
+
+    // Hover normal
+    if (svgX >= padding.left && svgX <= padding.left + plotWidth) {
+      const pct = (svgX - padding.left) / plotWidth;
+      const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+      const targetDist = zStart + pct * (zEnd - zStart);
       let low = 0, high = points.length - 1, closestIdx = 0;
       while (low <= high) {
         const mid = Math.floor((low + high) / 2);
         if (points[mid].distFromStart < targetDist) low = mid + 1;
         else high = mid - 1;
       }
-      closestIdx = low;
-      if (closestIdx >= points.length) closestIdx = points.length - 1;
+      closestIdx = Math.min(low, points.length - 1);
       if (closestIdx > 0) {
         const d1 = Math.abs(points[closestIdx].distFromStart - targetDist);
         const d2 = Math.abs(points[closestIdx - 1].distFromStart - targetDist);
@@ -310,7 +359,32 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     }
   };
 
-  const handleMouseLeave = () => { onHoverPointChange(null); };
+  const handleMouseUp = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (dragAnchorX.current === null) return;
+    if (!svgRef.current) { dragAnchorX.current = null; setSelBox(null); return; }
+    const svgX = toSvgX(e.clientX, svgRef.current.getBoundingClientRect());
+    const anchor = dragAnchorX.current;
+    dragAnchorX.current = null;
+
+    if (selBox && Math.abs(svgX - anchor) > 8) {
+      const pct1 = (Math.min(anchor, svgX) - padding.left) / plotWidth;
+      const pct2 = (Math.max(anchor, svgX) - padding.left) / plotWidth;
+      const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+      const range = zEnd - zStart;
+      const d1 = zStart + Math.max(0, pct1) * range;
+      const d2 = zStart + Math.min(1, pct2) * range;
+      if (d2 - d1 > 50) setZoomRange([d1, d2]);
+    }
+    setSelBox(null);
+  };
+
+  const handleMouseLeave = () => {
+    dragAnchorX.current = null;
+    setSelBox(null);
+    onHoverPointChange(null);
+  };
+
+  const handleDblClick = () => setZoomRange(null);
 
   const yTicks = useMemo(() => {
     if (activeTab === 'dual') return [];
@@ -323,9 +397,14 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   }, [chartParams, limits, activeTab, plotHeight]);
 
   const xTicks = useMemo(() => {
-    const step = limits.maxDist / 5;
-    return Array.from({ length: 6 }, (_, i) => ({ distance: step * i, x: getX(step * i) }));
-  }, [limits]);
+    const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
+    const range = zEnd - zStart;
+    const step = range / 5;
+    return Array.from({ length: 6 }, (_, i) => {
+      const dist = zStart + step * i;
+      return { distance: dist, x: getX(dist) };
+    });
+  }, [limits, zoomRange, getX]);
 
   const hoveredPoint = hoveredPointIndex !== null ? points[hoveredPointIndex] : null;
 
@@ -350,22 +429,40 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           <span>📈 Profils d'Entraînement</span>
         </h3>
 
-        <button type="button" onClick={() => setExpanded(e => !e)}
-          title={expanded ? 'Réduire' : 'Agrandir'}
-          style={{
-            background: 'none', border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.4rem',
-            cursor: 'pointer', color: 'var(--text-secondary)',
-            display: 'flex', alignItems: 'center', flexShrink: 0,
-          }}
-        >
-          {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+          {zoomRange && (
+            <button type="button" onClick={() => setZoomRange(null)}
+              title="Réinitialiser le zoom (ou double-clic sur le graphique)"
+              style={{
+                display: "flex", alignItems: "center", gap: "0.3rem",
+                padding: "0.3rem 0.6rem", fontSize: "0.78rem", fontWeight: 600,
+                background: "color-mix(in srgb, var(--accent-primary) 10%, transparent)",
+                border: "1px solid var(--accent-primary)", borderRadius: "var(--radius-sm)",
+                color: "var(--accent-primary)", cursor: "pointer",
+              }}
+            >
+              <ZoomIn size={12} />
+              {(zoomRange[0] / 1000).toFixed(1)}–{(zoomRange[1] / 1000).toFixed(1)} km ✕
+            </button>
+          )}
+          <button type="button" onClick={() => setExpanded(e => !e)}
+            title={expanded ? 'Réduire' : 'Agrandir'}
+            style={{
+              background: 'none', border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.4rem',
+              cursor: 'pointer', color: 'var(--text-secondary)',
+              display: 'flex', alignItems: 'center',
+            }}
+          >
+            {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        </div>
 
         <div className="chart-tabs">
           <button type="button" className={`chart-tab ${activeTab === "elevation" ? "active" : ""}`} onClick={() => setActiveTab("elevation")}>Altitude</button>
-          <button type="button" className={`chart-tab ${activeTab === "speed" ? "active" : ""}`} onClick={() => setActiveTab("speed")}>Vitesse</button>
-          {activityType !== 'cycling' && (
+          {activityType === 'cycling' ? (
+            <button type="button" className={`chart-tab ${activeTab === "speed" ? "active" : ""}`} onClick={() => setActiveTab("speed")}>Vitesse</button>
+          ) : (
             <button type="button" className={`chart-tab ${activeTab === "pace" ? "active" : ""}`} onClick={() => setActiveTab("pace")} style={{ color: activeTab === "pace" ? undefined : "var(--color-speed)" }}>Allure</button>
           )}
           {hasHeartRate && (
@@ -391,13 +488,19 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             ref={svgRef}
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
             className="svg-chart"
+            onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
-            onTouchMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseLeave}
+            onTouchMove={handleMouseMove}
             onTouchEnd={handleMouseLeave}
-            style={{ overflow: "visible" }}
+            onDoubleClick={handleDblClick}
+            style={{ overflow: "visible", cursor: selBox ? "col-resize" : "crosshair" }}
           >
             <defs>
+              <clipPath id="chart-clip">
+                <rect x={padding.left} y={padding.top} width={plotWidth} height={plotHeight} />
+              </clipPath>
               <linearGradient id="ele-gradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-ele)" stopOpacity="0.4" />
                 <stop offset="100%" stopColor="var(--color-ele)" stopOpacity="0.0" />
@@ -420,7 +523,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
               </linearGradient>
             </defs>
 
-            {/* Y axis — single series */}
+            {/* Y axis */}
             {activeTab !== 'dual' && yTicks.map((tick, idx) => (
               <g key={`y-${idx}`}>
                 <line x1={padding.left} y1={tick.y} x2={padding.left + plotWidth} y2={tick.y} className="chart-grid-line" />
@@ -428,7 +531,6 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
               </g>
             ))}
 
-            {/* Y axes — dual */}
             {activeTab === 'dual' && dualData && (
               <>
                 {dualData.paceTicks.map((tick, i) => (
@@ -455,26 +557,41 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             <line x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} className="chart-axis-line" />
             <text x={padding.left + plotWidth / 2} y={padding.top + plotHeight + 35} className="chart-text" textAnchor="middle" style={{ fontWeight: 600 }}>Distance (km)</text>
 
-            {/* Single-series chart */}
+            {/* Chart paths (clipped) */}
             {activeTab !== 'dual' && (
-              <>
+              <g clipPath="url(#chart-clip)">
                 <path d={chartPaths.area} className={`chart-area-${chartParams.colorClass}`} />
                 <path d={chartPaths.line} className={`chart-line-${chartParams.colorClass}`} />
-              </>
+              </g>
             )}
 
-            {/* Dual-axis chart */}
             {activeTab === 'dual' && dualData && (
-              <>
+              <g clipPath="url(#chart-clip)">
                 <path d={dualData.hrPaths.area} className="chart-area-hr" opacity={0.5} />
                 <path d={dualData.hrPaths.line} className="chart-line-hr" />
                 <path d={dualData.pacePaths.line} className="chart-line-speed" strokeDasharray="6 3" />
-              </>
+              </g>
+            )}
+
+            {/* Drag selection rectangle */}
+            {selBox && (
+              <rect
+                x={selBox.x1}
+                y={padding.top}
+                width={selBox.x2 - selBox.x1}
+                height={plotHeight}
+                fill="var(--accent-primary)"
+                fillOpacity={0.15}
+                stroke="var(--accent-primary)"
+                strokeWidth={1}
+                strokeOpacity={0.5}
+              />
             )}
 
             {/* Hover overlay */}
-            {hoveredPoint && (() => {
+            {hoveredPoint && !selBox && (() => {
               const cx = getX(hoveredPoint.distFromStart);
+              if (cx < padding.left || cx > padding.left + plotWidth) return null;
               let cy: number;
               if (activeTab === 'dual' && dualData) {
                 cy = dualData.getYH(hoveredPoint.hr ?? limits.maxHr);
@@ -511,8 +628,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
                 valLabel = `${val.toFixed(activeTab === 'hr' ? 0 : 1)}${chartParams.unit}`;
               }
 
-              // Build extra info line (pace + grade, when relevant)
-              const showPaceLine = activityType !== 'cycling' && activeTab !== 'pace' && activeTab !== 'dual' && hoveredPoint.speed && hoveredPoint.speed > 0.2;
+              const showPaceLine = activityType !== 'cycling' && activeTab !== 'pace' && activeTab !== 'dual' && activeTab !== 'cardiac' && hoveredPoint.speed && hoveredPoint.speed > 0.2;
               const paceExtra = showPaceLine ? fmtPace(1000 / hoveredPoint.speed!) + ' /km' : null;
               const gradeExtra = hoveredPoint.grade !== null ? `${hoveredPoint.grade > 0 ? '+' : ''}${hoveredPoint.grade}%` : null;
 
@@ -558,7 +674,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
         backgroundColor: "var(--bg-primary)", padding: "0.5rem 1rem",
         borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", fontSize: "0.85rem",
       }}>
-        {hoveredPoint ? (
+        {hoveredPoint && !selBox ? (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
               <Eye size={14} style={{ color: "var(--text-secondary)" }} />
@@ -588,7 +704,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           </>
         ) : (
           <div style={{ color: "var(--text-tertiary)", textAlign: "center", width: "100%", fontStyle: "italic" }}>
-            Survolez le graphique ou le tracé de la carte pour inspecter les données point par point
+            {selBox
+              ? "Relâchez pour zoomer sur la sélection"
+              : "Glissez pour zoomer · Double-clic pour réinitialiser · Survolez pour inspecter"}
           </div>
         )}
       </div>

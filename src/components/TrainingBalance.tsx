@@ -60,12 +60,13 @@ interface TooltipState {
 
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
+  const [viewDays, setViewDays] = useState<30 | 90>(30);
 
   if (history.length === 0) return null;
 
   const { label: tsbLbl, color: tsbColor } = tsbLabel(tsb.tsb);
   const { label: ctlLbl, color: ctlColor } = ctlLabel(tsb.ctl);
-  const data = tsb.chartData;
+  const data = tsb.chartData.slice(-viewDays);
 
   const ML = 36, MT = 8, MB = 22, MR = 8;
   const VW = 560, VH = 140;
@@ -111,6 +112,27 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           <span>Charge d'entraînement</span>
         </h3>
         <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+          {/* Toggle 1 mois / 3 mois */}
+          <div style={{
+            display: "flex", gap: "2px",
+            background: "var(--bg-primary)", padding: "2px",
+            borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)",
+          }}>
+            {([30, 90] as const).map(d => (
+              <button key={d} type="button"
+                onClick={() => { setViewDays(d); setTooltip(null); }}
+                style={{
+                  padding: "0.15rem 0.5rem", fontSize: "0.75rem", fontWeight: 600,
+                  borderRadius: "calc(var(--radius-sm) - 2px)", border: "none", cursor: "pointer",
+                  background: viewDays === d ? "var(--accent-primary)" : "transparent",
+                  color: viewDays === d ? "#fff" : "var(--text-secondary)",
+                  transition: "all 0.15s",
+                }}
+              >
+                {d === 30 ? "1 mois" : "3 mois"}
+              </button>
+            ))}
+          </div>
           <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
             {history.length} séance{history.length > 1 ? 's' : ''}
           </span>
