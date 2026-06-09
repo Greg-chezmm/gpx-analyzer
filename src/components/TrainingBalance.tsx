@@ -55,99 +55,7 @@ function fmtPace(sPerKm: number): string {
 
 interface TooltipState {
   entries: TrainingEntry[];
-  svgX: number;   // SVG coord — used for the vertical guide highlight
-  anchorX: number; // clientX — for HTML tooltip positioning
-  anchorY: number; // clientY — for HTML tooltip positioning
-}
-
-const TT_WIDTH = 200; // px, fixed-width HTML tooltip
-
-function HtmlTooltip({ tooltip }: { tooltip: TooltipState }) {
-  const { entries, anchorX, anchorY } = tooltip;
-  if (entries.length === 0) return null;
-
-  const isMulti = entries.length > 1;
-  const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entries[0].date));
-
-  const blocks = entries.map(e => {
-    const title = e.name.length > 28 ? e.name.slice(0, 26) + '…' : e.name;
-    const typeLabel = e.activityType === 'cycling' ? '🚴 Vélo' : e.activityType === 'running' ? '🏃 Course' : '';
-    const details: string[] = [];
-    if (e.distance && e.duration) details.push(`${(e.distance / 1000).toFixed(1)} km · ${fmtDur(e.duration)}`);
-    if (e.elevationGain && e.elevationGain > 0) details.push(`D+ ${Math.round(e.elevationGain)} m`);
-    if (e.activityType === 'cycling' && e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
-    else if (e.avgPace) details.push(`Allure ${fmtPace(e.avgPace)} /km`);
-    else if (e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
-    if (e.avgHeartRate) details.push(`FC moy. ${e.avgHeartRate} bpm`);
-    details.push(`TRIMP ${e.trimp.toFixed(0)}`);
-    return { title, typeLabel, details };
-  });
-
-  // Estimate height to decide above vs below
-  const estH = 28 + (isMulti ? 22 : 0) + entries.length * 88 + Math.max(0, entries.length - 1) * 10;
-  const HEADER_CLEARANCE = 70; // sticky header ≈ 64px
-  const spaceAbove = anchorY - HEADER_CLEARANCE;
-  const showBelow = spaceAbove < estH + 8;
-
-  const left = Math.max(8, Math.min(anchorX - TT_WIDTH / 2, window.innerWidth - TT_WIDTH - 8));
-  const rawTop = showBelow ? anchorY + 10 : anchorY - 10;
-  const top = showBelow
-    ? Math.min(rawTop, window.innerHeight - estH - 8)   // clamp bottom
-    : Math.max(HEADER_CLEARANCE, rawTop - estH);         // clamp top
-
-  return (
-    <div style={{
-      position: 'fixed',
-      left,
-      top,
-      zIndex: 10000,
-      width: TT_WIDTH,
-      background: 'var(--bg-secondary)',
-      border: '1px solid var(--border-color)',
-      borderRadius: '6px',
-      padding: '7px 9px',
-      pointerEvents: 'none',
-      boxShadow: 'var(--shadow-lg)',
-      fontSize: '0.7rem',
-      lineHeight: 1.45,
-      boxSizing: 'border-box',
-    }}>
-      {/* Multi-session date header */}
-      {isMulti && (
-        <div style={{ fontWeight: 700, fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-          {dateStr} · {entries.length} séances
-        </div>
-      )}
-
-      {blocks.map((b, idx) => (
-        <React.Fragment key={idx}>
-          {idx > 0 && (
-            <div style={{ borderTop: '1px solid var(--border-color)', margin: '5px 0' }} />
-          )}
-          {/* Name */}
-          <div style={{ fontWeight: 700, fontSize: '0.72rem', color: 'var(--text-primary)', marginBottom: '1px' }}>
-            {b.title}
-          </div>
-          {/* Date + type (single entry only) */}
-          {!isMulti && (
-            <div style={{ color: 'var(--text-tertiary)', marginBottom: '2px' }}>
-              {dateStr}{b.typeLabel ? ` · ${b.typeLabel}` : ''}
-            </div>
-          )}
-          {/* Type badge (multi entry) */}
-          {isMulti && b.typeLabel && (
-            <div style={{ color: 'var(--text-tertiary)', marginBottom: '2px', fontSize: '0.66rem' }}>
-              {b.typeLabel}
-            </div>
-          )}
-          {/* Detail lines */}
-          {b.details.map((line, li) => (
-            <div key={li} style={{ color: 'var(--text-secondary)' }}>{line}</div>
-          ))}
-        </React.Fragment>
-      ))}
-    </div>
-  );
+  svgX: number;
 }
 
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
@@ -257,7 +165,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             return (
               <g key={d.date}
                 style={{ cursor: 'pointer' }}
-                onMouseEnter={(e) => setTooltip({ entries: d.entries, svgX: cx, anchorX: e.clientX, anchorY: e.clientY })}
+                onMouseEnter={() => setTooltip({ entries: d.entries, svgX: cx })}
               >
                 {/* Vertical guide line — brightens on hover */}
                 <line
@@ -289,8 +197,52 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
         </svg>
       )}
 
-      {/* HTML tooltip — position:fixed breaks out of any SVG/card stacking context */}
-      {tooltip && <HtmlTooltip tooltip={tooltip} />}
+      {/* Panneau de détail inline — s'affiche sous le graphique au survol d'un dot */}
+      {tooltip && tooltip.entries.length > 0 && (() => {
+        const entries = tooltip.entries;
+        const isMulti = entries.length > 1;
+        const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entries[0].date));
+        return (
+          <div style={{
+            marginTop: '0.5rem',
+            padding: '8px 12px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '6px',
+            fontSize: '0.72rem',
+            lineHeight: 1.5,
+          }}>
+            <div style={{ fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+              {dateStr}{isMulti ? ` · ${entries.length} séances` : ''}
+            </div>
+            {entries.map((e, idx) => {
+              const typeLabel = e.activityType === 'cycling' ? '🚴 Vélo' : e.activityType === 'running' ? '🏃 Course' : '';
+              const details: string[] = [];
+              if (e.distance && e.duration) details.push(`${(e.distance / 1000).toFixed(1)} km · ${fmtDur(e.duration)}`);
+              if (e.elevationGain && e.elevationGain > 0) details.push(`D+ ${Math.round(e.elevationGain)} m`);
+              if (e.activityType === 'cycling' && e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
+              else if (e.avgPace) details.push(`Allure ${fmtPace(e.avgPace)} /km`);
+              else if (e.avgSpeed) details.push(`Vitesse ${e.avgSpeed.toFixed(1)} km/h`);
+              if (e.avgHeartRate) details.push(`FC moy. ${e.avgHeartRate} bpm`);
+              details.push(`TRIMP ${e.trimp.toFixed(0)}`);
+              return (
+                <React.Fragment key={idx}>
+                  {idx > 0 && <div style={{ borderTop: '1px solid var(--border-color)', margin: '4px 0' }} />}
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                      {e.name.length > 40 ? e.name.slice(0, 38) + '…' : e.name}
+                    </span>
+                    {typeLabel && <span style={{ color: 'var(--text-tertiary)' }}>{typeLabel}</span>}
+                    {details.map((d, li) => (
+                      <span key={li} style={{ color: 'var(--text-secondary)' }}>{d}</span>
+                    ))}
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Legend */}
       <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap", marginTop: "0.5rem" }}>
