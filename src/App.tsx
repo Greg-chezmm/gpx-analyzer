@@ -39,7 +39,7 @@ import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./component
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { generateSummary } from "./utils/generateSummary";
 import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
-import { downloadGPX } from "./utils/gpxExporter";
+import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 
 import {
   Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
@@ -306,6 +306,11 @@ function App() {
       setActivity(merged);
       setMergeNotice(info);
       setSavedToDrive(false);
+      // rawFileData devient le GPX fusionné — Drive sauvegarde l'activité complète
+      const mergedGpx = exportToGPX(merged, merged.fitLaps ?? null);
+      setRawFileData(mergedGpx);
+      const mergedFileName = merged.name.replace(/[^a-zA-Z0-9_\-.]/g, '_') + '.gpx';
+      setFileName(mergedFileName);
     } catch (err) {
       alert(`Impossible de fusionner : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     } finally {
