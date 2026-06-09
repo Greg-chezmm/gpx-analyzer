@@ -1,7 +1,6 @@
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 import type { Sex } from '../hooks/useUserSettings';
 import { karvonenBounds } from './session';
-import { gapFactor } from './splits';
 
 // ─── Cardiac Drift ───────────────────────────────────────────────────────────
 
