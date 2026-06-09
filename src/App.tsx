@@ -38,10 +38,11 @@ import { AthleteSettingsButton } from "./components/AthleteSettings";
 import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./components/DriveSync";
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { generateSummary } from "./utils/generateSummary";
+import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
 
 import {
   Activity, Timer, TrendingUp, Heart, Trash2, Map as MapIcon,
-  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight,
+  Calendar, Gauge, Sun, Moon, Loader2, Sparkles, ArrowLeftRight, GitMerge, X,
 } from "lucide-react";
 
 const SPLIT_OPTIONS = [
@@ -68,6 +69,8 @@ function App() {
   const [savedToDrive, setSavedToDrive] = useState(false);
   const [customActivityName, setCustomActivityName] = useState<string>('');
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
+  const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
+  const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const skipDriveHistorySync = useRef(false);
@@ -279,6 +282,34 @@ function App() {
     setSplitDistance(1000);
     setRawFileData(null);
     setSavedToDrive(false);
+    setMergeNotice(null);
+    setOverrideActivityType(null);
+    setCustomActivityName('');
+  };
+
+  const handleMergeFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activity) return;
+    setIsLoading(true);
+    try {
+      let second: GPXActivity;
+      if (file.name.toLowerCase().endsWith('.fit')) {
+        const buf = await file.arrayBuffer();
+        second = await parseFIT(buf, file.name.replace(/\.fit$/i, ''));
+      } else {
+        const text = await file.text();
+        second = parseGPX(text, file.name.replace(/\.gpx$/i, ''));
+      }
+      const { activity: merged, info } = mergeActivities(activity, second);
+      setActivity(merged);
+      setMergeNotice(info);
+      setSavedToDrive(false);
+    } catch (err) {
+      alert(`Impossible de fusionner : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const displayName = customActivityName || enrichedActivity?.name || fileName;
@@ -380,16 +411,33 @@ function App() {
             {isDark ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           {activity && (
-            <button type="button" className="btn btn-outline" onClick={handleReset}
-              style={{
-                padding: "0.5rem 1rem", fontSize: "0.9rem",
-                borderColor: "var(--color-hr)", color: "var(--color-hr)",
-                backgroundColor: "rgba(225,29,72,0.02)",
-              }}
-            >
-              <Trash2 size={15} />
-              <span className="btn-text">Fermer le fichier</span>
-            </button>
+            <>
+              <button type="button" className="btn btn-outline"
+                onClick={() => mergeInputRef.current?.click()}
+                style={{ padding: "0.5rem 1rem", fontSize: "0.9rem" }}
+                title="Ajouter un second segment (batterie épuisée)"
+              >
+                <GitMerge size={15} />
+                <span className="btn-text">Ajouter segment</span>
+              </button>
+              <input
+                ref={mergeInputRef}
+                type="file"
+                accept=".fit,.gpx"
+                style={{ display: "none" }}
+                onChange={handleMergeFile}
+              />
+              <button type="button" className="btn btn-outline" onClick={handleReset}
+                style={{
+                  padding: "0.5rem 1rem", fontSize: "0.9rem",
+                  borderColor: "var(--color-hr)", color: "var(--color-hr)",
+                  backgroundColor: "rgba(225,29,72,0.02)",
+                }}
+              >
+                <Trash2 size={15} />
+                <span className="btn-text">Fermer le fichier</span>
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -436,6 +484,26 @@ function App() {
           </div>
         ) : (
           <>
+            {/* Merge notice */}
+            {mergeNotice && (
+              <div style={{
+                display: "flex", alignItems: "center", gap: "0.75rem",
+                padding: "0.6rem 1rem", marginBottom: "0.75rem",
+                background: "rgba(99,102,241,0.08)", border: "1px solid rgba(99,102,241,0.35)",
+                borderRadius: "var(--radius-md)", fontSize: "0.85rem", color: "var(--text-secondary)",
+              }}>
+                <GitMerge size={15} style={{ color: "var(--accent-primary)", flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>
+                  <strong style={{ color: "var(--text-primary)" }}>Segments fusionnés</strong>
+                  {" — "}gap GPS {Math.round(mergeNotice.gapMeters)} m
+                  {mergeNotice.gapSeconds > 0 && `, pause ${formatDuration(Math.round(mergeNotice.gapSeconds))}`}
+                </span>
+                <button onClick={() => setMergeNotice(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.15rem", display: "flex" }}>
+                  <X size={14} />
+                </button>
+              </div>
+            )}
+
             {/* Activity title + session badge */}
             <div className="card animate-slide-up activity-header">
               <div style={{ flex: 1, minWidth: 0 }}>
