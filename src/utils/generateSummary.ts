@@ -251,7 +251,7 @@ export function generateSummary(opts: SummaryOptions): string {
       if (keyHM)  push(`• Prédiction semi : ${fmtTime(keyHM.timeS)}`);
       if (keyMA)  push(`• Prédiction marathon : ${fmtTime(keyMA.timeS)}`);
       const easyPace = paces.find(p => p.label === "Allure E (endurance)");
-      if (easyPace) push(`• Allure endurance cible : ${easyPace.pace} /km`);
+      if (easyPace) push(`• Allure endurance cible : ${formatPace(easyPace.minPaceSecPerKm)}–${formatPace(easyPace.maxPaceSecPerKm)} /km`);
     }
     if (drift) {
       const severity = drift.decoupling < 5 ? "faible" : drift.decoupling < 9 ? "modérée" : "élevée";

@@ -28,6 +28,7 @@ export type DriveStatus = 'unavailable' | 'disconnected' | 'connecting' | 'conne
 
 export interface DriveHandle {
   status: DriveStatus;
+  wasAuthorized: boolean;
   history: ActivityIndexEntry[];
   isSaving: boolean;
   signIn(): void;
@@ -52,6 +53,8 @@ export function useGoogleDrive(): DriveHandle {
   const [history, setHistory] = useState<ActivityIndexEntry[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const clientRef = useRef<{ requestAccessToken(overrides?: { prompt?: string }): void } | null>(null);
+  // Persiste à travers les refreshs : true tant que l'utilisateur n'a pas explicitement déconnecté
+  const [wasAuthorized] = useState(() => localStorage.getItem(AUTHORIZED_KEY) === '1');
 
   useEffect(() => {
     if (!CLIENT_ID) return;
@@ -64,8 +67,8 @@ export function useGoogleDrive(): DriveHandle {
         scope: SCOPE,
         callback: (resp) => {
           if (!resp.access_token) {
-            // Silent auth failed (no active session or first use)
-            localStorage.removeItem(AUTHORIZED_KEY);
+            // Reconnexion silencieuse bloquée (popup-blocker ou cookies tiers)
+            // On ne supprime PAS la clé — l'utilisateur pourra reconnecter en un clic
             setStatus('disconnected');
             return;
           }
@@ -108,7 +111,9 @@ export function useGoogleDrive(): DriveHandle {
   const signIn = useCallback(() => {
     if (!clientRef.current) return;
     setStatus('connecting');
-    clientRef.current.requestAccessToken({ prompt: 'consent' });
+    // Si déjà autorisé, pas besoin de redemander le consentement — prompt vide = popup rapide sans écran de consentement
+    const prompt = localStorage.getItem(AUTHORIZED_KEY) === '1' ? '' : 'consent';
+    clientRef.current.requestAccessToken({ prompt });
   }, []);
 
   const signOut = useCallback(() => {
@@ -166,5 +171,5 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
+  return { status, wasAuthorized, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
 }

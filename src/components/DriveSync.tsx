@@ -31,13 +31,21 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
   if (drive.status === 'unavailable') return null;
 
   if (drive.status === 'disconnected' || drive.status === 'error') {
+    const isReconnect = drive.wasAuthorized;
     return (
       <button type="button" className="btn btn-outline" onClick={drive.signIn}
-        title="Connecter Google Drive"
-        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}
+        title={isReconnect ? "Reconnecter Google Drive" : "Connecter Google Drive"}
+        style={{
+          padding: '0.5rem 1rem', fontSize: '0.9rem',
+          ...(isReconnect ? {
+            borderColor: '#f59e0b',
+            color: '#f59e0b',
+            backgroundColor: 'rgba(245,158,11,0.08)',
+          } : {}),
+        }}
       >
-        <Cloud size={15} />
-        <span className="btn-text">Drive</span>
+        {isReconnect ? <CloudOff size={15} /> : <Cloud size={15} />}
+        <span className="btn-text">{isReconnect ? 'Reconnecter' : 'Drive'}</span>
       </button>
     );
   }
