@@ -27,6 +27,7 @@ import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { TrainingBalance } from "./components/TrainingBalance";
+import { ProgressChart } from "./components/ProgressChart";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -722,6 +723,7 @@ function App() {
 
             {/* TSB / CTL / ATL — historique multi-séances */}
             <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
+            <ProgressChart history={history} />
 
             {/* Bilan FIT — TE, VO2max montre, récupération, EPOC, feeling, zones */}
             {enrichedActivity!.fitSummary && (

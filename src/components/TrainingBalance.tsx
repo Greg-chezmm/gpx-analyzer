@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Activity, Trash2 } from "lucide-react";
+import { Activity, Trash2, AlertTriangle, CheckCircle } from "lucide-react";
 import type { TSBResult } from "../utils/trainingMetrics";
 import type { TrainingEntry } from "../hooks/useTrainingHistory";
 
@@ -58,12 +58,62 @@ interface TooltipState {
   svgX: number;
 }
 
+interface Alert {
+  level: 'warning' | 'danger' | 'ok';
+  message: string;
+  detail: string;
+}
+
+function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: Array<{ trimp: number; ctl: number }> }): Alert[] {
+  const alerts: Alert[] = [];
+
+  // TSB critique
+  if (tsb.tsb < -30) {
+    alerts.push({ level: 'danger', message: 'Surmenage probable', detail: `TSB ${tsb.tsb.toFixed(0)} — repos avant toute séance intense` });
+  } else if (tsb.tsb < -15) {
+    alerts.push({ level: 'warning', message: 'Fatigue accumulée', detail: `TSB ${tsb.tsb.toFixed(0)} — surveiller les signes de surcharge` });
+  }
+
+  // Ratio ATL/CTL (charge aiguë/chronique)
+  if (tsb.ctl > 0) {
+    const ratio = tsb.atl / tsb.ctl;
+    if (ratio > 1.5) {
+      alerts.push({ level: 'danger', message: 'Ratio ATL/CTL élevé', detail: `${ratio.toFixed(2)} — charge aiguë très supérieure à la forme chronique` });
+    } else if (ratio > 1.3) {
+      alerts.push({ level: 'warning', message: 'Charge aiguë importante', detail: `Ratio ATL/CTL ${ratio.toFixed(2)} — risque de blessure augmenté` });
+    }
+  }
+
+  // Ramp rate sur 7 jours
+  const data = tsb.chartData;
+  if (data.length >= 8) {
+    const ramp = (data[data.length - 1].ctl) - (data[data.length - 8].ctl);
+    if (ramp > 7) {
+      alerts.push({ level: 'warning', message: 'Progression CTL rapide', detail: `+${ramp.toFixed(1)} pts cette semaine — augmenter plus progressivement` });
+    }
+  }
+
+  // Monotonie (Banister) sur 7 jours
+  if (data.length >= 7) {
+    const week = data.slice(-7).map(d => d.trimp);
+    const mean = week.reduce((a, b) => a + b, 0) / 7;
+    const sd = Math.sqrt(week.reduce((a, v) => a + (v - mean) ** 2, 0) / 7);
+    const mono = sd > 0 ? mean / sd : 0;
+    if (mono > 2) {
+      alerts.push({ level: 'warning', message: 'Monotonie élevée', detail: `Indice ${mono.toFixed(1)} — variez l'intensité de vos séances` });
+    }
+  }
+
+  return alerts;
+}
+
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [viewDays, setViewDays] = useState<30 | 90>(30);
 
   if (history.length === 0) return null;
 
+  const alerts = computeAlerts(tsb);
   const { label: tsbLbl, color: tsbColor } = tsbLabel(tsb.tsb);
   const { label: ctlLbl, color: ctlColor } = ctlLabel(tsb.ctl);
   const data = tsb.chartData.slice(-viewDays);
@@ -143,6 +193,43 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           </button>
         </div>
       </div>
+
+      {/* Alertes */}
+      {alerts.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
+          {alerts.map((a, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'flex-start', gap: '0.6rem',
+              padding: '0.6rem 0.85rem',
+              borderRadius: 'var(--radius-sm)',
+              background: a.level === 'danger' ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)',
+              border: `1px solid ${a.level === 'danger' ? '#ef444440' : '#f59e0b40'}`,
+            }}>
+              <AlertTriangle size={14} style={{ color: a.level === 'danger' ? '#ef4444' : '#f59e0b', flexShrink: 0, marginTop: '1px' }} />
+              <div>
+                <span style={{ fontWeight: 700, fontSize: '0.82rem', color: a.level === 'danger' ? '#ef4444' : '#f59e0b' }}>
+                  {a.message}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginLeft: '0.5rem' }}>
+                  {a.detail}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {alerts.length === 0 && tsb.ctl > 5 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.5rem',
+          padding: '0.45rem 0.85rem', marginBottom: '1rem',
+          borderRadius: 'var(--radius-sm)',
+          background: 'rgba(52,211,153,0.07)', border: '1px solid #34d39930',
+          fontSize: '0.8rem', color: '#34d399', fontWeight: 600,
+        }}>
+          <CheckCircle size={13} />
+          Charge équilibrée — aucun indicateur de surcharge détecté
+        </div>
+      )}
 
       {/* KPI row */}
       <div style={{ display: "flex", gap: "1.5rem", justifyContent: "center", flexWrap: "wrap", marginBottom: "1.25rem" }}>

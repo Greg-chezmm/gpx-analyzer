@@ -177,7 +177,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
         <History size={14} /> Activités récentes · Drive
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-        {drive.history.slice(0, 8).map((entry, i) => {
+        {[...drive.history].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8).map((entry, i) => {
           const key = entryKey(entry, i);
           const isConfirming = confirmKey === key;
           const isDeleting = deletingKey === key;
@@ -380,7 +380,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {drive.history.map((entry, i) => {
+              {[...drive.history].sort((a, b) => b.date.localeCompare(a.date)).map((entry, i) => {
                 const key = entryKey(entry, i);
                 const isConfirming = confirmKey === key;
                 const isDeleting = deletingKey === key;
