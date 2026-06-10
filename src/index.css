@@ -29,6 +29,8 @@
   --color-cad:         #7c3aed;
   --color-cad-light:   #f5f3ff;
   --color-cardiac:     #a78bfa;
+  --color-power:       #f59e0b;
+  --color-power-light: #fffbeb;
   --color-time:        #ea580c;
   --color-time-light:  #fff7ed;
 
@@ -594,6 +596,8 @@ h1, h2, h3, h4, h5, h6 {
 .chart-area-cad       { fill: url(#cad-gradient); }
 .chart-line-cardiac   { stroke: var(--color-cardiac); stroke-width: 2.5; fill: none; }
 .chart-area-cardiac   { fill: url(#cardiac-gradient); }
+.chart-line-power     { stroke: var(--color-power);   stroke-width: 2.5; fill: none; }
+.chart-area-power     { fill: url(#power-gradient); }
 
 /* ═══════════════════════════════════════════════════════════════
    17. SPLITS TABLE

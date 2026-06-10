@@ -28,6 +28,8 @@ import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { TrainingBalance } from "./components/TrainingBalance";
 import { PowerMetrics } from "./components/PowerMetrics";
+import { PowerZones } from "./components/PowerZones";
+import { PaceZones } from "./components/PaceZones";
 import { VO2maxEstimate } from "./components/VO2maxEstimate";
 import { VDOTPredictor } from "./components/VDOTPredictor";
 import { SplitsBars } from "./components/SplitsBars";
@@ -230,6 +232,16 @@ function App() {
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
     [enrichedActivity]
+  );
+
+  const hasPower = useMemo(
+    () => enrichedActivity?.points.some(p => p.power !== null && p.power > 0) ?? false,
+    [enrichedActivity]
+  );
+
+  const intensityFactor = useMemo(
+    () => (normalizedPower && ftp > 0 ? normalizedPower / ftp : null),
+    [normalizedPower, ftp]
   );
 
   const vo2maxEst = useMemo(
@@ -583,12 +595,14 @@ function App() {
             {/* Secondary KPIs */}
             {hasHeartRate && (
               <div className="secondary-kpis animate-slide-up">
-                <div className="card kpi-item">
-                  <span className="kpi-label">Allure moyenne</span>
-                  <strong className="kpi-value" style={{ color: "var(--accent-secondary)" }}>
-                    {formatPace(enrichedActivity!.avgPace)} /km
-                  </strong>
-                </div>
+                {enrichedActivity!.activityType !== 'cycling' && (
+                  <div className="card kpi-item">
+                    <span className="kpi-label">Allure moyenne</span>
+                    <strong className="kpi-value" style={{ color: "var(--accent-secondary)" }}>
+                      {formatPace(enrichedActivity!.avgPace)} /km
+                    </strong>
+                  </div>
+                )}
                 {cardiacPaceResult?.avgCardiacPace != null && enrichedActivity!.activityType !== 'cycling' && (
                   <div className="card kpi-item">
                     <span className="kpi-label" title="Allure normalisée à 65% de réserve cardiaque">Allure cardiaque</span>
@@ -609,6 +623,14 @@ function App() {
                     {(enrichedActivity!.maxSpeed * 3.6).toFixed(1)} km/h
                   </strong>
                 </div>
+                {intensityFactor !== null && enrichedActivity!.activityType === 'cycling' && (
+                  <div className="card kpi-item">
+                    <span className="kpi-label" title="Puissance normalisée / FTP">IF (Intensity Factor)</span>
+                    <strong className="kpi-value" style={{ color: "var(--color-power, #f59e0b)" }}>
+                      {intensityFactor.toFixed(2)}
+                    </strong>
+                  </div>
+                )}
                 {enrichedActivity!.avgCadence !== null && (
                   <div className="card kpi-item">
                     <span className="kpi-label">Cadence moyenne</span>
@@ -641,6 +663,7 @@ function App() {
                     onHoverPointChange={setHoveredPointIndex}
                     hasHeartRate={hasHeartRate}
                     hasCadence={enrichedActivity!.avgCadence !== null}
+                    hasPower={hasPower}
                     activityType={enrichedActivity!.activityType}
                     fcMax={fcMax}
                     fcRest={fcRest}
@@ -660,6 +683,25 @@ function App() {
                 onFcRestChange={setFcRest}
               />
               </div>
+            )}
+
+            {/* Zones d'allure % VMA (running uniquement) */}
+            {enrichedActivity!.activityType !== 'cycling' && (
+              <PaceZones
+                points={enrichedActivity!.points}
+                vma={vma}
+                onVmaChange={setVma}
+              />
+            )}
+
+            {/* Zones de puissance Coggan (vélo + puissance) */}
+            {hasPower && enrichedActivity!.activityType === 'cycling' && (
+              <PowerZones
+                points={enrichedActivity!.points}
+                ftp={ftp}
+                onFtpChange={setFtp}
+                weight={weight}
+              />
             )}
 
             {/* Scatter plot Allure/Vitesse vs FC */}
@@ -774,12 +816,15 @@ function App() {
               efforts: intervals.filter(iv => iv.type === "effort"),
               recoveries: intervals.filter(iv => iv.type === "recovery"),
             } : null,
-            fcMax, fcRest, vma, weight, birthYear,
+            hillRepeats,
+            fcMax, fcRest, vma, ftp, weight, birthYear,
             sessionType: session?.type ?? null,
             trimp,
             fitSummary: enrichedActivity.fitSummary ?? null,
             vo2max: vo2maxEst,
             drift,
+            normalizedPower,
+            intensityFactor,
           })}
           onClose={() => setShowAISummary(false)}
         />

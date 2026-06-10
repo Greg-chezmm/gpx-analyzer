@@ -8,12 +8,13 @@ interface ChartViewerProps {
   onHoverPointChange: (index: number | null) => void;
   hasHeartRate: boolean;
   hasCadence: boolean;
+  hasPower?: boolean;
   activityType: 'running' | 'cycling' | 'unknown';
   fcMax?: number;
   fcRest?: number;
 }
 
-type ChartType = "elevation" | "speed" | "pace" | "hr" | "cad" | "dual" | "cardiac";
+type ChartType = "elevation" | "speed" | "pace" | "hr" | "cad" | "dual" | "cardiac" | "power";
 
 interface ChartParams {
   getValue: (pt: GPXTrackPoint) => number;
@@ -41,11 +42,15 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   onHoverPointChange,
   hasHeartRate,
   hasCadence,
+  hasPower = false,
   activityType,
   fcMax = 195,
   fcRest = 52,
 }) => {
-  const [activeTab, setActiveTab] = useState<ChartType>("elevation");
+  const defaultTab = (type: typeof activityType): ChartType =>
+    type === 'cycling' ? 'speed' : type === 'running' ? 'pace' : 'elevation';
+
+  const [activeTab, setActiveTab] = useState<ChartType>(() => defaultTab(activityType));
   const [expanded, setExpanded] = useState(false);
   const [zoomRange, setZoomRange] = useState<[number, number] | null>(null);
   const [selBox, setSelBox] = useState<{ x1: number; x2: number } | null>(null);
@@ -58,12 +63,13 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const plotWidth = svgWidth - padding.left - padding.right;
   const plotHeight = svgHeight - padding.top - padding.bottom;
 
-  // Reset zoom when activity changes
+  // Reset zoom + tab when activity changes (new file or type toggle)
   useEffect(() => {
     setZoomRange(null);
     setSelBox(null);
     dragAnchorX.current = null;
-  }, [points]);
+    setActiveTab(defaultTab(activityType));
+  }, [points, activityType]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!expanded) return;
@@ -73,7 +79,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   }, [expanded]);
 
   const limits = useMemo(() => {
-    if (points.length === 0) return { maxDist: 0, minEle: 0, maxEle: 0, maxSpeed: 0, minHr: 0, maxHr: 0, maxCad: 0, minPace: 180, maxPace: 420, minCardiacPace: 60, maxCardiacPace: 900 };
+    if (points.length === 0) return { maxDist: 0, minEle: 0, maxEle: 0, maxSpeed: 0, minHr: 0, maxHr: 0, maxCad: 0, minPace: 180, maxPace: 420, minCardiacPace: 60, maxCardiacPace: 900, maxPower: 400 };
 
     const maxDist = points[points.length - 1].distFromStart;
 
@@ -90,6 +96,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 
     const cads = points.map(p => p.cad).filter((c): c is number => c !== null);
     const maxCad = cads.length > 0 ? Math.max(...cads) : 120;
+
+    const powers = points.map(p => p.power).filter((w): w is number => w !== null && w > 0);
+    const maxPower = powers.length > 0 ? Math.max(...powers) * 1.1 : 400;
 
     const validSpeeds = points.filter(p => p.speed && p.speed > 0.5);
     const paces = validSpeeds.map(p => 1000 / p.speed!);
@@ -123,6 +132,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       maxPace,
       minCardiacPace: Math.max(30, cpLow - 5),
       maxCardiacPace: Math.min(1800, cpHigh + 15),
+      maxPower,
     };
   }, [points, fcMax, fcRest]);
 
@@ -178,10 +188,17 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
           formatY: fmtPace,
         };
       }
+      case "power":
+        return {
+          getValue: (pt) => pt.power ?? 0,
+          label: "Puissance", unit: " W",
+          color: "var(--color-power)", colorClass: "power",
+          yMin: 0, yMax: limits.maxPower,
+        };
       case "dual":
         return {
           getValue: (pt) => pt.hr || 0,
-          label: "Allure + FC", unit: "",
+          label: activityType === 'cycling' ? "Vitesse + FC" : "Allure + FC", unit: "",
           color: "var(--color-hr)", colorClass: "hr",
           yMin: limits.minHr, yMax: limits.maxHr,
         };
@@ -252,7 +269,13 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const dualData = useMemo(() => {
     if (activeTab !== 'dual' || !hasHeartRate || points.length === 0) return null;
 
-    const paceParams: ChartParams = {
+    const isCyclingDual = activityType === 'cycling';
+    const primaryParams: ChartParams = isCyclingDual ? {
+      getValue: (pt) => (pt.speed || 0) * 3.6,
+      label: "Vitesse", unit: " km/h",
+      color: "var(--color-speed)", colorClass: "speed",
+      yMin: 0, yMax: limits.maxSpeed * 3.6,
+    } : {
       getValue: (pt) => (pt.speed && pt.speed > 0.2) ? 1000 / pt.speed : limits.maxPace,
       label: "Allure", unit: " /km",
       color: "var(--color-speed)", colorClass: "speed",
@@ -266,7 +289,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       yMin: limits.minHr, yMax: limits.maxHr,
     };
 
-    const getYP = (v: number) => getY(v, paceParams);
+    const getYP = (v: number) => getY(v, primaryParams);
     const getYH = (v: number) => getY(v, hrParams);
 
     const [zStart, zEnd] = zoomRange ?? [0, limits.maxDist];
@@ -274,12 +297,12 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       ? points.filter(p => p.distFromStart >= zStart && p.distFromStart <= zEnd)
       : points;
     const stride = Math.max(1, Math.floor(visiblePts.length / (expanded ? 600 : 300)));
-    const pacePts: [number, number][] = [];
+    const primaryPts: [number, number][] = [];
     const hrPts: [number, number][] = [];
 
     for (let i = 0; i < visiblePts.length; i += stride) {
       const pt = visiblePts[i];
-      pacePts.push([getX(pt.distFromStart), getYP(paceParams.getValue(pt))]);
+      primaryPts.push([getX(pt.distFromStart), getYP(primaryParams.getValue(pt))]);
       if (pt.hr) hrPts.push([getX(pt.distFromStart), getYH(pt.hr)]);
     }
 
@@ -295,14 +318,18 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
     const step4 = (min: number, max: number) =>
       Array.from({ length: 5 }, (_, i) => min + (max - min) * i / 4);
 
+    const primaryTicks = isCyclingDual
+      ? step4(0, limits.maxSpeed * 3.6).map(v => ({ y: getYP(v), label: `${v.toFixed(0)}` }))
+      : step4(limits.minPace, limits.maxPace).map(v => ({ y: getYP(v), label: fmtPace(v) }));
+
     return {
-      pacePaths: { line: buildLine(pacePts), area: buildArea(pacePts) },
+      pacePaths: { line: buildLine(primaryPts), area: buildArea(primaryPts) },
       hrPaths: { line: buildLine(hrPts), area: buildArea(hrPts) },
-      paceTicks: step4(limits.minPace, limits.maxPace).map(v => ({ y: getYP(v), label: fmtPace(v) })),
+      paceTicks: primaryTicks,
       hrTicks: step4(limits.minHr, limits.maxHr).map(v => ({ y: getYH(v), label: String(Math.round(v)) })),
-      getYP, getYH, paceParams, hrParams,
+      getYP, getYH, primaryParams, hrParams, isCyclingDual,
     };
-  }, [activeTab, points, hasHeartRate, limits, plotHeight, zoomRange, expanded, getX]);
+  }, [activeTab, activityType, points, hasHeartRate, limits, plotHeight, zoomRange, expanded, getX]);
 
   // Convertit les coordonnées écran en unités SVG (viewBox="0 0 600 …" ≠ largeur réelle)
   const toSvgX = (clientX: number, rect: DOMRect) =>
@@ -473,11 +500,16 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
               {activityType === 'cycling' ? 'Cadence (rpm)' : 'Foulée (ppm)'}
             </button>
           )}
-          {hasHeartRate && activityType !== 'cycling' && (
-            <button type="button" className={`chart-tab ${activeTab === "dual" ? "active" : ""}`} onClick={() => setActiveTab("dual")}>Allure + FC</button>
+          {hasHeartRate && (
+            <button type="button" className={`chart-tab ${activeTab === "dual" ? "active" : ""}`} onClick={() => setActiveTab("dual")}>
+              {activityType === 'cycling' ? 'Vitesse + FC' : 'Allure + FC'}
+            </button>
           )}
           {hasHeartRate && activityType !== 'cycling' && (
             <button type="button" className={`chart-tab ${activeTab === "cardiac" ? "active" : ""}`} onClick={() => setActiveTab("cardiac")} style={{ color: activeTab === "cardiac" ? undefined : "var(--color-cardiac)" }}>Allure cardiaque</button>
+          )}
+          {hasPower && activityType === 'cycling' && (
+            <button type="button" className={`chart-tab ${activeTab === "power" ? "active" : ""}`} onClick={() => setActiveTab("power")} style={{ color: activeTab === "power" ? undefined : "var(--color-power)" }}>Puissance</button>
           )}
         </div>
       </div>
@@ -520,6 +552,10 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
               <linearGradient id="cardiac-gradient" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-cardiac)" stopOpacity="0.35" />
                 <stop offset="100%" stopColor="var(--color-cardiac)" stopOpacity="0.0" />
+              </linearGradient>
+              <linearGradient id="power-gradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="var(--color-power)" stopOpacity="0.4" />
+                <stop offset="100%" stopColor="var(--color-power)" stopOpacity="0.0" />
               </linearGradient>
             </defs>
 
@@ -605,10 +641,17 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
 
               let valLabel: string;
               if (activeTab === 'dual') {
-                const paceStr = hoveredPoint.speed && hoveredPoint.speed > 0.2
-                  ? fmtPace(1000 / hoveredPoint.speed) + ' /km'
-                  : '--';
-                valLabel = `${paceStr}  ❤ ${hoveredPoint.hr ?? '--'} bpm`;
+                if (activityType === 'cycling') {
+                  const speedStr = hoveredPoint.speed ? `${(hoveredPoint.speed * 3.6).toFixed(1)} km/h` : '--';
+                  valLabel = `${speedStr}  ❤ ${hoveredPoint.hr ?? '--'} bpm`;
+                } else {
+                  const paceStr = hoveredPoint.speed && hoveredPoint.speed > 0.2
+                    ? fmtPace(1000 / hoveredPoint.speed) + ' /km'
+                    : '--';
+                  valLabel = `${paceStr}  ❤ ${hoveredPoint.hr ?? '--'} bpm`;
+                }
+              } else if (activeTab === 'power') {
+                valLabel = hoveredPoint.power !== null ? `${hoveredPoint.power} W` : '--';
               } else if (activeTab === 'pace') {
                 valLabel = hoveredPoint.speed && hoveredPoint.speed > 0.1
                   ? fmtPace(1000 / hoveredPoint.speed) + ' /km'
@@ -628,7 +671,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
                 valLabel = `${val.toFixed(activeTab === 'hr' ? 0 : 1)}${chartParams.unit}`;
               }
 
-              const showPaceLine = activityType !== 'cycling' && activeTab !== 'pace' && activeTab !== 'dual' && activeTab !== 'cardiac' && hoveredPoint.speed && hoveredPoint.speed > 0.2;
+              const showPaceLine = activityType !== 'cycling' && activeTab !== 'pace' && activeTab !== 'dual' && activeTab !== 'cardiac' && activeTab !== 'power' && hoveredPoint.speed && hoveredPoint.speed > 0.2;
               const paceExtra = showPaceLine ? fmtPace(1000 / hoveredPoint.speed!) + ' /km' : null;
               const gradeExtra = hoveredPoint.grade !== null ? `${hoveredPoint.grade > 0 ? '+' : ''}${hoveredPoint.grade}%` : null;
 
