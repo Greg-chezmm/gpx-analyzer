@@ -9,16 +9,18 @@ interface Props {
   onSave: (newName: string) => void;
 }
 
+/** Formate une date en français (ex. : "07 juin 2025"). */
 function fmtDate(d: Date): string {
   return new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }).format(d);
 }
 
+/** Éditeur inline du nom de l'activité avec chips d'insertion rapide (lieu, date). */
 export function ActivityNameEditor({ name, location, locationLoading, date, onSave }: Props) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(name);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Reset draft when name changes from outside (new activity loaded)
+  // Réinitialise le brouillon si une nouvelle activité est chargée depuis l'extérieur.
   useEffect(() => {
     setDraft(name);
     setEditing(false);
@@ -27,6 +29,7 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
   const startEdit = () => {
     setDraft(name);
     setEditing(true);
+    // setTimeout 0 pour laisser React monter l'input avant le focus.
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -41,6 +44,7 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
     setEditing(false);
   };
 
+  /** Insère un texte (lieu ou date) dans le brouillon, précédé d'un séparateur " · ". */
   const insertChip = (text: string) => {
     const sep = draft.trim() ? ' · ' : '';
     setDraft(prev => prev.trim() + sep + text);
@@ -76,7 +80,7 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1, minWidth: 0, width: '100%' }}>
-      {/* Input + action buttons */}
+      {/* Champ de saisie + boutons Valider / Annuler */}
       <div style={{ display: 'flex', alignItems: 'stretch', gap: '0.4rem', width: '100%' }}>
         <input
           ref={inputRef}
@@ -85,7 +89,7 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
           onKeyDown={handleKey}
           style={{
             flex: 1, padding: '0.5rem 0.65rem',
-            fontSize: '1rem', fontWeight: 700, /* 16px — évite le zoom automatique iOS */
+            fontSize: '1rem', fontWeight: 700, /* 16px minimum — évite le zoom automatique iOS */
             fontFamily: 'var(--font-heading)',
             background: 'var(--bg-primary)', color: 'var(--text-primary)',
             border: '1.5px solid var(--accent-primary)',
@@ -115,7 +119,7 @@ export function ActivityNameEditor({ name, location, locationLoading, date, onSa
         </button>
       </div>
 
-      {/* Chips — insertion rapide lieu / date */}
+      {/* Chips d'insertion rapide : lieu et/ou date */}
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>Insérer :</span>
 

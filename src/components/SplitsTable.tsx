@@ -7,6 +7,7 @@ interface SplitsTableProps {
   activityType: 'running' | 'cycling' | 'unknown';
 }
 
+/** Formate une durée en secondes en "h:mm:ss" ou "m:ss". */
 export const formatDuration = (seconds: number): string => {
   const total = Math.round(seconds);
   const h = Math.floor(total / 3600);
@@ -18,6 +19,7 @@ export const formatDuration = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
+/** Formate une allure en secondes/km en "m:ss", ou "--:--" si invalide. */
 export const formatPace = (secondsPerKm: number): string => {
   if (secondsPerKm === 0 || isNaN(secondsPerKm) || !isFinite(secondsPerKm)) return "--:--";
   const total = Math.round(secondsPerKm);
@@ -26,51 +28,57 @@ export const formatPace = (secondsPerKm: number): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
+/**
+ * Tableau des splits au kilomètre — affiche les métriques disponibles (FC, cadence,
+ * puissance, GAP, EF) et exporte en TSV pour Excel / Google Sheets.
+ */
 export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }) => {
   const [copied, setCopied] = useState(false);
 
   if (splits.length === 0) return null;
 
-  // Check which extended columns are present in the parsed GPX activity splits
+  // Détection des colonnes optionnelles présentes dans les données parsées
   const hasHeartRate = splits.some(s => s.avgHeartRate !== null);
-  const hasCadence = splits.some(s => s.avgCadence !== null);
-  const hasPower = splits.some(s => s.avgPower !== null);
-  const hasGrade = splits.some(s => s.avgGrade !== null);
-  const hasGAP = splits.some(s => s.avgGAP !== null);
-  const hasEF = splits.some(s => s.ef !== null);
+  const hasCadence   = splits.some(s => s.avgCadence !== null);
+  const hasPower     = splits.some(s => s.avgPower !== null);
+  const hasGrade     = splits.some(s => s.avgGrade !== null);
+  const hasGAP       = splits.some(s => s.avgGAP !== null);
+  const hasEF        = splits.some(s => s.ef !== null);
 
-  const isCycling = activityType === 'cycling';
+  const isCycling   = activityType === 'cycling';
   const cadenceUnit = isCycling ? 'rpm' : 'ppm';
+  // Cadence brute GPX = demi-cycles (foulées/min divisé par 2) pour la course
   const cadenceValue = (raw: number) => isCycling ? raw : raw * 2;
 
-  // Generate Tab-Separated Values (TSV) format for spreadsheet copy-pasting
+  /** Génère le TSV et le place dans le presse-papier. */
   const handleCopyTable = () => {
     let tsv = `Km\tTemps\t${isCycling ? 'Vitesse moy. (km/h)' : 'Allure (min/km)'}\tVitesse moy. (km/h)\tV. max (km/h)\tD+ (m)\tD- (m)`;
-    
+
     if (hasGrade) tsv += "\tPente moy. (%)";
-    if (hasGAP) tsv += "\tGAP (min/km)";
-    if (hasEF) tsv += "\tEF";
+    if (hasGAP)   tsv += "\tGAP (min/km)";
+    if (hasEF)    tsv += "\tEF";
     if (hasHeartRate) tsv += "\tCardio moy. (bpm)\tCardio max (bpm)";
-    if (hasCadence) tsv += `\tCadence moy. (${cadenceUnit})`;
-    if (hasPower) tsv += "\tPuissance moy. (W)";
+    if (hasCadence)   tsv += `\tCadence moy. (${cadenceUnit})`;
+    if (hasPower)     tsv += "\tPuissance moy. (W)";
     tsv += "\tDist. cumulée (km)\tD+ cumulé (m)";
     tsv += "\n";
 
     splits.forEach(split => {
       tsv += `${split.number}\t`;
       tsv += `${formatDuration(split.duration)}\t`;
+      // Colonne principale : vitesse (vélo) ou allure (course)
       tsv += isCycling ? `${(split.avgSpeed * 3.6).toFixed(1)}\t` : `${formatPace(split.avgPace)}\t`;
       tsv += `${(split.avgSpeed * 3.6).toFixed(1)}\t`;
       tsv += `${(split.maxSpeed * 3.6).toFixed(1)}\t`;
       tsv += `${split.elevationGain}\t`;
       tsv += `${split.elevationLoss}`;
-      
+
       if (hasGrade) tsv += `\t${split.avgGrade !== null ? split.avgGrade : ""}`;
-      if (hasGAP) tsv += `\t${split.avgGAP !== null ? formatPace(split.avgGAP) : ""}`;
-      if (hasEF) tsv += `\t${split.ef !== null ? split.ef : ""}`;
+      if (hasGAP)   tsv += `\t${split.avgGAP !== null ? formatPace(split.avgGAP) : ""}`;
+      if (hasEF)    tsv += `\t${split.ef !== null ? split.ef : ""}`;
       if (hasHeartRate) tsv += `\t${split.avgHeartRate || ""}\t${split.maxHeartRate || ""}`;
-      if (hasCadence) tsv += `\t${split.avgCadence ? cadenceValue(split.avgCadence) : ""}`;
-      if (hasPower) tsv += `\t${split.avgPower || ""}`;
+      if (hasCadence)   tsv += `\t${split.avgCadence ? cadenceValue(split.avgCadence) : ""}`;
+      if (hasPower)     tsv += `\t${split.avgPower || ""}`;
       tsv += `\t${(split.cumulativeDistance / 1000).toFixed(2)}`;
       tsv += `\t${split.cumulativeElevationGain}`;
       tsv += "\n";
@@ -97,9 +105,9 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
             type="button"
             className="btn btn-outline"
             onClick={handleCopyTable}
-            style={{ 
-              display: "flex", 
-              alignItems: "center", 
+            style={{
+              display: "flex",
+              alignItems: "center",
               gap: "0.5rem",
               padding: "0.4rem 0.85rem",
               fontSize: "0.85rem",
@@ -114,7 +122,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
           </button>
         </div>
       </div>
-      
+
       <div className="splits-table-container">
         <table className="splits-table">
           <thead>
@@ -130,6 +138,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                   <Zap size={14} /> {isCycling ? 'Vitesse' : 'Allure'}
                 </span>
               </th>
+              {/* Colonne V. moy. séparée uniquement pour la course (vélo l'affiche déjà en principal) */}
               {!isCycling && <th>V. moy.</th>}
               <th>V. max</th>
               <th>
@@ -137,7 +146,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                   <ArrowUp size={14} /> Dénivelé
                 </span>
               </th>
-              
+
               {hasGrade && (
                 <th>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "var(--color-ele)" }}>
@@ -147,6 +156,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
               )}
 
               {hasGAP && (
+                // GAP = Grade Adjusted Pace, allure normalisée selon la pente (modèle Minetti 2002)
                 <th>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "#a78bfa" }}
                     title="Grade Adjusted Pace — allure corrigée selon la pente (Minetti 2002)">
@@ -156,6 +166,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
               )}
 
               {hasEF && (
+                // EF = Efficiency Factor : vitesse (m/s) × 1000 / FC moy — mesure l'économie aérobie
                 <th>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "#fbbf24" }}
                     title="Facteur d'efficacité aérobie = vitesse (m/s) × 1000 / FC">
@@ -171,7 +182,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                   </span>
                 </th>
               )}
-              
+
               {hasCadence && (
                 <th>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "var(--color-cad)" }}>
@@ -179,7 +190,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                   </span>
                 </th>
               )}
-              
+
               {hasPower && (
                 <th>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "var(--accent-primary)" }}>
@@ -221,7 +232,7 @@ export const SplitsTable: React.FC<SplitsTableProps> = ({ splits, activityType }
                 <td className="numeric" style={{ color: "var(--color-ele)", fontWeight: "600" }}>
                   +{split.elevationGain}m / -{split.elevationLoss}m
                 </td>
-                
+
                 {hasGrade && (
                   <td className="numeric" style={{ color: "var(--color-ele)", fontWeight: "600" }}>
                     {split.avgGrade !== null ? `${split.avgGrade > 0 ? '+' : ''}${split.avgGrade}%` : "-"}

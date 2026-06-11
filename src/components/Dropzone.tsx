@@ -6,11 +6,13 @@ interface DropzoneProps {
   onLoadSample: () => void;
 }
 
+/** Zone de dépôt de fichier GPX ou FIT avec bouton de sélection et exemple de démonstration. */
 export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSample }) => {
   const [isDragActive, setIsDragActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  /** Gère dragenter, dragover et dragleave pour mettre à jour l'état visuel de survol. */
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -21,6 +23,7 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
     }
   };
 
+  /** Valide l'extension, lit le fichier comme ArrayBuffer (.fit) ou texte (.gpx). */
   const processFile = (file: File) => {
     if (!file) return;
 
@@ -35,6 +38,7 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
     reader.onerror = () => setError("Erreur lors de la lecture du fichier. Veuillez réessayer.");
 
     if (extension === "fit") {
+      // FIT est un format binaire — lecture en ArrayBuffer obligatoire.
       reader.onload = (e) => {
         const buffer = e.target?.result as ArrayBuffer;
         if (buffer) onActivityLoaded(buffer, file.name);
@@ -53,7 +57,6 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
     e.preventDefault();
     e.stopPropagation();
     setIsDragActive(false);
-
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       processFile(e.dataTransfer.files[0]);
     }
@@ -72,7 +75,7 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
 
   return (
     <div className="animate-slide-up" style={{ maxWidth: "600px", margin: "4rem auto", width: "100%" }}>
-      <div 
+      <div
         className={`dropzone ${isDragActive ? "active" : ""}`}
         onDragEnter={handleDrag}
         onDragOver={handleDrag}
@@ -87,7 +90,7 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
           onChange={handleChange}
           style={{ display: "none" }}
         />
-        
+
         <div className="dropzone-icon">
           <UploadCloud size={32} />
         </div>
@@ -104,13 +107,13 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
         </p>
 
         {error && (
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
-            gap: "0.5rem", 
-            color: "var(--color-hr)", 
-            backgroundColor: "var(--color-hr-light)", 
-            padding: "0.75rem 1rem", 
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            color: "var(--color-hr)",
+            backgroundColor: "var(--color-hr-light)",
+            padding: "0.75rem 1rem",
             borderRadius: "var(--radius-sm)",
             fontSize: "0.9rem",
             marginBottom: "1.5rem",
@@ -122,16 +125,16 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
         )}
 
         <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "1rem" }}>
-          <button 
-            type="button" 
+          <button
+            type="button"
             className="btn btn-primary"
             onClick={handleButtonClick}
           >
             Sélectionner un fichier
           </button>
-          
-          <button 
-            type="button" 
+
+          <button
+            type="button"
             className="btn btn-outline"
             onClick={onLoadSample}
           >
@@ -141,10 +144,10 @@ export const Dropzone: React.FC<DropzoneProps> = ({ onActivityLoaded, onLoadSamp
         </div>
       </div>
 
-      <div style={{ 
-        marginTop: "2rem", 
-        textAlign: "center", 
-        fontSize: "0.85rem", 
+      <div style={{
+        marginTop: "2rem",
+        textAlign: "center",
+        fontSize: "0.85rem",
         color: "var(--text-tertiary)",
         display: "flex",
         flexDirection: "column",

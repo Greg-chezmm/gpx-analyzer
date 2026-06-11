@@ -88,6 +88,14 @@ export function mergeActivities(
     maxPower:       maxOf('power'),
     avgTemp:        avgOf('temp') !== null ? Math.round(avgOf('temp')! * 10) / 10 : null,
     activityType:   a.activityType,
+    dataQuality: {
+      hrCoverage:   Math.min(a.dataQuality.hrCoverage,   b.dataQuality.hrCoverage),
+      elevCoverage: Math.min(a.dataQuality.elevCoverage, b.dataQuality.elevCoverage),
+      elevOutliers: a.dataQuality.elevOutliers + b.dataQuality.elevOutliers,
+      gapCount:     a.dataQuality.gapCount + b.dataQuality.gapCount,
+      longestGap:   Math.max(a.dataQuality.longestGap,   b.dataQuality.longestGap),
+      gpsDropped:   a.dataQuality.gpsDropped + b.dataQuality.gpsDropped,
+    },
     fitSummary,
     fitLaps:        allLaps.length > 0 ? allLaps : undefined,
   };

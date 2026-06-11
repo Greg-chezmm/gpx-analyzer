@@ -3,13 +3,17 @@ import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2 } f
 import type { DriveHandle } from '../hooks/useGoogleDrive';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 
-/* ── Header button: connect / show history ─────────────────────────── */
+/* ── Bouton header : connexion / accès à l'historique ──────────────────── */
 
 interface DriveSyncButtonProps {
   drive: DriveHandle;
   onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
 }
 
+/**
+ * Bouton Drive dans la barre de navigation — se connecte, se reconnecte,
+ * ou ouvre le panneau historique selon l'état de connexion.
+ */
 export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -37,6 +41,7 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
         title={isReconnect ? "Reconnecter Google Drive" : "Connecter Google Drive"}
         style={{
           padding: '0.5rem 1rem', fontSize: '0.9rem',
+          // Teinte ambrée pour signaler une reconnexion nécessaire
           ...(isReconnect ? {
             borderColor: '#f59e0b',
             color: '#f59e0b',
@@ -89,7 +94,7 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
   );
 }
 
-/* ── Save button: shown in header when activity is loaded ───────────── */
+/* ── Bouton sauvegarde : affiché dans le header quand une activité est ouverte ── */
 
 interface DriveSaveButtonProps {
   drive: DriveHandle;
@@ -97,6 +102,10 @@ interface DriveSaveButtonProps {
   alreadySaved: boolean;
 }
 
+/**
+ * Bouton de sauvegarde Drive — visible uniquement quand connecté ;
+ * désactivé si l'activité est déjà enregistrée.
+ */
 export function DriveSaveButton({ drive, onSave, alreadySaved }: DriveSaveButtonProps) {
   if (drive.status !== 'connected') return null;
 
@@ -126,13 +135,17 @@ export function DriveSaveButton({ drive, onSave, alreadySaved }: DriveSaveButton
   );
 }
 
-/* ── Welcome screen: activity list ─────────────────────────────────── */
+/* ── Liste d'activités sur l'écran d'accueil ────────────────────────────── */
 
 interface DriveActivityListProps {
   drive: DriveHandle;
   onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
 }
 
+/**
+ * Liste des activités récentes Drive affichée sur l'écran d'accueil —
+ * permet de charger ou supprimer une activité.
+ */
 export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
@@ -140,6 +153,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
 
   if (drive.status !== 'connected' || drive.history.length === 0) return null;
 
+  /** Clé stable pour l'entrée : fileId si disponible, sinon date+index. */
   const entryKey = (entry: ActivityIndexEntry, i: number) => entry.fileId ?? `${entry.date}-${i}`;
 
   const handleLoad = async (entry: ActivityIndexEntry) => {
@@ -177,6 +191,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
         <History size={14} /> Activités récentes · Drive
       </h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        {/* Triées par date décroissante, limitées aux 8 dernières */}
         {[...drive.history].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8).map((entry, i) => {
           const key = entryKey(entry, i);
           const isConfirming = confirmKey === key;
@@ -236,7 +251,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
                 }
               </button>
 
-              {/* Delete zone */}
+              {/* Zone de suppression avec confirmation en deux clics */}
               <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                 {isConfirming ? (
                   <>
@@ -290,7 +305,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
   );
 }
 
-/* ── History slide panel ────────────────────────────────────────────── */
+/* ── Panneau latéral d'historique (slide-in) ────────────────────────────── */
 
 interface DriveHistoryPanelProps {
   drive: DriveHandle;
@@ -299,6 +314,10 @@ interface DriveHistoryPanelProps {
   onClose: () => void;
 }
 
+/**
+ * Panneau latéral pleine hauteur listant toutes les activités Drive —
+ * s'ouvre depuis DriveSyncButton, permet le chargement et la suppression.
+ */
 function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPanelProps) {
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -324,6 +343,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
         background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
       }}
+      // Fermeture en cliquant sur le fond semi-transparent
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div style={{
@@ -331,7 +351,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
         background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-color)',
         display: 'flex', flexDirection: 'column', overflowY: 'auto',
       }}>
-        {/* Header */}
+        {/* En-tête sticky */}
         <div style={{
           padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -365,7 +385,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
           </div>
         </div>
 
-        {/* List */}
+        {/* Liste */}
         <div style={{ flex: 1, padding: '1rem' }}>
           {drive.history.length === 0 ? (
             <div style={{
@@ -438,7 +458,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
                       </div>
                     </button>
 
-                    {/* Delete zone */}
+                    {/* Zone de suppression avec confirmation en deux clics */}
                     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                       {isConfirming ? (
                         <>

@@ -12,16 +12,22 @@ interface ScatterPlotProps {
 
 const ZONE_COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f97316", "#ef4444"];
 
+/** Formate des secondes/km en "mm:ss" pour l'axe Y du graphique en course à pied. */
 function fmtPace(secPerKm: number): string {
   const m = Math.floor(secPerKm / 60);
   const s = Math.round(secPerKm % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+/**
+ * Nuage de points allure (ou puissance/vitesse) vs fréquence cardiaque avec
+ * régression linéaire, bandes de zones Karvonen et aide à la lecture.
+ */
 export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest, activityType }) => {
   const bounds = useMemo(() => karvonenBounds(fcMax, fcRest), [fcMax, fcRest]);
   const [showHelp, setShowHelp] = useState(false);
 
+  // Cycling ≠ running ; unknown traité comme running (pas de capteur de puissance attendu)
   const isRunning = activityType !== 'cycling';
 
   const validPts = useMemo(
@@ -34,7 +40,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
     [isRunning, validPts]
   );
 
-  // For cycling: default to power mode if power data is available
+  // Vélo : bascule automatique sur le mode puissance si des données power existent
   const [powerMode, setPowerMode] = useState(false);
   useEffect(() => { setPowerMode(hasPower); }, [hasPower]);
 
@@ -42,36 +48,39 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
 
   if (validPts.length < 20) return null;
 
-  const ratio = Math.ceil(validPts.length / 600);
-  const sampled = ratio > 1 ? validPts.filter((_, i) => i % ratio === 0) : validPts;
+  // Sous-échantillonnage pour limiter à ~600 points affichés (performance SVG)
+  const samplingRatio = Math.ceil(validPts.length / 600);
+  const sampled = samplingRatio > 1 ? validPts.filter((_, i) => i % samplingRatio === 0) : validPts;
 
   const hrArr = sampled.map(p => p.hr!);
-  // Running: pace s/km. Cycling: power (W) or speed (km/h).
+  // Y : s/km (course), watts (vélo + capteur), km/h (vélo sans capteur)
   const yArr = isRunning
-    ? sampled.map(p => 1000 / p.speed!)            // s/km
+    ? sampled.map(p => 1000 / p.speed!)
     : usePower
-      ? sampled.map(p => p.power ?? 0)             // watts
-      : sampled.map(p => p.speed! * 3.6);          // km/h
+      ? sampled.map(p => p.power ?? 0)
+      : sampled.map(p => p.speed! * 3.6);
 
+  // Marges légères autour des données pour éviter les points sur le bord du SVG
   const hrLo = Math.max(Math.min(...hrArr) - 3, 0);
   const hrHi = Math.max(...hrArr) + 3;
-  // For running, yLo = fastest pace (small s/km), yHi = slowest (large s/km)
-  const yRaw = [...yArr];
-  const yLo = Math.min(...yRaw) * (isRunning ? 0.98 : 1) - (isRunning ? 0 : 0.3);
-  const yHi = Math.max(...yRaw) * (isRunning ? 1.02 : 1) + (isRunning ? 0 : 0.3);
+  const yLo = Math.min(...yArr) * (isRunning ? 0.98 : 1) - (isRunning ? 0 : 0.3);
+  const yHi = Math.max(...yArr) * (isRunning ? 1.02 : 1) + (isRunning ? 0 : 0.3);
 
+  // Dimensions SVG et marges internes
   const W = 540, H = 300;
   const pad = { t: 16, r: 20, b: 44, l: 60 };
   const pw = W - pad.l - pad.r;
   const ph = H - pad.t - pad.b;
 
+  // Transformations données → coordonnées SVG
   const xs = (hr: number) => pad.l + ((hr - hrLo) / (hrHi - hrLo)) * pw;
-  // Running: INVERTED — fast pace (low s/km) at top, slow (high s/km) at bottom
-  // Cycling: normal — high speed at top
+  // Course : axe Y inversé (allure rapide = petits s/km → en haut)
+  // Vélo : axe Y normal (vitesse ou puissance élevée → en haut)
   const ys = isRunning
     ? (v: number) => pad.t + ((v - yLo) / (yHi - yLo)) * ph
     : (v: number) => pad.t + ph - ((v - yLo) / (yHi - yLo)) * ph;
 
+  /** Retourne l'index de zone cardiaque (0–4) pour une FC donnée. */
   const getZone = (hr: number) => {
     if (hr >= bounds[4]) return 4;
     if (hr >= bounds[3]) return 3;
@@ -80,28 +89,30 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
     return 0;
   };
 
-  // Linear regression on yArr
-  const n    = hrArr.length;
-  const mX   = hrArr.reduce((a, b) => a + b, 0) / n;
-  const mY   = yArr.reduce((a, b) => a + b, 0) / n;
-  const ssXX = hrArr.reduce((s, x) => s + (x - mX) ** 2, 0);
-  const ssXY = hrArr.reduce((s, x, i) => s + (x - mX) * (yArr[i] - mY), 0);
-  const ssYY = yArr.reduce((s, y) => s + (y - mY) ** 2, 0);
+  // Régression linéaire y = slope × x + intercept sur l'ensemble des points échantillonnés
+  const n         = hrArr.length;
+  const meanHr    = hrArr.reduce((a, b) => a + b, 0) / n;
+  const meanY     = yArr.reduce((a, b) => a + b, 0) / n;
+  const ssXX      = hrArr.reduce((s, x) => s + (x - meanHr) ** 2, 0);
+  const ssXY      = hrArr.reduce((s, x, i) => s + (x - meanHr) * (yArr[i] - meanY), 0);
+  const ssYY      = yArr.reduce((s, y) => s + (y - meanY) ** 2, 0);
   const slope     = ssXX > 0 ? ssXY / ssXX : 0;
-  const intercept = mY - slope * mX;
+  const intercept = meanY - slope * meanHr;
+  // R² = carré du coefficient de corrélation de Pearson
   const r2 = ssXX > 0 && ssYY > 0 ? (ssXY / Math.sqrt(ssXX * ssYY)) ** 2 : 0;
 
+  // Points extrêmes de la droite de tendance, clampés à la plage Y visible
   const clamp = (v: number) => Math.max(yLo, Math.min(yHi, v));
-  const tY1 = clamp(slope * hrLo + intercept);
-  const tY2 = clamp(slope * hrHi + intercept);
+  const trendY1 = clamp(slope * hrLo + intercept);
+  const trendY2 = clamp(slope * hrHi + intercept);
 
-  // X ticks (HR)
+  // Graduations X (FC) : pas adaptatif selon l'étendue
   const hrSpan = hrHi - hrLo;
   const hrStep = hrSpan > 60 ? 20 : hrSpan > 30 ? 10 : 5;
   const xTicks: number[] = [];
   for (let v = Math.ceil(hrLo / hrStep) * hrStep; v <= hrHi; v += hrStep) xTicks.push(v);
 
-  // Y ticks
+  // Graduations Y : pas adaptatif selon le mode d'affichage
   const yTicks: number[] = [];
   if (isRunning) {
     const ySpan = yHi - yLo;
@@ -117,6 +128,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
     for (let v = Math.ceil(yLo / step) * step; v <= yHi; v += step) yTicks.push(v);
   }
 
+  // Bandes de zones cardiaques en fond du graphique
   const bands = [
     { lo: hrLo,      hi: bounds[1], z: 0 },
     { lo: bounds[1], hi: bounds[2], z: 1 },
@@ -125,6 +137,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
     { lo: bounds[4], hi: hrHi,      z: 4 },
   ];
 
+  // Interprétation textuelle du R²
   const r2Label = r2 >= 0.7 ? "corrélation forte" : r2 >= 0.4 ? "corrélation modérée" : "corrélation faible";
   const yAxisLabel = isRunning ? "Allure (/km)" : usePower ? "Puissance (W)" : "Vitesse (km/h)";
   const title = isRunning ? "Allure vs Fréquence Cardiaque"
@@ -161,7 +174,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: "300px" }}>
           <rect x={pad.l} y={pad.t} width={pw} height={ph} fill="var(--bg-secondary)" rx="3" />
 
-          {/* Zone bands */}
+          {/* Bandes de zones cardiaques */}
           {bands.map(({ lo, hi, z }) => {
             const x1 = Math.max(pad.l, xs(lo));
             const x2 = Math.min(pad.l + pw, xs(hi));
@@ -172,7 +185,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
             );
           })}
 
-          {/* Zone boundary dashes */}
+          {/* Lignes verticales de séparation entre zones */}
           {bounds.slice(1).map((bnd, i) => {
             const x = xs(bnd);
             if (x <= pad.l || x >= pad.l + pw) return null;
@@ -182,13 +195,13 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
             );
           })}
 
-          {/* Horizontal grid */}
+          {/* Grille horizontale */}
           {yTicks.map(v => (
             <line key={v} x1={pad.l} y1={ys(v)} x2={pad.l + pw} y2={ys(v)}
               stroke="var(--border-color)" strokeOpacity={0.35} />
           ))}
 
-          {/* Data points */}
+          {/* Points de données colorés par zone */}
           {sampled.map((pt, i) => (
             <circle key={i}
               cx={xs(pt.hr!)}
@@ -197,13 +210,13 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
             />
           ))}
 
-          {/* Trend line */}
+          {/* Droite de tendance (régression linéaire) */}
           <line
-            x1={xs(hrLo)} y1={ys(tY1)} x2={xs(hrHi)} y2={ys(tY2)}
+            x1={xs(hrLo)} y1={ys(trendY1)} x2={xs(hrHi)} y2={ys(trendY2)}
             stroke="white" strokeWidth={1.5} strokeOpacity={0.55} strokeDasharray="6 3"
           />
 
-          {/* X axis */}
+          {/* Axe X — FC */}
           {xTicks.map(v => (
             <g key={v} transform={`translate(${xs(v)}, ${pad.t + ph})`}>
               <line y2={5} stroke="var(--border-color)" />
@@ -213,7 +226,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
           <text x={pad.l + pw / 2} y={H - 2} textAnchor="middle"
             fontSize={11} fontWeight={600} fill="var(--text-secondary)">FC (bpm)</text>
 
-          {/* Y axis */}
+          {/* Axe Y — allure / puissance / vitesse */}
           {yTicks.map(v => (
             <g key={v} transform={`translate(${pad.l}, ${ys(v)})`}>
               <line x2={-5} stroke="var(--border-color)" />
@@ -231,7 +244,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
         </svg>
       </div>
 
-      {/* Zone legend */}
+      {/* Légende des zones */}
       <div style={{ display: "flex", gap: "0.5rem 1.25rem", flexWrap: "wrap", marginTop: "0.75rem" }}>
         {["Z1", "Z2", "Z3", "Z4", "Z5"].map((z, i) => (
           <div key={z} style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
@@ -242,7 +255,7 @@ export const ScatterPlot: React.FC<ScatterPlotProps> = ({ points, fcMax, fcRest,
         ))}
       </div>
 
-      {/* Help toggle */}
+      {/* Aide à la lecture (panneau dépliable) */}
       <button
         type="button"
         onClick={() => setShowHelp(v => !v)}

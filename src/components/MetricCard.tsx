@@ -5,17 +5,19 @@ interface MetricCardProps {
   label: string;
   value: string | number;
   unit?: string;
+  /** Nom de la variable CSS de couleur thématique (ex. "hr" → --color-hr). */
   colorVar: "speed" | "hr" | "ele" | "time" | "cad";
 }
 
+/** Carte de métrique principale (distance, temps, D+, FC…) avec icône colorée. */
 export const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, unit, colorVar }) => {
   return (
     <div className="card metric-card animate-slide-up">
-      <div 
+      <div
         className="metric-icon-wrapper"
-        style={{ 
-          backgroundColor: `var(--color-${colorVar}-light)`, 
-          color: `var(--color-${colorVar})` 
+        style={{
+          backgroundColor: `var(--color-${colorVar}-light)`,
+          color: `var(--color-${colorVar})`,
         }}
       >
         {icon}

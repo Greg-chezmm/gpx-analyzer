@@ -13,18 +13,20 @@ interface ZoneDef {
   label: string;
   description: string;
   color: string;
-  pctMin: number;
+  pctMin: number; // % VMA (vitesse maximale aérobie)
   pctMax: number;
 }
 
+/** Zones d'allure Z1–Z5 définies en % VMA (vitesse maximale aérobie). */
 const ZONES: ZoneDef[] = [
-  { label: "Z1", description: "Récupération",        color: "#93c5fd", pctMin: 0,    pctMax: 0.50 },
+  { label: "Z1", description: "Récupération",           color: "#93c5fd", pctMin: 0,    pctMax: 0.50 },
   { label: "Z2", description: "Endurance fondamentale", color: "#34d399", pctMin: 0.50, pctMax: 0.65 },
-  { label: "Z3", description: "Aérobie",             color: "#fbbf24", pctMin: 0.65, pctMax: 0.80 },
-  { label: "Z4", description: "Seuil",               color: "#f97316", pctMin: 0.80, pctMax: 0.90 },
-  { label: "Z5", description: "VO2max / Fractionné", color: "#ef4444", pctMin: 0.90, pctMax: Infinity },
+  { label: "Z3", description: "Aérobie",                color: "#fbbf24", pctMin: 0.65, pctMax: 0.80 },
+  { label: "Z4", description: "Seuil",                  color: "#f97316", pctMin: 0.80, pctMax: 0.90 },
+  { label: "Z5", description: "VO2max / Fractionné",    color: "#ef4444", pctMin: 0.90, pctMax: Infinity },
 ];
 
+/** Convertit une vitesse en m/s en allure formatée "mm:ss" /km. */
 function fmtPace(speedMs: number): string {
   if (speedMs <= 0) return "–";
   const secPerKm = 1000 / speedMs;
@@ -33,6 +35,7 @@ function fmtPace(speedMs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** Stepper +/− pour régler la VMA en km/h par paliers de 0,5. */
 const Stepper: React.FC<{
   value: number; min: number; max: number; step: number;
   onChange: (v: number) => void;
@@ -63,23 +66,27 @@ const Stepper: React.FC<{
   );
 };
 
+/** Affiche les zones d'allure Z1–Z5 en % VMA avec stepper VMA réactif et plages allure /km. */
 export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }) => {
+  // Conversion VMA km/h → m/s pour les comparaisons avec la vitesse GPS
   const vmaMs = vma / 3.6;
 
   const zoneTime = new Array<number>(ZONES.length).fill(0);
 
   for (let i = 1; i < points.length; i++) {
     const curr = points[i], prev = points[i - 1];
+    // Filtre les points à l'arrêt (< 0,3 m/s ≈ marche très lente ou pause)
     if (!curr.speed || curr.speed < 0.3) continue;
     if (curr.time === null || prev.time === null) continue;
     const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
     if (dt <= 0 || dt > 60) continue;
-    const pct = ((curr.speed + (prev.speed ?? curr.speed)) / 2) / vmaMs;
-    let z = 0;
+    const avgSpeedMs = ((curr.speed + (prev.speed ?? curr.speed)) / 2);
+    const pctVma = avgSpeedMs / vmaMs;
+    let zoneIdx = 0;
     for (let j = ZONES.length - 1; j >= 0; j--) {
-      if (pct >= ZONES[j].pctMin) { z = j; break; }
+      if (pctVma >= ZONES[j].pctMin) { zoneIdx = j; break; }
     }
-    zoneTime[z] += dt;
+    zoneTime[zoneIdx] += dt;
   }
 
   const totalTime = zoneTime.reduce((a, b) => a + b, 0);
@@ -98,7 +105,7 @@ export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }
         <Stepper value={vma} min={10} max={30} step={0.5} onChange={onVmaChange} />
       </div>
 
-      {/* Stacked proportional bar */}
+      {/* Barre empilée proportionnelle au temps total */}
       <div style={{ display: "flex", height: "18px", borderRadius: "9px", overflow: "hidden", gap: "2px", marginBottom: "1.5rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = (zoneTime[idx] / totalTime) * 100;
@@ -112,12 +119,12 @@ export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }
         })}
       </div>
 
-      {/* Zone cards */}
+      {/* Cartes de zone */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: "0.85rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = (zoneTime[idx] / totalTime) * 100;
-          const speedMin = zone.pctMin * vmaMs;
-          const speedMax = zone.pctMax === Infinity ? null : zone.pctMax * vmaMs;
+          const speedMinMs = zone.pctMin * vmaMs;
+          const speedMaxMs = zone.pctMax === Infinity ? null : zone.pctMax * vmaMs;
 
           return (
             <div key={zone.label} style={{
@@ -135,10 +142,11 @@ export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }
                   — {zone.description}
                 </span>
               </div>
+              {/* Plage allure : inversée car allure rapide = petit s/km → vitesse max de la zone affiché en 1er */}
               <div style={{ fontSize: "0.8rem", color: "var(--text-tertiary)", fontWeight: 500 }}>
-                {speedMax === null
-                  ? `> ${fmtPace(speedMin)} /km`
-                  : `${fmtPace(speedMax)} – ${fmtPace(speedMin)} /km`}
+                {speedMaxMs === null
+                  ? `> ${fmtPace(speedMinMs)} /km`
+                  : `${fmtPace(speedMaxMs)} – ${fmtPace(speedMinMs)} /km`}
               </div>
               <div style={{ fontFamily: "var(--font-heading)", fontWeight: 800, fontSize: "1.4rem", color: zone.color, lineHeight: 1.1 }}>
                 {pct.toFixed(1)}

@@ -6,12 +6,16 @@ interface State {
 }
 
 interface Props extends React.PropsWithChildren {
-  /** Optional custom fallback UI. If omitted, shows the default error card. */
+  /** Interface de repli personnalisée. Si omis, affiche la carte d'erreur par défaut. */
   fallback?: React.ReactNode;
-  /** Label shown in the error card to identify which section crashed. */
+  /** Nom de la section affiché dans le message d'erreur pour identifier le composant fautif. */
   section?: string;
 }
 
+/**
+ * Conteneur React qui intercepte les erreurs de rendu dans son arbre enfant
+ * et affiche une interface de secours au lieu de planter l'application entière.
+ */
 export class ErrorBoundary extends React.Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -26,6 +30,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
     console.error("[GPX Analyzer] Erreur composant :", error.message, info.componentStack);
   }
 
+  /** Réinitialise l'état d'erreur pour permettre un nouvel essai de rendu. */
   reset = () => this.setState({ error: null });
 
   render() {
@@ -35,7 +40,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
     if (this.props.fallback) return this.props.fallback;
 
-    const section = this.props.section ? ` — ${this.props.section}` : "";
+    const sectionLabel = this.props.section ? ` — ${this.props.section}` : "";
 
     return (
       <div className="card" style={{
@@ -46,7 +51,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
         <AlertTriangle size={28} style={{ color: "var(--color-hr)", flexShrink: 0 }} />
         <div>
           <p style={{ fontWeight: 700, marginBottom: "0.4rem", color: "var(--text-primary)" }}>
-            Erreur d'affichage{section}
+            Erreur d'affichage{sectionLabel}
           </p>
           <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", maxWidth: "400px" }}>
             {error.message}

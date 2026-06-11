@@ -3,6 +3,7 @@ import L from "leaflet";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { MapPin } from "lucide-react";
 
+// Correction des icônes Leaflet : le bundler Vite ne résout pas _getIconUrl correctement
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -20,20 +21,25 @@ interface ActivityMapProps {
   hasHeartRate?: boolean;
 }
 
+/** Interpolation linéaire scalaire entre a et b. */
 function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
+/** Interpolation linéaire RGB entre deux couleurs, retourne une string "rgb(…)". */
 function lerpRgb(a: [number,number,number], b: [number,number,number], t: number): string {
   return `rgb(${Math.round(lerp(a[0],b[0],t))},${Math.round(lerp(a[1],b[1],t))},${Math.round(lerp(a[2],b[2],t))})`;
 }
 
+/**
+ * Mappe une valeur normalisée [0, 1] sur un dégradé bleu → vert → jaune → rouge.
+ * Utilisé pour les modes vitesse et FC.
+ */
 function valueToColor(t: number): string {
   t = Math.max(0, Math.min(1, t));
-  // blue → green → yellow → red
   const stops: [number, number, number][] = [
-    [59, 130, 246],
-    [16, 185, 129],
-    [251, 191, 36],
-    [239, 68, 68],
+    [59, 130, 246],   // bleu = lent / FC basse
+    [16, 185, 129],   // vert
+    [251, 191, 36],   // jaune
+    [239, 68, 68],    // rouge = rapide / FC haute
   ];
   const n = stops.length - 1;
   const pos = t * n;
@@ -42,15 +48,21 @@ function valueToColor(t: number): string {
   return lerpRgb(stops[lo], stops[hi], pos - lo);
 }
 
-// Diverging scale: blue (descent) → gray (flat) → red (climb)
+/**
+ * Mappe une pente en % sur une échelle divergente bleu (descente) → gris (plat) → rouge (montée).
+ * Plage [-20 %, +20 %] → [0, 1] avec 0,5 = plat.
+ */
 function gradeToColor(grade: number): string {
-  // Map [-20%, +20%] → [0, 1], flat=0.5
   const t = Math.max(0, Math.min(1, (grade + 20) / 40));
   const gray: [number,number,number] = [148, 163, 184];
   if (t < 0.5) return lerpRgb([59, 130, 246], gray, t / 0.5);
   return lerpRgb(gray, [239, 68, 68], (t - 0.5) / 0.5);
 }
 
+/**
+ * Carte Leaflet interactive du parcours — affiche le tracé coloré par vitesse, FC ou pente,
+ * les marqueurs kilométriques, et synchronise le point survolé avec les autres composants.
+ */
 export const ActivityMap: React.FC<ActivityMapProps> = ({
   points,
   hoveredPointIndex,
@@ -58,20 +70,22 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
   hasHeartRate = false,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const polylineRef = useRef<L.Polyline | null>(null);
+  const mapRef          = useRef<L.Map | null>(null);
+  const polylineRef     = useRef<L.Polyline | null>(null);
   const colorSegmentsRef = useRef<L.Polyline[]>([]);
-  const hoverMarkerRef = useRef<L.Marker | null>(null);
-  const kmMarkersRef = useRef<L.Marker[]>([]);
+  const hoverMarkerRef  = useRef<L.Marker | null>(null);
+  const kmMarkersRef    = useRef<L.Marker[]>([]);
+  // Ref pour éviter de recapturer onHoverPointChange dans les listeners Leaflet
   const onHoverRef = useRef(onHoverPointChange);
   const [colorMode, setColorMode] = useState<ColorMode>('none');
 
   useEffect(() => { onHoverRef.current = onHoverPointChange; }, [onHoverPointChange]);
 
-  // Initialize map — runs when a new activity is loaded
+  // Initialisation de la carte — s'exécute à chaque chargement d'activité
   useEffect(() => {
     if (!mapContainerRef.current || points.length === 0) return;
 
+    // Destruction de la carte précédente si elle existe
     if (mapRef.current) {
       mapRef.current.remove();
       mapRef.current = null;
@@ -82,6 +96,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       .setView([startPt.lat, startPt.lon], 13);
     mapRef.current = map;
 
+    // Fond de carte CartoDB Voyager (léger, adapté aux tracés sportifs)
     L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
       subdomains: 'abcd',
@@ -93,7 +108,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       { padding: [30, 30] }
     );
 
-    // Start / End markers
+    // Marqueurs de départ (vert) et d'arrivée (rouge)
     L.circleMarker([startPt.lat, startPt.lon], {
       radius: 7, fillColor: "#10b981", color: "#ffffff", weight: 2, fillOpacity: 1,
     }).addTo(map).bindTooltip("Départ", { permanent: false, direction: "top", className: "map-tooltip" });
@@ -103,9 +118,10 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       radius: 7, fillColor: "#e11d48", color: "#ffffff", weight: 2, fillOpacity: 1,
     }).addTo(map).bindTooltip("Arrivée", { permanent: false, direction: "top", className: "map-tooltip" });
 
-    // Km markers
+    // Marqueurs kilométriques : pas adaptatif selon la distance totale
     kmMarkersRef.current = [];
     const totalKm = Math.floor(points[points.length - 1].distFromStart / 1000);
+    // Pas de 1 km jusqu'à 20 km, 5 km jusqu'à 100 km, puis 10 km
     const kmStep = totalKm <= 20 ? 1 : totalKm <= 100 ? 5 : 10;
     for (let km = kmStep; km <= totalKm; km += kmStep) {
       let ptIdx = -1;
@@ -128,7 +144,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       );
     }
 
-    // Hover marker (hidden initially, position updated by separate effect)
+    // Marqueur de survol — position mise à jour par l'effet dédié ci-dessous
     hoverMarkerRef.current = L.marker([startPt.lat, startPt.lon], {
       icon: L.divIcon({
         className: "custom-div-icon",
@@ -139,7 +155,8 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       zIndexOffset: 1000,
     });
 
-    // Map-level mousemove (works in all color modes)
+    // Détection du point le plus proche au survol de la carte
+    // Sous-échantillonnage par pas pour limiter le coût de la boucle sur grands GPX
     const searchStep = Math.max(1, Math.floor(points.length / 500));
     map.on('mousemove', (e: L.LeafletMouseEvent) => {
       if (!onHoverRef.current) return;
@@ -150,9 +167,10 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
         const d = ml.distanceTo(L.latLng(points[i].lat, points[i].lon));
         if (d < minDist) { minDist = d; closestIdx = i; }
       }
-      const mPx = map.latLngToContainerPoint(ml);
-      const cPx = map.latLngToContainerPoint(L.latLng(points[closestIdx].lat, points[closestIdx].lon));
-      onHoverRef.current(Math.hypot(mPx.x - cPx.x, mPx.y - cPx.y) < 30 ? closestIdx : null);
+      const mousePx   = map.latLngToContainerPoint(ml);
+      const closestPx = map.latLngToContainerPoint(L.latLng(points[closestIdx].lat, points[closestIdx].lon));
+      // Seuil de 30 px : en dehors du tracé, on ne surligne rien
+      onHoverRef.current(Math.hypot(mousePx.x - closestPx.x, mousePx.y - closestPx.y) < 30 ? closestIdx : null);
     });
     map.on('mouseout', () => { if (onHoverRef.current) onHoverRef.current(null); });
 
@@ -162,7 +180,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
     };
   }, [points]);
 
-  // Track rendering — rebuilds when colorMode changes without destroying the map
+  // Rendu du tracé — reconstruit uniquement quand le mode de couleur change
   useEffect(() => {
     const map = mapRef.current;
     if (!map || points.length === 0) return;
@@ -172,6 +190,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
     colorSegmentsRef.current = [];
 
     if (colorMode === 'none') {
+      // Tracé uniforme (couleur accent)
       polylineRef.current = L.polyline(
         points.map(p => [p.lat, p.lon] as [number, number]),
         { color: "#4f46e5", weight: 5, opacity: 0.85, lineJoin: "round" }
@@ -179,7 +198,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       return;
     }
 
-    // Downsample for performance (max ~400 segments)
+    // Sous-échantillonnage pour limiter le nombre de segments Canvas (max ~400)
     const stride = Math.max(1, Math.floor(points.length / 400));
     const sampled: GPXTrackPoint[] = [];
     for (let i = 0; i < points.length; i += stride) sampled.push(points[i]);
@@ -192,14 +211,14 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       for (let i = 1; i < sampled.length; i++) {
         const prev = sampled[i - 1];
         const curr = sampled[i];
-        const grade = curr.grade ?? 0;
         segs.push(
           L.polyline([[prev.lat, prev.lon], [curr.lat, curr.lon]], {
-            color: gradeToColor(grade), weight: 5, opacity: 0.9, renderer,
+            color: gradeToColor(curr.grade ?? 0), weight: 5, opacity: 0.9, renderer,
           }).addTo(map)
         );
       }
     } else {
+      // Normalisation min-max sur les valeurs non nulles
       const vals = sampled.map(p => colorMode === 'speed' ? (p.speed ?? 0) : (p.hr ?? 0));
       const validVals = vals.filter(v => v > 0);
       const minV = validVals.reduce((m, v) => v < m ? v : m, Infinity);
@@ -221,9 +240,9 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
     colorSegmentsRef.current = segs;
   }, [points, colorMode]);
 
-  // Hover marker position sync
+  // Synchronisation du marqueur de survol avec hoveredPointIndex
   useEffect(() => {
-    const map = mapRef.current;
+    const map    = mapRef.current;
     const marker = hoverMarkerRef.current;
     if (!map || !marker || points.length === 0) return;
 
@@ -236,10 +255,12 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
     marker.setLatLng([pt.lat, pt.lon]);
     if (!map.hasLayer(marker)) marker.addTo(map);
 
+    // Recadrage automatique si le point sort du viewport
     const bounds = map.getBounds();
     if (!bounds.contains(L.latLng(pt.lat, pt.lon))) map.panTo([pt.lat, pt.lon]);
   }, [hoveredPointIndex, points]);
 
+  /** Recentre la carte pour afficher l'ensemble du tracé. */
   const handleRecenter = () => {
     if (!mapRef.current || points.length === 0) return;
     mapRef.current.fitBounds(
@@ -263,7 +284,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
           <span>📍 Carte Interactive du Parcours</span>
         </h3>
         <div className="panel-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
-          {/* Color mode selector */}
+          {/* Sélecteur de mode de couleur du tracé */}
           <div style={{
             display: "flex", gap: "2px",
             backgroundColor: "var(--bg-primary)",
@@ -302,7 +323,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
         </div>
       </div>
 
-      {/* Gradient legend */}
+      {/* Barre de légende du dégradé de couleur */}
       {colorMode !== 'none' && (
         <div style={{
           display: "flex", alignItems: "center", gap: "0.6rem",

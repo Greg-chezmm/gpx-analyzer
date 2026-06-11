@@ -11,7 +11,7 @@ interface AthleteSettingsProps {
   birthYear: number; onBirthYearChange: (v: number) => void;
   sex: Sex;          onSexChange: (v: Sex) => void;
   isCycling?: boolean;
-  // Controlled mode (triggered from burger menu — no button rendered)
+  /** Mode contrôlé : si fourni, aucun bouton déclencheur n'est rendu (piloté depuis le burger menu). */
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
 }
@@ -26,6 +26,7 @@ interface FieldDef {
   runningOnly?: boolean;
 }
 
+/** Contrôle +/− pour un paramètre numérique du profil athlète. */
 function Stepper({ label, value, min, max, step, unit, onChange }: FieldDef) {
   const dec = () => { if (value - step >= min) onChange(Math.round((value - step) * 100) / 100); };
   const inc = () => { if (value + step <= max) onChange(Math.round((value + step) * 100) / 100); };
@@ -63,6 +64,11 @@ function Stepper({ label, value, min, max, step, unit, onChange }: FieldDef) {
   );
 }
 
+/**
+ * Panneau de paramètres athlète (FC max, FC repos, VMA, FTP, poids, année de naissance, sexe).
+ * Peut être piloté en mode contrôlé via `open`/`onOpenChange` (depuis le burger menu)
+ * ou fonctionner de manière autonome avec son propre bouton déclencheur.
+ */
 export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => {
   const isControlled = props.open !== undefined;
   const [localOpen, setLocalOpen] = useState(false);
@@ -74,6 +80,7 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
     props.onOpenChange?.(v);
   };
 
+  // Ferme le panneau si un clic se produit hors de la zone.
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -84,21 +91,23 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fields: FieldDef[] = [
-    { label: "FC max",    value: props.fcMax,     min: 100, max: 230, step: 1,   unit: "bpm", onChange: props.onFcMaxChange },
-    { label: "FC repos",  value: props.fcRest,    min: 30,  max: 100, step: 1,   unit: "bpm", onChange: props.onFcRestChange },
+    { label: "FC max",    value: props.fcMax,     min: 100, max: 230, step: 1,   unit: "bpm",  onChange: props.onFcMaxChange },
+    { label: "FC repos",  value: props.fcRest,    min: 30,  max: 100, step: 1,   unit: "bpm",  onChange: props.onFcRestChange },
     { label: "VMA",       value: props.vma,       min: 10,  max: 30,  step: 0.5, unit: "km/h", onChange: props.onVmaChange, runningOnly: true },
-    { label: "FTP",       value: props.ftp,       min: 50,  max: 600, step: 5,   unit: "W",   onChange: props.onFtpChange, cyclingOnly: true },
-    { label: "Poids",     value: props.weight,    min: 30,  max: 200, step: 1,   unit: "kg",  onChange: props.onWeightChange },
-    { label: "Né en",     value: props.birthYear, min: 1940,max: 2010,step: 1,   unit: "",    onChange: props.onBirthYearChange },
+    { label: "FTP",       value: props.ftp,       min: 50,  max: 600, step: 5,   unit: "W",    onChange: props.onFtpChange, cyclingOnly: true },
+    { label: "Poids",     value: props.weight,    min: 30,  max: 200, step: 1,   unit: "kg",   onChange: props.onWeightChange },
+    { label: "Né en",     value: props.birthYear, min: 1940, max: 2010, step: 1, unit: "",     onChange: props.onBirthYearChange },
   ];
 
-  const visible = fields.filter(f => {
+  // Filtre les champs selon le type d'activité (VMA masquée en vélo, FTP masqué en running).
+  const visibleFields = fields.filter(f => {
     if (f.cyclingOnly && !props.isCycling) return false;
     if (f.runningOnly && props.isCycling) return false;
     return true;
   });
 
-  const panelPos = isControlled
+  // Position du panneau : fixed quand contrôlé (burger), absolute sinon (bouton autonome).
+  const panelPosition = isControlled
     ? { position: "fixed" as const, top: "64px", right: "16px" }
     : { position: "absolute" as const, top: "calc(100% + 8px)", right: 0 };
 
@@ -119,7 +128,7 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
 
       {open && (
         <div style={{
-          ...panelPos,
+          ...panelPosition,
           zIndex: 2100, minWidth: "260px",
           background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
           borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-xl)",
@@ -135,7 +144,7 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
             </button>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.65rem" }}>
-            {/* Sexe — toggle binaire pour le calcul TRIMP Banister */}
+            {/* Sexe — toggle binaire utilisé pour le facteur k du TRIMP Banister (M=1,92 / F=1,67) */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
               <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)", fontWeight: 600 }}>Sexe</span>
               <div style={{ display: "flex", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", overflow: "hidden" }}>
@@ -152,7 +161,7 @@ export const AthleteSettingsButton: React.FC<AthleteSettingsProps> = (props) => 
                 ))}
               </div>
             </div>
-            {visible.map(f => <Stepper key={f.label} {...f} />)}
+            {visibleFields.map(f => <Stepper key={f.label} {...f} />)}
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import React from "react";
 import { Map, TrendingUp, Heart, BarChart2, Activity } from "lucide-react";
 
+/** Définition statique des ancres de navigation — id correspond à l'attribut id du DOM. */
 const NAV_ITEMS = [
   { id: "nav-map",     label: "Carte",      icon: <Map size={14} /> },
   { id: "nav-charts",  label: "Graphiques", icon: <TrendingUp size={14} /> },
@@ -9,6 +10,7 @@ const NAV_ITEMS = [
   { id: "nav-balance", label: "Charge",     icon: <Activity size={14} /> },
 ] as const;
 
+/** Barre de navigation flottante fixe — s'affiche uniquement lorsqu'une activité est chargée. */
 export const FloatingNav: React.FC<{ visible: boolean }> = ({ visible }) => {
   if (!visible) return null;
 

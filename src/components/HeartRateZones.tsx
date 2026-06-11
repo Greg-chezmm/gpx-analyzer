@@ -16,10 +16,11 @@ interface ZoneDefinition {
   label: string;
   description: string;
   color: string;
-  pctMin: number; // % of FC reserve (Karvonen)
+  pctMin: number; // % de la réserve FC (méthode Karvonen)
   pctMax: number;
 }
 
+/** Zones cardiaques Z1–Z5 définies en % de réserve FC (Karvonen). */
 const ZONES: ZoneDefinition[] = [
   { label: "Z1", description: "Récupération",  color: "#60a5fa", pctMin: 0,    pctMax: 0.60 },
   { label: "Z2", description: "Endurance",      color: "#34d399", pctMin: 0.60, pctMax: 0.70 },
@@ -28,8 +29,11 @@ const ZONES: ZoneDefinition[] = [
   { label: "Z5", description: "Max / VO2max",   color: "#ef4444", pctMin: 0.90, pctMax: Infinity },
 ];
 
+/**
+ * Retourne l'index de zone (0–4) pour une FC donnée selon les bornes Karvonen.
+ * bounds = [z1min, z2min, z3min, z4min, z5min] en bpm absolus.
+ */
 function getZoneIndex(hr: number, bounds: number[]): number {
-  // bounds = [z1min, z2min, z3min, z4min, z5min] (Karvonen)
   if (hr >= bounds[4]) return 4;
   if (hr >= bounds[3]) return 3;
   if (hr >= bounds[2]) return 2;
@@ -37,6 +41,7 @@ function getZoneIndex(hr: number, bounds: number[]): number {
   return 0;
 }
 
+/** Stepper +/− réactif pour saisir FC max ou FC repos. */
 const NumberInput: React.FC<{
   id: string; label: string; value: number; min: number; max: number; unit: string;
   color: string; colorLight: string; onChange: (v: number) => void;
@@ -74,18 +79,21 @@ const NumberInput: React.FC<{
   );
 };
 
+/** Affiche les zones de fréquence cardiaque Z1–Z5 (méthode Karvonen) avec steppers FC max / FC repos réactifs. */
 export const HeartRateZones: React.FC<HeartRateZonesProps> = ({
   points, fcMax, fcRest, onFcMaxChange, onFcRestChange,
 }) => {
   const bounds = karvonenBounds(fcMax, fcRest);
   const reserve = fcMax - fcRest;
 
+  // Cumul du temps (en secondes) passé dans chaque zone, interpolé entre points consécutifs
   const zoneTime = new Array<number>(ZONES.length).fill(0);
   for (let i = 1; i < points.length; i++) {
     const curr = points[i], prev = points[i - 1];
     if (curr.hr === null || prev.hr === null) continue;
     if (curr.time === null || prev.time === null) continue;
     const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
+    // Ignore les intervalles nuls ou aberrants (>60 s = pause ou gap GPS)
     if (dt <= 0 || dt > 60) continue;
     zoneTime[getZoneIndex((curr.hr + prev.hr) / 2, bounds)] += dt;
   }
@@ -120,10 +128,11 @@ export const HeartRateZones: React.FC<HeartRateZonesProps> = ({
         </div>
       </div>
 
-      {/* Stacked proportional bar */}
+      {/* Barre empilée proportionnelle au temps total */}
       <div style={{ display: "flex", height: "18px", borderRadius: "9px", overflow: "hidden", gap: "2px", marginBottom: "1.5rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = totalTime > 0 ? (zoneTime[idx] / totalTime) * 100 : 0;
+          // Ne pas afficher les segments trop fins (<0.3%) pour éviter les artefacts visuels
           if (pct < 0.3) return null;
           return (
             <div key={zone.label} title={`${zone.label} — ${pct.toFixed(1)}%`} style={{
@@ -134,7 +143,7 @@ export const HeartRateZones: React.FC<HeartRateZonesProps> = ({
         })}
       </div>
 
-      {/* Zone cards */}
+      {/* Cartes de zone */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: "0.85rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = totalTime > 0 ? (zoneTime[idx] / totalTime) * 100 : 0;

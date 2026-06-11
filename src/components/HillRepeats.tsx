@@ -10,6 +10,11 @@ interface HillRepeatsProps {
   points: GPXTrackPoint[];
 }
 
+/**
+ * Badge coloré indiquant la régularité ou la fatigue sur une série de côtes.
+ * Seuils : < 3% → régulier, 3–8% → fatigue modérée, > 8% → fatigue marquée.
+ * pct > 0 = ralentissement (fatigue), pct < 0 = accélération (progression).
+ */
 function FatigueBadge({ pct }: { pct: number | null }) {
   if (pct === null) return null;
   const abs = Math.abs(pct);
@@ -35,6 +40,7 @@ interface RepRowProps {
   onClick: () => void;
 }
 
+/** Ligne de tableau pour une répétition de côte individuelle. */
 function RepRow({ rep, hasHR, isLast, onClick }: RepRowProps) {
   return (
     <tr
@@ -60,6 +66,7 @@ function RepRow({ rep, hasHR, isLast, onClick }: RepRowProps) {
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-speed)", fontWeight: 600 }}>
         {rep.avgPace > 0 ? formatPace(rep.avgPace) + " /km" : "—"}
       </td>
+      {/* VAM = Vitesse Ascensionnelle Moyenne en m/h — compare l'efficacité en côte */}
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
         {Math.round(rep.vam)} m/h
       </td>
@@ -86,6 +93,7 @@ interface SeriesPanelProps {
   onRepClick: (rep: HillRepetition, seriesId: number) => void;
 }
 
+/** Panneau repliable pour une série de répétitions de côte. */
 function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
   const [open, setOpen] = useState(true);
   const hasHR = s.avgHR !== null;
@@ -144,8 +152,9 @@ function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
   );
 }
 
+/** Tableau des répétitions de côtes détectées, organisées par série, avec clic → carte. */
 export const HillRepeats: React.FC<HillRepeatsProps> = ({ series, points }) => {
-  const totalReps = series.reduce((a, s) => a + s.repCount, 0);
+  const totalReps = series.reduce((sum, s) => sum + s.repCount, 0);
   const [selected, setSelected] = useState<{ rep: HillRepetition; seriesId: number } | null>(null);
 
   return (

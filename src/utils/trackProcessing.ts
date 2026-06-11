@@ -21,8 +21,10 @@ import type { GPXTrackPoint } from './gpxCore';
 export function enrichPoints(points: GPXTrackPoint[]): {
   elevationGain: number;
   elevationLoss: number;
+  elevOutliers: number;
+  elevCoverage: number;
 } {
-  if (points.length === 0) return { elevationGain: 0, elevationLoss: 0 };
+  if (points.length === 0) return { elevationGain: 0, elevationLoss: 0, elevOutliers: 0, elevCoverage: 100 };
 
   // a) Elevation smoothing
   const rawEle = points.map(p => p.ele);
@@ -30,14 +32,18 @@ export function enrichPoints(points: GPXTrackPoint[]): {
   // Pre-pass: reject isolated GPS altitude outliers before smoothing.
   // A point deviating > 50 m from its neighbors' midpoint is almost certainly
   // sensor noise (GPS altitude accuracy is typically ±10-20 m, not ±100 m).
+  let elevOutliers = 0;
   for (let i = 1; i < rawEle.length - 1; i++) {
     if (rawEle[i] === null) continue;
     const prev = rawEle[i - 1], next = rawEle[i + 1];
     if (prev === null || next === null) continue;
     if (Math.abs(rawEle[i]! - (prev + next) / 2) > 50) {
       rawEle[i] = (prev + next) / 2;
+      elevOutliers++;
     }
   }
+  const elevWithData = rawEle.filter(e => e !== null).length;
+  const elevCoverage = Math.round(elevWithData / points.length * 100);
 
   const ELE_WIN = 5;
   for (let i = 0; i < points.length; i++) {
@@ -103,6 +109,8 @@ export function enrichPoints(points: GPXTrackPoint[]): {
   return {
     elevationGain: Math.round(elevationGain * 10) / 10,
     elevationLoss: Math.round(elevationLoss * 10) / 10,
+    elevOutliers,
+    elevCoverage,
   };
 }
 
@@ -117,11 +125,17 @@ export function computeTrackStats(points: GPXTrackPoint[], fallbackDistance: num
     ? (endTime.getTime() - startTime.getTime()) / 1000 : 0;
 
   let movingTime = 0, maxSpeed = 0, movingSpeedSum = 0, movingPointsCount = 0;
+  let gapCount = 0, longestGap = 0;
 
   for (let i = 1; i < points.length; i++) {
     const curr = points[i], prev = points[i - 1];
     const timeDiff = curr.time && prev.time
       ? (curr.time.getTime() - prev.time.getTime()) / 1000 : 0;
+
+    if (timeDiff >= 30) {
+      gapCount++;
+      if (timeDiff > longestGap) longestGap = timeDiff;
+    }
 
     if (timeDiff > 0 && timeDiff < 30) {
       const spd = curr.speed ?? 0;
@@ -150,5 +164,7 @@ export function computeTrackStats(points: GPXTrackPoint[], fallbackDistance: num
     maxSpeed,
     avgSpeed,
     avgPace: avgSpeed > 0 ? 1000 / avgSpeed : 0,
+    gapCount,
+    longestGap,
   };
 }

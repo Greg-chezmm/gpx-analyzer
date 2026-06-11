@@ -6,16 +6,19 @@ interface AISummaryProps {
   onClose: () => void;
 }
 
+/** Modale affichant le résumé textuel de l'activité prêt à coller dans une IA (Claude, ChatGPT…). */
 export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
   const [copied, setCopied] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Fermeture clavier via Escape.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
+  /** Copie le contenu du textarea (modifiable) plutôt que le texte d'origine. */
   const handleCopy = async () => {
     const val = textareaRef.current?.value ?? text;
     await navigator.clipboard.writeText(val);
@@ -43,7 +46,7 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
         overflow: "hidden",
         boxShadow: "0 25px 50px rgba(0,0,0,0.35)",
       }}>
-        {/* Header */}
+        {/* En-tête */}
         <div style={{
           display: "flex", alignItems: "center", gap: "0.75rem",
           padding: "1rem 1.25rem",
@@ -67,7 +70,7 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
           </button>
         </div>
 
-        {/* Textarea */}
+        {/* Zone de texte modifiable avant copie */}
         <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", padding: "1rem 1.25rem" }}>
           <textarea
             ref={textareaRef}
@@ -90,7 +93,7 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
           />
         </div>
 
-        {/* Footer */}
+        {/* Pied de modale — actions */}
         <div style={{
           display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap",
           padding: "0.85rem 1.25rem",

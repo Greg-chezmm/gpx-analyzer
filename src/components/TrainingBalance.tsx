@@ -9,6 +9,10 @@ interface Props {
   onClear: () => void;
 }
 
+/**
+ * Retourne le libellé et la couleur d'état selon le TSB (Training Stress Balance).
+ * TSB > 10 = frais, < -30 = surmenage — seuils issus de la méthode Banister/PMC.
+ */
 function tsbLabel(tsb: number): { label: string; color: string } {
   if (tsb >  10) return { label: "Frais",     color: "#34d399" };
   if (tsb >   0) return { label: "Équilibré", color: "#60a5fa" };
@@ -17,6 +21,10 @@ function tsbLabel(tsb: number): { label: string; color: string } {
   return              { label: "Surmenage",   color: "#ef4444" };
 }
 
+/**
+ * Retourne le libellé et la couleur de niveau de forme selon le CTL.
+ * CTL (Chronic Training Load) : charge chronique sur 42 jours — proxy de la forme.
+ */
 function ctlLabel(ctl: number): { label: string; color: string } {
   if (ctl >= 80) return { label: "Élite",       color: "#a78bfa" };
   if (ctl >= 60) return { label: "Compétiteur", color: "#60a5fa" };
@@ -25,6 +33,7 @@ function ctlLabel(ctl: number): { label: string; color: string } {
   return              { label: "Débutant",      color: "#94a3b8" };
 }
 
+/** Tuile KPI numérique avec étiquette colorée. */
 function KPI({ label, value, sub, color }: { label: string; value: string; sub: string; color: string }) {
   return (
     <div style={{ textAlign: "center", minWidth: "90px" }}>
@@ -39,6 +48,7 @@ function KPI({ label, value, sub, color }: { label: string; value: string; sub: 
   );
 }
 
+/** Formate une durée en secondes en h:mm ou m:ss. */
 function fmtDur(s: number): string {
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
@@ -47,6 +57,7 @@ function fmtDur(s: number): string {
   return `${m}:${ss.toString().padStart(2, '0')}`;
 }
 
+/** Formate une allure en s/km en "m:ss". */
 function fmtPace(sPerKm: number): string {
   const m = Math.floor(sPerKm / 60);
   const s = Math.round(sPerKm % 60);
@@ -64,17 +75,22 @@ interface Alert {
   detail: string;
 }
 
+/**
+ * Calcule les alertes de charge d'entraînement à partir des métriques PMC.
+ * Vérifie : TSB critique, ratio ATL/CTL (seuil 1.3/1.5), ramp rate CTL sur 7 jours (>7 pts),
+ * et monotonie de Banister (indice > 2 = variété insuffisante).
+ */
 function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: Array<{ trimp: number; ctl: number }> }): Alert[] {
   const alerts: Alert[] = [];
 
-  // TSB critique
+  // TSB critique : en dessous de -30 le risque de blessure/surentraînement est élevé
   if (tsb.tsb < -30) {
     alerts.push({ level: 'danger', message: 'Surmenage probable', detail: `TSB ${tsb.tsb.toFixed(0)} — repos avant toute séance intense` });
   } else if (tsb.tsb < -15) {
     alerts.push({ level: 'warning', message: 'Fatigue accumulée', detail: `TSB ${tsb.tsb.toFixed(0)} — surveiller les signes de surcharge` });
   }
 
-  // Ratio ATL/CTL (charge aiguë/chronique)
+  // Ratio ATL/CTL : au-delà de 1.3 la charge aiguë dépasse la capacité chronique
   if (tsb.ctl > 0) {
     const ratio = tsb.atl / tsb.ctl;
     if (ratio > 1.5) {
@@ -84,7 +100,7 @@ function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: 
     }
   }
 
-  // Ramp rate sur 7 jours
+  // Ramp rate : progression CTL > 7 points/semaine = augmentation trop rapide
   const data = tsb.chartData;
   if (data.length >= 8) {
     const ramp = (data[data.length - 1].ctl) - (data[data.length - 8].ctl);
@@ -93,7 +109,7 @@ function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: 
     }
   }
 
-  // Monotonie (Banister) sur 7 jours
+  // Monotonie de Banister : moyenne TRIMP / écart-type sur 7 jours ; > 2 = manque de variation
   if (data.length >= 7) {
     const week = data.slice(-7).map(d => d.trimp);
     const mean = week.reduce((a, b) => a + b, 0) / 7;
@@ -107,6 +123,10 @@ function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: 
   return alerts;
 }
 
+/**
+ * Panneau de charge d'entraînement — affiche les courbes CTL/ATL/TSB,
+ * les alertes de surcharge et le détail inline des séances au survol.
+ */
 export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [viewDays, setViewDays] = useState<30 | 90>(30);
@@ -118,25 +138,31 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
   const { label: ctlLbl, color: ctlColor } = ctlLabel(tsb.ctl);
   const data = tsb.chartData.slice(-viewDays);
 
+  // Marges et dimensions du SVG en unités viewport
   const ML = 36, MT = 8, MB = 22, MR = 8;
   const VW = 560, VH = 140;
-  const cw = VW - ML - MR;
-  const ch = VH - MT - MB - 12;
+  const chartWidth  = VW - ML - MR;
+  const chartHeight = VH - MT - MB - 12;
   const n = data.length;
 
   const allVals = data.flatMap(d => [d.ctl, d.atl, d.tsb]);
   const maxV = Math.max(...allVals, 10);
   const minV = Math.min(...allVals, -5);
-  const range = maxV - minV || 1;
+  const valRange = maxV - minV || 1;
 
-  const toX = (i: number) => ML + (n > 1 ? (i / (n - 1)) * cw : cw / 2);
-  const toY = (v: number) => MT + ch - ((v - minV) / range) * ch;
+  /** Convertit un index de point en coordonnée X SVG. */
+  const toX = (i: number) => ML + (n > 1 ? (i / (n - 1)) * chartWidth : chartWidth / 2);
+  /** Convertit une valeur en coordonnée Y SVG (axe inversé). */
+  const toY = (v: number) => MT + chartHeight - ((v - minV) / valRange) * chartHeight;
   const zeroY = toY(0);
+  // Ligne de points de séances en bas du graphique
   const dotsY = VH - MB - 6;
 
+  /** Construit la commande de tracé SVG pour une des trois courbes. */
   const path = (key: 'ctl' | 'atl' | 'tsb') =>
     data.map((d, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(d[key]).toFixed(1)}`).join(' ');
 
+  // Labels de l'axe X : un par mois (ou au premier point)
   const xLabels: { i: number; label: string }[] = [];
   data.forEach((d, i) => {
     if (d.date.slice(8) === '01' || i === 0) {
@@ -146,6 +172,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
     }
   });
 
+  // Points de séances (jours avec TRIMP > 0) enrichis des entrées d'historique
   const trainingDots = data
     .map((d, i) => ({ ...d, i }))
     .filter(d => d.trimp > 0)
@@ -194,7 +221,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
         </div>
       </div>
 
-      {/* Alertes */}
+      {/* Alertes de surcharge */}
       {alerts.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '1rem' }}>
           {alerts.map((a, i) => (
@@ -218,6 +245,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           ))}
         </div>
       )}
+      {/* Message positif si aucune alerte et CTL significatif */}
       {alerts.length === 0 && tsb.ctl > 5 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: '0.5rem',
@@ -231,43 +259,44 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
         </div>
       )}
 
-      {/* KPI row */}
+      {/* Tuiles KPI : CTL / ATL / TSB */}
       <div style={{ display: "flex", gap: "1.5rem", justifyContent: "center", flexWrap: "wrap", marginBottom: "1.25rem" }}>
         <KPI label="CTL — Forme physique" value={tsb.ctl.toFixed(1)} sub={ctlLbl} color={ctlColor} />
         <KPI label="ATL — Fatigue aiguë"  value={tsb.atl.toFixed(1)} sub={`${tsb.atl > tsb.ctl ? '↑' : '↓'} charge récente`} color="#f97316" />
         <KPI label="TSB — Forme du jour"  value={tsb.tsb > 0 ? `+${tsb.tsb.toFixed(1)}` : tsb.tsb.toFixed(1)} sub={tsbLbl} color={tsbColor} />
       </div>
 
-      {/* SVG chart */}
+      {/* Graphique SVG CTL/ATL/TSB */}
       {n >= 2 && (
         <svg viewBox={`0 0 ${VW} ${VH}`}
           style={{ width: "100%", display: "block", overflow: "visible" }}
           onMouseLeave={() => setTooltip(null)}
         >
-          {/* Grid */}
+          {/* Grille horizontale (valeurs 0, 25, 50, 75, 100) */}
           {[0, 25, 50, 75, 100].filter(v => v >= minV && v <= maxV).map(v => (
             <g key={v}>
               <line x1={ML} y1={toY(v)} x2={VW - MR} y2={toY(v)} stroke="var(--border-color)" strokeWidth="0.5" />
               <text x={ML - 4} y={toY(v) + 4} textAnchor="end" fontSize="9" fill="var(--text-tertiary)">{v}</text>
             </g>
           ))}
-          {/* Zero line */}
+          {/* Ligne zéro (TSB = 0 = charge neutre) */}
           <line x1={ML} y1={zeroY} x2={VW - MR} y2={zeroY} stroke="var(--border-color)" strokeWidth="1" strokeDasharray="3,3" />
 
-          {/* CTL / ATL / TSB lines */}
+          {/* Courbes CTL (bleu), ATL (orange), TSB (couleur variable) */}
           <path d={path('ctl')} fill="none" stroke="#60a5fa" strokeWidth="2" strokeLinejoin="round" />
           <path d={path('atl')} fill="none" stroke="#f97316" strokeWidth="2" strokeLinejoin="round" />
           <path d={path('tsb')} fill="none" stroke={tsbColor} strokeWidth="1.5" strokeLinejoin="round" strokeDasharray="4,2" />
 
-          {/* Dots row separator */}
+          {/* Séparateur visuel avant la ligne de points de séances */}
           <line x1={ML} y1={dotsY - 8} x2={VW - MR} y2={dotsY - 8}
             stroke="var(--border-color)" strokeWidth="0.4" />
 
-          {/* Session vertical lines + dots */}
+          {/* Points de séances et lignes verticales de guidage */}
           {trainingDots.map((d) => {
             const cx = toX(d.i);
             const hasMulti = d.entries.length > 1;
             const isCycling = !hasMulti && d.entries[0]?.activityType === 'cycling';
+            // Violet = course, vert = vélo
             const dotColor = isCycling ? '#34d399' : '#818cf8';
             const isActive = tooltip?.svgX === cx;
             const r = isActive ? 5 : 4;
@@ -276,14 +305,14 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
                 style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setTooltip({ entries: d.entries, svgX: cx })}
               >
-                {/* Vertical guide line — brightens on hover */}
+                {/* Ligne verticale de guidage — s'intensifie au survol */}
                 <line
                   x1={cx} y1={MT}
                   x2={cx} y2={dotsY - 9}
                   stroke={dotColor} strokeWidth="0.75"
                   strokeDasharray="2,3" strokeOpacity={isActive ? 0.8 : 0.3}
                 />
-                {/* Session dot — stacked rings if multiple sessions */}
+                {/* Deux cercles décalés si plusieurs séances le même jour */}
                 {hasMulti ? (
                   <>
                     <circle cx={cx - 2} cy={dotsY} r={r}
@@ -299,14 +328,14 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             );
           })}
 
-          {/* X labels */}
+          {/* Labels de l'axe X (mois) */}
           {xLabels.map(({ i, label }) => (
             <text key={label + i} x={toX(i)} y={VH - 4} textAnchor="middle" fontSize="9" fill="var(--text-tertiary)">{label}</text>
           ))}
         </svg>
       )}
 
-      {/* Panneau de détail inline — s'affiche sous le graphique au survol d'un dot */}
+      {/* Détail inline des séances — s'affiche sous le graphique au survol d'un point */}
       {tooltip && tooltip.entries.length > 0 && (() => {
         const entries = tooltip.entries;
         const isMulti = entries.length > 1;
@@ -353,7 +382,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
         );
       })()}
 
-      {/* Legend */}
+      {/* Légende des courbes */}
       <div style={{ display: "flex", gap: "1rem", justifyContent: "center", flexWrap: "wrap", marginTop: "0.5rem" }}>
         {[
           { color: "#60a5fa", label: "CTL — Forme chronique (42j)" },
@@ -374,6 +403,7 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
         </div>
       </div>
 
+      {/* Avertissement si l'historique est trop court pour être fiable */}
       {n < 14 && (
         <div style={{ fontSize: "0.71rem", color: "var(--text-tertiary)", textAlign: "center", marginTop: "0.75rem",
           borderTop: "1px solid var(--border-color)", paddingTop: "0.5rem" }}>

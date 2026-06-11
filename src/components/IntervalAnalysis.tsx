@@ -12,24 +12,27 @@ interface IntervalAnalysisProps {
   source?: "fit" | "detected";
 }
 
+/** Calcule la moyenne d'un tableau de nombres ; retourne null si vide. */
 function avg(values: number[]): number | null {
   if (values.length === 0) return null;
   return values.reduce((a, b) => a + b, 0) / values.length;
 }
 
+/** Tableau des intervalles d'effort détectés, avec résumé et clic → carte. */
 export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   intervals,
   activityType,
   points,
   source = "detected",
 }) => {
-  const effortIntervals = intervals.filter((iv) => iv.type === "effort");
+  const effortIntervals   = intervals.filter((iv) => iv.type === "effort");
   const recoveryIntervals = intervals.filter((iv) => iv.type === "recovery");
 
   if (effortIntervals.length === 0) return null;
 
   const isCycling = activityType === "cycling";
   const cadenceUnit = isCycling ? "rpm" : "ppm";
+  // Cadence GPX stockée en demi-pas/s pour la course ; on multiplie par 2 pour obtenir ppm.
   const cadenceDisplay = (raw: number) => (isCycling ? raw : raw * 2);
 
   const hasHeartRate = effortIntervals.some((iv) => iv.avgHeartRate !== null);
@@ -37,12 +40,13 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   const hasPower     = effortIntervals.some((iv) => iv.avgPower != null);
   const hasElevation = effortIntervals.some((iv) => (iv.totalAscent ?? 0) > 0 || (iv.totalDescent ?? 0) > 0);
 
-  const avgEffortPace = avg(effortIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
-  const avgRecoveryPace = avg(recoveryIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
-  const avgEffortPower = hasPower
+  const avgEffortPace    = avg(effortIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
+  const avgRecoveryPace  = avg(recoveryIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
+  const avgEffortPower   = hasPower
     ? avg(effortIntervals.filter(iv => iv.avgPower != null).map(iv => iv.avgPower!))
     : null;
 
+  // Badge fatigue : si l'allure des 3 derniers efforts dépasse de >5% celle des 3 premiers.
   let showFatigueBadge = false;
   if (effortIntervals.length >= 6) {
     const avgFirst = avg(effortIntervals.slice(0, 3).map((iv) => iv.avgPace));
@@ -57,7 +61,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
 
   return (
     <div className="card animate-slide-up" style={{ width: "100%" }}>
-      {/* Header */}
+      {/* En-tête cliquable — plie/déplie le panneau */}
       <div
         className="panel-header"
         onClick={() => setOpen(o => !o)}
@@ -98,7 +102,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
       </div>
 
       {open && <>
-        {/* Summary */}
+        {/* Résumé global des efforts */}
         <div style={{
           display: "flex", flexWrap: "wrap", gap: "1rem",
           marginBottom: "1.25rem", padding: "0.75rem 1rem",
@@ -118,7 +122,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
           )}
         </div>
 
-        {/* Table */}
+        {/* Tableau détaillé par répétition */}
         <div style={{ overflowX: "auto", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)" }}>
           <table className="splits-table">
             <thead>

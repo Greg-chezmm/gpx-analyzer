@@ -7,6 +7,8 @@ interface VO2maxEstimateProps {
 }
 
 interface VO2Level { label: string; color: string; min: number; max: number }
+
+/** Niveaux VO2max en mL/kg/min, de faible à élite (barème adulte tous genres). */
 const VO2_LEVELS: VO2Level[] = [
   { label: "Faible",   color: "#ef4444", min: 0,  max: 30 },
   { label: "Moyen",    color: "#f97316", min: 30, max: 40 },
@@ -16,8 +18,9 @@ const VO2_LEVELS: VO2Level[] = [
   { label: "Élite",    color: "#a78bfa", min: 70, max: 100 },
 ];
 
-function getLevel(v: number): VO2Level {
-  return VO2_LEVELS.find(l => v >= l.min && v < l.max) ?? VO2_LEVELS[VO2_LEVELS.length - 1];
+/** Retourne le niveau VO2max correspondant à la valeur, ou le dernier par défaut. */
+function getLevel(value: number): VO2Level {
+  return VO2_LEVELS.find(l => value >= l.min && value < l.max) ?? VO2_LEVELS[VO2_LEVELS.length - 1];
 }
 
 const CONFIDENCE_LABELS = {
@@ -26,11 +29,13 @@ const CONFIDENCE_LABELS = {
   low:    { label: "Faible",  color: "#f97316" },
 };
 
+/** Affiche l'estimation VO2max sous-maximale avec barre de niveaux et indicateur de fiabilité. */
 export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
-  const lvl = getLevel(estimate.value);
+  const level = getLevel(estimate.value);
+  // 80 mL/kg/min comme plafond d'affichage de la jauge (au-delà = élite absolu)
   const MAX_DISPLAY = 80;
-  const gaugeW = Math.min(100, (estimate.value / MAX_DISPLAY) * 100);
-  const conf = CONFIDENCE_LABELS[estimate.confidence];
+  const gaugePercent = Math.min(100, (estimate.value / MAX_DISPLAY) * 100);
+  const confidence = CONFIDENCE_LABELS[estimate.confidence];
 
   return (
     <div className="card animate-slide-up">
@@ -41,17 +46,17 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
         </h3>
         <div style={{
           padding: "0.3rem 0.85rem", borderRadius: "var(--radius-full)",
-          backgroundColor: `${conf.color}18`, border: `1px solid ${conf.color}44`,
-          fontSize: "0.78rem", fontWeight: 700, color: conf.color,
+          backgroundColor: `${confidence.color}18`, border: `1px solid ${confidence.color}44`,
+          fontSize: "0.78rem", fontWeight: 700, color: confidence.color,
         }}>
-          Fiabilité {conf.label}
+          Fiabilité {confidence.label}
         </div>
       </div>
 
-      {/* Main value */}
+      {/* Valeur principale */}
       <div style={{ display: "flex", alignItems: "flex-end", gap: "1.5rem", marginBottom: "1.25rem", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontFamily: "var(--font-heading)", fontWeight: 900, fontSize: "3.5rem", color: lvl.color, lineHeight: 1 }}>
+          <div style={{ fontFamily: "var(--font-heading)", fontWeight: 900, fontSize: "3.5rem", color: level.color, lineHeight: 1 }}>
             {estimate.value}
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>mL/kg/min</div>
@@ -60,10 +65,10 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
           <div style={{
             display: "inline-block", padding: "0.3rem 0.85rem",
             borderRadius: "var(--radius-full)",
-            backgroundColor: `${lvl.color}18`, border: `1px solid ${lvl.color}44`,
-            fontSize: "1rem", fontWeight: 800, color: lvl.color,
+            backgroundColor: `${level.color}18`, border: `1px solid ${level.color}44`,
+            fontSize: "1rem", fontWeight: 800, color: level.color,
           }}>
-            {lvl.label}
+            {level.label}
           </div>
           <div style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", marginTop: "0.4rem" }}>
             Vitesse moy. : {estimate.speedKmh} km/h · HRR moy. : {estimate.hrrPct}%
@@ -71,7 +76,7 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
         </div>
       </div>
 
-      {/* Scale bar */}
+      {/* Barre de niveaux colorée avec curseur triangulaire */}
       <div style={{ marginBottom: "0.5rem" }}>
         <div style={{ display: "flex", height: "10px", borderRadius: "5px", overflow: "hidden", marginBottom: "0.4rem" }}>
           {VO2_LEVELS.map(l => (
@@ -80,13 +85,13 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
             }} />
           ))}
         </div>
-        {/* Cursor */}
+        {/* Triangle curseur positionné en % sur la barre */}
         <div style={{ position: "relative", height: "12px" }}>
           <div style={{
-            position: "absolute", left: `${gaugeW}%`, transform: "translateX(-50%)",
+            position: "absolute", left: `${gaugePercent}%`, transform: "translateX(-50%)",
             width: 0, height: 0,
             borderLeft: "5px solid transparent", borderRight: "5px solid transparent",
-            borderBottom: `7px solid ${lvl.color}`,
+            borderBottom: `7px solid ${level.color}`,
           }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-tertiary)" }}>
@@ -98,6 +103,7 @@ export const VO2maxEstimate: React.FC<VO2maxEstimateProps> = ({ estimate }) => {
         </div>
       </div>
 
+      {/* Méthode : ACSM sous-maximale terrain plat, filtre HRR ≥ 55% pour exclure les segments peu sollicités */}
       <div style={{ fontSize: "0.71rem", color: "var(--text-tertiary)", borderTop: "1px solid var(--border-color)", paddingTop: "0.6rem", marginTop: "0.25rem" }}>
         Méthode sous-maximale : ACSM terrain plat (HRR ≥ 55%) + Karvonen · Segment le plus stable : {estimate.windowMin} min
       </div>

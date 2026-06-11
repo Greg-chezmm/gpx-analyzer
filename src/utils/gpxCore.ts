@@ -25,6 +25,15 @@ export interface FitSummary {
   timeInHrZone: number[] | null;  // secondes [Z1..Z5], zones % FCmax montre
 }
 
+export interface DataQuality {
+  hrCoverage: number;    // % points avec FC (0–100)
+  elevCoverage: number;  // % points avec altitude valide (0–100)
+  elevOutliers: number;  // points altitude corrigés (spike > 50 m)
+  gapCount: number;      // pauses GPS/chrono ≥ 30 s
+  longestGap: number;    // durée max d'un gap (secondes)
+  gpsDropped: number;    // enregistrements sans GPS valide (FIT only, 0 pour GPX)
+}
+
 export interface GPXActivity {
   name: string;
   startTime: Date | null;
@@ -46,6 +55,7 @@ export interface GPXActivity {
   maxPower: number | null;
   avgTemp: number | null;
   activityType: 'running' | 'cycling' | 'unknown';
+  dataQuality: DataQuality;
   fitSummary?: FitSummary;
   fitLaps?: import('./intervals').GPXInterval[];
 }
@@ -199,8 +209,8 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
     });
   }
 
-  const { elevationGain, elevationLoss } = enrichPoints(points);
-  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace }
+  const { elevationGain, elevationLoss, elevOutliers, elevCoverage } = enrichPoints(points);
+  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace, gapCount, longestGap }
     = computeTrackStats(points, accumulatedDistance);
 
   // Detect activity type from <type> tag or speed heuristic
@@ -242,5 +252,13 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
     maxPower: powerCount > 0 ? maxPowerVal : null,
     avgTemp: tempCount > 0 ? Math.round((tempSum / tempCount) * 10) / 10 : null,
     activityType,
+    dataQuality: {
+      hrCoverage:   points.length > 0 ? Math.round(hrCount    / points.length * 100) : 0,
+      elevCoverage,
+      elevOutliers,
+      gapCount,
+      longestGap,
+      gpsDropped:   0,
+    },
   };
 }

@@ -7,14 +7,19 @@ interface CardiacDriftProps {
   drift: CardiacDriftData;
 }
 
+/**
+ * Retourne couleur, libellé et fond selon le niveau de découplage (%).
+ * Seuil ≤5% = excellent, ≤10% = acceptable, >10% = dérive marquée.
+ */
 function driftStyle(d: number): { color: string; label: string; bg: string } {
   if (Math.abs(d) <= 5)  return { color: "#16a34a", label: "Excellent — base aérobie solide", bg: "#f0fdf4" };
   if (Math.abs(d) <= 10) return { color: "#d97706", label: "Acceptable — léger drift cardiaque", bg: "#fffbeb" };
   return                        { color: "#dc2626", label: "Dérive marquée — allure trop élevée ou fatigue", bg: "#fef2f2" };
 }
 
+/** Affiche la dérive cardiaque (découplage %) et l'efficacité aérobie EF en deux moitiés de séance. */
 export const CardiacDrift: React.FC<CardiacDriftProps> = ({ drift }) => {
-  const ds = driftStyle(drift.decoupling);
+  const style = driftStyle(drift.decoupling);
 
   return (
     <div className="card animate-slide-up">
@@ -23,27 +28,28 @@ export const CardiacDrift: React.FC<CardiacDriftProps> = ({ drift }) => {
           <Activity size={18} style={{ color: "#a78bfa" }} />
           <span>Dérive Cardiaque &amp; Efficacité Aérobie</span>
         </h3>
-        {/* Decoupling badge */}
+        {/* Badge de découplage coloré selon le seuil */}
         <div style={{
           display: "flex", alignItems: "center", gap: "0.5rem",
           padding: "0.35rem 0.85rem", borderRadius: "var(--radius-full)",
-          backgroundColor: ds.bg, border: `1px solid ${ds.color}44`,
-          fontSize: "0.82rem", fontWeight: 700, color: ds.color,
+          backgroundColor: style.bg, border: `1px solid ${style.color}44`,
+          fontSize: "0.82rem", fontWeight: 700, color: style.color,
         }}>
           {drift.decoupling > 0 ? "↑" : "↓"} {Math.abs(drift.decoupling).toFixed(1)}% dérive
         </div>
       </div>
 
-      <p style={{ fontSize: "0.82rem", color: ds.color, fontWeight: 600, marginBottom: "1rem" }}>
-        {ds.label}
+      <p style={{ fontSize: "0.82rem", color: style.color, fontWeight: 600, marginBottom: "1rem" }}>
+        {style.label}
       </p>
 
-      {/* Two halves comparison */}
+      {/* Comparaison 1ʳᵉ / 2ᵉ moitié */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem", marginBottom: "1.25rem" }}>
         {[
           { label: "1ʳᵉ moitié", ef: drift.ef1, hr: drift.avgHR1, pace: drift.avgPace1 },
           { label: "2ᵉ moitié",  ef: drift.ef2, hr: drift.avgHR2, pace: drift.avgPace2 },
         ].map((half, i) => {
+          // La 2ᵉ moitié est mise en évidence si l'EF s'est dégradé (dérive visible)
           const isWorse = i === 1 && drift.ef2 < drift.ef1;
           return (
             <div key={i} style={{
@@ -73,7 +79,7 @@ export const CardiacDrift: React.FC<CardiacDriftProps> = ({ drift }) => {
         })}
       </div>
 
-      {/* EF overall */}
+      {/* EF global — formule : vitesse (m/s) × 1000 ÷ FC */}
       <div style={{
         display: "flex", alignItems: "center", justifyContent: "space-between",
         padding: "0.65rem 1rem", borderRadius: "var(--radius-md)",

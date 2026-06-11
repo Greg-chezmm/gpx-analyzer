@@ -13,6 +13,10 @@ interface Props {
 
 // ─── Training Effect ──────────────────────────────────────────────────────────
 
+/**
+ * Retourne le libellé et la couleur selon le Training Effect (échelle 0–5 Garmin/Suunto).
+ * < 2 = maintien, 2–3 = amélioration, > 4 = surcompensation.
+ */
 function teInfo(te: number): { label: string; color: string } {
   if (te < 1.0) return { label: "Aucun effet",      color: "#94a3b8" };
   if (te < 2.0) return { label: "Maintien",         color: "#34d399" };
@@ -21,8 +25,9 @@ function teInfo(te: number): { label: string; color: string } {
   return              { label: "Surcompensation",   color: "#f97316" };
 }
 
-// ─── Feeling ─────────────────────────────────────────────────────────────────
+// ─── Ressenti subjectif ───────────────────────────────────────────────────────
 
+/** Correspondance entre l'entier de ressenti FIT (1–5) et son libellé/emoji. */
 const FEELING: Record<number, { label: string; emoji: string }> = {
   1: { label: "Très difficile", emoji: "😞" },
   2: { label: "Difficile",      emoji: "😕" },
@@ -31,8 +36,9 @@ const FEELING: Record<number, { label: string; emoji: string }> = {
   5: { label: "Excellent",      emoji: "😄" },
 };
 
-// ─── KPI card ─────────────────────────────────────────────────────────────────
+// ─── Tuile KPI ────────────────────────────────────────────────────────────────
 
+/** Tuile KPI centrée avec valeur numérique et badge coloré. */
 function KPI({ label, value, sub, color, title }: {
   label: string; value: string; sub: string; color: string; title?: string;
 }) {
@@ -49,12 +55,12 @@ function KPI({ label, value, sub, color, title }: {
   );
 }
 
-// ─── Zone comparison ─────────────────────────────────────────────────────────
+// ─── Comparaison zones FC ─────────────────────────────────────────────────────
 
 const ZONE_COLORS = ["#34d399", "#60a5fa", "#fbbf24", "#f97316", "#ef4444"];
 const ZONE_LABELS = ["Z1", "Z2", "Z3", "Z4", "Z5"];
 
-// Zones montre = % FCmax fixes (Garmin/Suunto standard)
+/** Seuils zones montre : % FCmax fixes (standard Garmin/Suunto). */
 const WATCH_ZONE_PCT = [
   "< 60 %",
   "60–70 %",
@@ -63,7 +69,7 @@ const WATCH_ZONE_PCT = [
   "> 90 %",
 ];
 
-// Zones Karvonen = % HRR
+/** Seuils zones Karvonen : % de la réserve cardiaque (HRR). */
 const KARV_ZONE_PCT = [
   "50–60 % HRR",
   "60–70 % HRR",
@@ -72,6 +78,7 @@ const KARV_ZONE_PCT = [
   "> 90 % HRR",
 ];
 
+/** Barre de pourcentage animée. */
 function Bar({ pct, color }: { pct: number; color: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flex: 1 }}>
@@ -85,21 +92,25 @@ function Bar({ pct, color }: { pct: number; color: string }) {
   );
 }
 
+/**
+ * Panneau de résumé des données issues du fichier FIT (montre) —
+ * Training Effect, VO2max, récupération, EPOC, ressenti et comparaison des zones FC.
+ */
 export const FitSummary: React.FC<Props> = ({ fit, fcMax, vo2maxEst, trimp }) => {
   const te = fit.trainingEffect != null ? teInfo(fit.trainingEffect) : null;
   const feel = fit.feeling != null ? FEELING[Math.round(fit.feeling)] : null;
 
-  // Zones montre (secondes → pourcentages)
+  // Zones montre : secondes par zone → pourcentages du temps total
   const watchTotal = fit.timeInHrZone?.reduce((a, b) => a + b, 0) ?? 0;
   const watchPct = fit.timeInHrZone?.map(s => watchTotal > 0 ? Math.round((s / watchTotal) * 100) : 0) ?? null;
 
-  // Zones Karvonen depuis trimp.zoneMinutes (minutes)
+  // Zones Karvonen depuis trimp.zoneMinutes (minutes) → pourcentages
   const karvTotal = trimp?.zoneMinutes.reduce((a, b) => a + b, 0) ?? 0;
   const karvPct = trimp?.zoneMinutes.map(m => karvTotal > 0 ? Math.round((m / karvTotal) * 100) : 0) ?? null;
 
   const showZones = watchPct !== null || karvPct !== null;
 
-  // Comparaison VO2max montre vs estimation
+  // Écart VO2max montre vs estimation interne (arrondi à 1 décimale)
   const vo2diff = (fit.estimatedVO2max != null && vo2maxEst != null)
     ? Math.round((vo2maxEst.value - fit.estimatedVO2max) * 10) / 10
     : null;
@@ -113,7 +124,7 @@ export const FitSummary: React.FC<Props> = ({ fit, fcMax, vo2maxEst, trimp }) =>
         </h3>
       </div>
 
-      {/* KPIs */}
+      {/* Tuiles KPI */}
       <div style={{ display: "flex", gap: "1.5rem", justifyContent: "center", flexWrap: "wrap", marginBottom: "1.25rem" }}>
         {te && fit.trainingEffect != null && (
           <KPI
@@ -131,6 +142,7 @@ export const FitSummary: React.FC<Props> = ({ fit, fcMax, vo2maxEst, trimp }) =>
               {fit.estimatedVO2max.toFixed(1)}
             </div>
             <div style={{ fontSize: "0.7rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>mL/kg/min</div>
+            {/* Écart ≤ 2 mL/kg/min = concordance acceptable */}
             {vo2diff !== null && (
               <div style={{ fontSize: "0.7rem", fontWeight: 700, marginTop: "0.2rem", color: Math.abs(vo2diff) <= 2 ? "#34d399" : "#f97316" }}>
                 {vo2diff >= 0 ? "+" : ""}{vo2diff} vs notre calc.
@@ -173,7 +185,7 @@ export const FitSummary: React.FC<Props> = ({ fit, fcMax, vo2maxEst, trimp }) =>
         )}
       </div>
 
-      {/* Comparaison zones FC */}
+      {/* Tableau de comparaison des zones FC montre vs Karvonen */}
       {showZones && (
         <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: "1rem" }}>
           <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--text-secondary)", marginBottom: "0.75rem" }}>
@@ -221,6 +233,7 @@ export const FitSummary: React.FC<Props> = ({ fit, fcMax, vo2maxEst, trimp }) =>
                           <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                             <span style={{ color: "var(--text-tertiary)", minWidth: "72px", fontSize: "0.7rem" }}>{KARV_ZONE_PCT[i]}</span>
                             <Bar pct={kPct ?? 0} color={ZONE_COLORS[i]} />
+                            {/* kMin est en minutes — on convertit en secondes pour formatDuration */}
                             {kMin != null && <span style={{ color: "var(--text-tertiary)", fontSize: "0.7rem", minWidth: "38px" }}>{formatDuration(kMin * 60)}</span>}
                           </div>
                         </td>

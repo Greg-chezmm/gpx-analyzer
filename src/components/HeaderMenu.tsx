@@ -5,36 +5,38 @@ interface HeaderMenuProps {
   isDark: boolean;
   onToggleTheme: () => void;
   onOpenSettings: () => void;
-  // activity-specific (undefined when no activity loaded)
+  /** Actions activité — undefined quand aucun fichier n'est chargé. */
   hasActivity?: boolean;
   onExportGPX?: () => void;
   onMerge?: () => void;
   onReset?: () => void;
 }
 
+/** Menu burger du header — regroupe thème, profil et actions sur l'activité en cours. */
 export function HeaderMenu({
   isDark, onToggleTheme, onOpenSettings,
   hasActivity, onExportGPX, onMerge, onReset,
 }: HeaderMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const btnRef   = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
+    // Positionne le panneau sous le bouton déclencheur.
     if (btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 8, right: window.innerWidth - r.right });
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({ top: rect.bottom + 8, right: window.innerWidth - rect.right });
     }
-    const onDown = (e: MouseEvent) => {
+    const onClickOutside = (e: MouseEvent) => {
       if (
         !panelRef.current?.contains(e.target as Node) &&
         !btnRef.current?.contains(e.target as Node)
       ) setOpen(false);
     };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
   }, [open]);
 
   const close = () => setOpen(false);
@@ -84,7 +86,7 @@ export function HeaderMenu({
             onClick={() => { onToggleTheme(); close(); }}
           />
 
-          {/* Actions activité */}
+          {/* Actions sur l'activité — visibles uniquement si un fichier est chargé */}
           {hasActivity && (
             <>
               <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.25rem 0.5rem' }} />
@@ -118,9 +120,11 @@ interface MenuItemProps {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Si vrai, colore l'item en rouge (action destructrice). */
   danger?: boolean;
 }
 
+/** Bouton de menu avec icône, hover coloré et état désactivé. */
 function MenuItem({ icon, label, onClick, disabled, danger }: MenuItemProps) {
   return (
     <button

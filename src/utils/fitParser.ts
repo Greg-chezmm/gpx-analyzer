@@ -216,6 +216,7 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
   // consecutive points; with GPS-only the pre-lock period (~20-60 s) is absent,
   // but the resulting zone error is <1% for typical 1h+ activities.
   const gpsRecords = records.filter(r => isValidGPS(r.position_lat, r.position_long));
+  const gpsDropped = records.length - gpsRecords.length;
 
   if (gpsRecords.length === 0) {
     throw new Error('Aucune coordonnée GPS valide dans ce fichier FIT (activité intérieure ?).');
@@ -249,8 +250,8 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     });
   }
 
-  const { elevationGain, elevationLoss } = enrichPoints(points);
-  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace }
+  const { elevationGain, elevationLoss, elevOutliers, elevCoverage } = enrichPoints(points);
+  const { startTime, endTime, totalDuration, movingTime, maxSpeed, avgSpeed, avgPace, gapCount, longestGap }
     = computeTrackStats(points, accumulatedDistance);
 
   // ── Activity type — FIT sport field is explicit, fallback to speed ─────────
@@ -308,6 +309,14 @@ function fitDataToActivity(data: FitData, name: string): GPXActivity {
     maxPower:       powerCount > 0 ? maxPower                          : null,
     avgTemp:        tempCount  > 0 ? Math.round((tempSum / tempCount) * 10) / 10 : null,
     activityType,
+    dataQuality: {
+      hrCoverage:   records.length > 0 ? Math.round(hrCount / records.length * 100) : 0,
+      elevCoverage,
+      elevOutliers,
+      gapCount,
+      longestGap,
+      gpsDropped,
+    },
     fitSummary,
     fitLaps,
   };

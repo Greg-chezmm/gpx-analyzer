@@ -14,10 +14,11 @@ interface ZoneDef {
   label: string;
   description: string;
   color: string;
-  pctMin: number;
+  pctMin: number; // % FTP (modèle Coggan)
   pctMax: number;
 }
 
+/** Zones de puissance Z1–Z7 selon le modèle Coggan (% FTP). */
 const ZONES: ZoneDef[] = [
   { label: "Z1", description: "Récupération active",   color: "#93c5fd", pctMin: 0,    pctMax: 0.55 },
   { label: "Z2", description: "Endurance",             color: "#34d399", pctMin: 0.55, pctMax: 0.75 },
@@ -28,6 +29,7 @@ const ZONES: ZoneDef[] = [
   { label: "Z7", description: "Neuromusculaire",       color: "#7c3aed", pctMin: 1.50, pctMax: Infinity },
 ];
 
+/** Retourne l'index de zone (0–6) pour une puissance donnée en % FTP. */
 function getZoneIndex(power: number, ftp: number): number {
   const pct = power / ftp;
   for (let i = ZONES.length - 1; i >= 0; i--) {
@@ -36,6 +38,7 @@ function getZoneIndex(power: number, ftp: number): number {
   return 0;
 }
 
+/** Stepper +/− pour régler le FTP par paliers configurables. */
 const Stepper: React.FC<{
   label: string; value: number; min: number; max: number; step: number; unit: string;
   color: string; colorLight: string; onChange: (v: number) => void;
@@ -66,6 +69,7 @@ const Stepper: React.FC<{
   );
 };
 
+/** Affiche les zones de puissance Z1–Z7 (modèle Coggan) avec stepper FTP réactif et ratio W/kg. */
 export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange, weight }) => {
   const zoneTime = new Array<number>(ZONES.length).fill(0);
   let totalPower = 0;
@@ -76,10 +80,11 @@ export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange
     if (curr.power === null || prev.power === null) continue;
     if (curr.time === null || prev.time === null) continue;
     const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
+    // Ignore les gaps GPS ou pauses (>60 s)
     if (dt <= 0 || dt > 60) continue;
-    const avgW = (curr.power + prev.power) / 2;
-    if (ftp > 0) zoneTime[getZoneIndex(avgW, ftp)] += dt;
-    totalPower += avgW;
+    const avgWatts = (curr.power + prev.power) / 2;
+    if (ftp > 0) zoneTime[getZoneIndex(avgWatts, ftp)] += dt;
+    totalPower += avgWatts;
     powerCount++;
   }
 
@@ -113,7 +118,7 @@ export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange
         </div>
       </div>
 
-      {/* Stacked proportional bar */}
+      {/* Barre empilée proportionnelle au temps total */}
       <div style={{ display: "flex", height: "18px", borderRadius: "9px", overflow: "hidden", gap: "2px", marginBottom: "1.5rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = totalTime > 0 ? (zoneTime[idx] / totalTime) * 100 : 0;
@@ -127,7 +132,7 @@ export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange
         })}
       </div>
 
-      {/* Zone cards */}
+      {/* Cartes de zone */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: "0.85rem" }}>
         {ZONES.map((zone, idx) => {
           const pct = totalTime > 0 ? (zoneTime[idx] / totalTime) * 100 : 0;
@@ -139,6 +144,7 @@ export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange
               border: `1px solid ${zone.color}33`, borderRadius: "var(--radius-md)",
               padding: "0.85rem 1rem", background: `${zone.color}0d`,
               display: "flex", flexDirection: "column", gap: "0.35rem",
+              // Atténue les zones non atteintes pour mettre en avant les zones actives
               opacity: pct < 0.5 ? 0.45 : 1,
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>

@@ -44,12 +44,14 @@ import { HeaderMenu } from "./components/HeaderMenu";
 import { generateSummary } from "./utils/generateSummary";
 import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
 import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
+import { DataQuality } from "./components/DataQuality";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
   Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge,
 } from "lucide-react";
 
+/** Options de découpage des splits disponibles dans le sélecteur. */
 const SPLIT_OPTIONS = [
   { value: 500,   label: "500m" },
   { value: 1000,  label: "1 km" },
@@ -58,12 +60,16 @@ const SPLIT_OPTIONS = [
   { value: 10000, label: "10 km" },
 ];
 
+/** Composant racine — orchestre l'état global, les calculs dérivés et la mise en page du dashboard. */
 function App() {
+
+  /* ── Hooks — paramètres athlète, thème, historique, Drive ── */
   const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear, sex, setSex } = useUserSettings();
   const { isDark, toggleTheme } = useTheme();
   const { history, addEntry, updateEntry, replaceHistory, clearHistory } = useTrainingHistory();
   const drive = useGoogleDrive();
 
+  /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
   const [fileName, setFileName] = useState<string>("");
@@ -79,12 +85,16 @@ function App() {
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  // Drapeaux pour éviter les boucles infinie lors de la synchronisation Drive ↔ localStorage.
   const skipDriveHistorySync = useRef(false);
   const skipSettingsSync = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mémorise le nom personnalisé venant de Drive avant que l'activité soit chargée.
   const driveCustomNameRef = useRef<string>('');
 
-  // Enrich GPS elevation with barometric altitude when JSON is loaded
+  /* ── Mémos — données dérivées de l'activité ── */
+
+  // Applique l'override de type d'activité sans toucher à l'objet parsé.
   const enrichedActivity = useMemo(() => {
     if (!activity || !overrideActivityType) return activity;
     return { ...activity, activityType: overrideActivityType };
@@ -97,7 +107,7 @@ function App() {
 
   const intervals = useMemo(() => {
     if (!enrichedActivity) return null;
-    // Prefer watch laps (structured workout / manual lap) over speed-based detection
+    // Préfère les laps montre (séance structurée / lap manuel) à la détection par vitesse.
     if (enrichedActivity.fitLaps?.length) return enrichedActivity.fitLaps;
     return detectIntervals(enrichedActivity);
   }, [enrichedActivity]);
@@ -126,109 +136,7 @@ function App() {
     [enrichedActivity, fcMax, fcRest, sex]
   );
 
-  // Auto-save current activity to training history when TRIMP is available.
-  // customActivityName in deps ensures the entry is updated when the user renames.
-  useEffect(() => {
-    if (!trimp || !enrichedActivity) return;
-    const date = enrichedActivity.startTime
-      ? enrichedActivity.startTime.toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
-    addEntry({
-      date,
-      trimp: trimp.edwards,
-      name: displayName,
-      activityType: enrichedActivity.activityType,
-      distance: enrichedActivity.totalDistance,
-      duration: enrichedActivity.movingTime,
-      elevationGain: enrichedActivity.elevationGain,
-      avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
-      avgSpeed: enrichedActivity.avgSpeed * 3.6,
-      avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
-    });
-  }, [trimp, enrichedActivity, customActivityName]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const tsbResult = useMemo(() => calcTSB(history), [history]);
-
-  // Load settings from Drive on connect, apply to local state
-  useEffect(() => {
-    if (drive.status !== 'connected') return;
-    skipSettingsSync.current = true;
-    drive.loadSettings().then(remote => {
-      if (!remote) { skipSettingsSync.current = false; return; }
-      if (remote.fcMax   > 0)   setFcMax(remote.fcMax);
-      if (remote.fcRest  > 0)   setFcRest(remote.fcRest);
-      if (remote.vma     > 0)   setVma(remote.vma);
-      if (remote.ftp     > 0)   setFtp(remote.ftp);
-      if (remote.weight  > 0)   setWeight(remote.weight);
-      if (remote.birthYear > 0) setBirthYear(remote.birthYear);
-      if (remote.sex === 'M' || remote.sex === 'F') setSex(remote.sex);
-      setTimeout(() => { skipSettingsSync.current = false; }, 200);
-    }).catch(() => { skipSettingsSync.current = false; });
-  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Save settings to Drive when any value changes (debounced 800ms)
-  useEffect(() => {
-    if (drive.status !== 'connected' || skipSettingsSync.current) return;
-    if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
-    settingsSaveTimer.current = setTimeout(() => {
-      drive.saveSettings({ fcMax, fcRest, vma, ftp, weight, birthYear, sex });
-    }, 800);
-    return () => { if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current); };
-  }, [fcMax, fcRest, vma, ftp, weight, birthYear, sex]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reverse geocode start point when activity changes
-  useEffect(() => {
-    setLocationName(null);
-    // Restore Drive custom name if the activity was loaded from Drive; otherwise clear
-    setCustomActivityName(driveCustomNameRef.current);
-    driveCustomNameRef.current = '';
-    if (!enrichedActivity?.points?.length) return;
-    const pt = enrichedActivity.points[0];
-    if (!pt.lat || !pt.lon) return;
-    setLocationLoading(true);
-    reverseGeocode(pt.lat, pt.lon)
-      .then(loc => setLocationName(loc))
-      .finally(() => setLocationLoading(false));
-  }, [enrichedActivity]);
-
-  // Sync Drive → localStorage on connect (merge remote + local, remote fills gaps)
-  useEffect(() => {
-    if (drive.status !== 'connected') return;
-    let cancelled = false;
-    skipDriveHistorySync.current = true;
-    drive.loadHistory().then(remote => {
-      if (cancelled) return;
-      if (remote.length === 0) { skipDriveHistorySync.current = false; return; }
-      // Dedup by physical identity (date+duration+distance) to survive renames;
-      // fallback to date+name for old entries without those fields.
-      const mergeKey = (e: TrainingEntry | { date: string; trimp: number; name: string; duration?: number; distance?: number }) =>
-        (e.duration && e.distance)
-          ? `${e.date}|${Math.round(e.duration)}|${Math.round(e.distance)}`
-          : `${e.date}|${e.name}`;
-      const seen = new Map<string, TrainingEntry>();
-      [...remote, ...history].forEach(e => {
-        const key = mergeKey(e);
-        const ex = seen.get(key);
-        if (!ex) { seen.set(key, e as TrainingEntry); return; }
-        // Prefer the entry with a custom name (not raw suuntoapp- format) or more fields
-        const exIsSuunto = /^suuntoapp-/i.test(ex.name);
-        const newIsSuunto = /^suuntoapp-/i.test(e.name);
-        if (exIsSuunto && !newIsSuunto) seen.set(key, e as TrainingEntry);
-        else if (!exIsSuunto && newIsSuunto) { /* keep existing */ }
-        else if (Object.keys(e).length > Object.keys(ex).length) seen.set(key, e as TrainingEntry);
-      });
-      const merged = Array.from(seen.values()).sort((a, b) => a.date.localeCompare(b.date));
-      replaceHistory(merged);
-      setTimeout(() => { skipDriveHistorySync.current = false; }, 0);
-    }).catch(() => { skipDriveHistorySync.current = false; });
-    return () => { cancelled = true; };
-  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Sync localStorage → Drive on history change (skip when change came from Drive)
-  useEffect(() => {
-    if (drive.status !== 'connected' || skipDriveHistorySync.current || history.length === 0) return;
-    drive.saveHistory(history).catch(() => {});
-  }, [history]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
@@ -264,17 +172,123 @@ function App() {
     [climbs, enrichedActivity]
   );
 
+  /* ── Effets — synchronisation Drive, géocodage, historique ── */
+
+  // Sauvegarde automatique dans l'historique à chaque nouvelle activité analysée (TRIMP requis).
+  // customActivityName en dépendance assure la mise à jour lors d'un renommage.
+  useEffect(() => {
+    if (!trimp || !enrichedActivity) return;
+    const date = enrichedActivity.startTime
+      ? enrichedActivity.startTime.toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+    addEntry({
+      date,
+      trimp: trimp.edwards,
+      name: displayName,
+      activityType: enrichedActivity.activityType,
+      distance: enrichedActivity.totalDistance,
+      duration: enrichedActivity.movingTime,
+      elevationGain: enrichedActivity.elevationGain,
+      avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
+      avgSpeed: enrichedActivity.avgSpeed * 3.6,
+      avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
+    });
+  }, [trimp, enrichedActivity, customActivityName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Charge les paramètres athlète depuis Drive à la connexion ; skipSettingsSync évite la boucle de retour.
+  useEffect(() => {
+    if (drive.status !== 'connected') return;
+    skipSettingsSync.current = true;
+    drive.loadSettings().then(remote => {
+      if (!remote) { skipSettingsSync.current = false; return; }
+      if (remote.fcMax   > 0)   setFcMax(remote.fcMax);
+      if (remote.fcRest  > 0)   setFcRest(remote.fcRest);
+      if (remote.vma     > 0)   setVma(remote.vma);
+      if (remote.ftp     > 0)   setFtp(remote.ftp);
+      if (remote.weight  > 0)   setWeight(remote.weight);
+      if (remote.birthYear > 0) setBirthYear(remote.birthYear);
+      if (remote.sex === 'M' || remote.sex === 'F') setSex(remote.sex);
+      setTimeout(() => { skipSettingsSync.current = false; }, 200);
+    }).catch(() => { skipSettingsSync.current = false; });
+  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Sauvegarde les paramètres athlète vers Drive, debounce 800 ms pour éviter les appels trop fréquents.
+  useEffect(() => {
+    if (drive.status !== 'connected' || skipSettingsSync.current) return;
+    if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
+    settingsSaveTimer.current = setTimeout(() => {
+      drive.saveSettings({ fcMax, fcRest, vma, ftp, weight, birthYear, sex });
+    }, 800);
+    return () => { if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current); };
+  }, [fcMax, fcRest, vma, ftp, weight, birthYear, sex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Géocodage inversé du premier point GPS pour proposer le lieu dans le renommage.
+  useEffect(() => {
+    setLocationName(null);
+    // Restaure le nom personnalisé Drive si l'activité provient du cloud ; sinon vide.
+    setCustomActivityName(driveCustomNameRef.current);
+    driveCustomNameRef.current = '';
+    if (!enrichedActivity?.points?.length) return;
+    const firstPoint = enrichedActivity.points[0];
+    if (!firstPoint.lat || !firstPoint.lon) return;
+    setLocationLoading(true);
+    reverseGeocode(firstPoint.lat, firstPoint.lon)
+      .then(loc => setLocationName(loc))
+      .finally(() => setLocationLoading(false));
+  }, [enrichedActivity]);
+
+  // Synchronisation Drive → localStorage à la connexion (fusion remote + local, remote comble les trous).
+  useEffect(() => {
+    if (drive.status !== 'connected') return;
+    let cancelled = false;
+    skipDriveHistorySync.current = true;
+    drive.loadHistory().then(remote => {
+      if (cancelled) return;
+      if (remote.length === 0) { skipDriveHistorySync.current = false; return; }
+      // Clé de déduplication stable au renommage : date+durée+distance.
+      // Fallback date+name pour les anciennes entrées sans ces champs.
+      const mergeKey = (e: TrainingEntry | { date: string; trimp: number; name: string; duration?: number; distance?: number }) =>
+        (e.duration && e.distance)
+          ? `${e.date}|${Math.round(e.duration)}|${Math.round(e.distance)}`
+          : `${e.date}|${e.name}`;
+      const seen = new Map<string, TrainingEntry>();
+      [...remote, ...history].forEach(e => {
+        const key = mergeKey(e);
+        const existing = seen.get(key);
+        if (!existing) { seen.set(key, e as TrainingEntry); return; }
+        // Préfère l'entrée avec un nom propre (pas le format brut suuntoapp-…).
+        const existingIsSuunto = /^suuntoapp-/i.test(existing.name);
+        const newIsSuunto      = /^suuntoapp-/i.test(e.name);
+        if (existingIsSuunto && !newIsSuunto) seen.set(key, e as TrainingEntry);
+        else if (!existingIsSuunto && newIsSuunto) { /* garde l'entrée existante */ }
+        else if (Object.keys(e).length > Object.keys(existing).length) seen.set(key, e as TrainingEntry);
+      });
+      const merged = Array.from(seen.values()).sort((a, b) => a.date.localeCompare(b.date));
+      replaceHistory(merged);
+      setTimeout(() => { skipDriveHistorySync.current = false; }, 0);
+    }).catch(() => { skipDriveHistorySync.current = false; });
+    return () => { cancelled = true; };
+  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Synchronisation localStorage → Drive à chaque changement d'historique (sauf si origine Drive).
+  useEffect(() => {
+    if (drive.status !== 'connected' || skipDriveHistorySync.current || history.length === 0) return;
+    drive.saveHistory(history).catch(() => {});
+  }, [history]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Handlers — chargement, fusion, renommage, export ── */
+
   const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string) => {
     driveCustomNameRef.current = customName || '';
-    const cleanName = name.replace(/\.[^/.]+$/, "");
+    const nameWithoutExtension = name.replace(/\.[^/.]+$/, "");
     const isFit = name.toLowerCase().endsWith(".fit");
     setIsLoading(true);
-    // Defer by one frame so the spinner renders before the synchronous parse.
+    // Décale d'une frame + 30 ms pour laisser le spinner s'afficher avant le parse synchrone.
     requestAnimationFrame(() => setTimeout(async () => {
       try {
         const parsed = isFit && data instanceof ArrayBuffer
-          ? await parseFIT(data, cleanName)
-          : parseGPX(data as string, cleanName);
+          ? await parseFIT(data, nameWithoutExtension)
+          : parseGPX(data as string, nameWithoutExtension);
         setActivity(parsed);
         setFileName(name);
         setHoveredPointIndex(null);
@@ -289,8 +303,10 @@ function App() {
     }, 30));
   };
 
+  /** Charge l'activité exemple générée dynamiquement (parcours Paris). */
   const handleLoadSample = () => handleActivityLoaded(generateSampleGPX(), "Exemple_Course_Paris.gpx");
 
+  /** Réinitialise complètement l'état pour revenir à l'écran d'accueil. */
   const handleReset = () => {
     setActivity(null);
     setFileName("");
@@ -303,6 +319,7 @@ function App() {
     setCustomActivityName('');
   };
 
+  /** Fusionne un second fichier GPX/FIT avec l'activité courante. */
   const handleMergeFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -321,7 +338,7 @@ function App() {
       setActivity(merged);
       setMergeNotice(info);
       setSavedToDrive(false);
-      // rawFileData devient le GPX fusionné — Drive sauvegarde l'activité complète
+      // rawFileData devient le GPX fusionné — Drive sauvegarde l'activité complète.
       const mergedGpx = exportToGPX(merged, merged.fitLaps ?? null);
       setRawFileData(mergedGpx);
       const mergedFileName = merged.name.replace(/[^a-zA-Z0-9_\-.]/g, '_') + '.gpx';
@@ -333,8 +350,10 @@ function App() {
     }
   };
 
+  /** Nom affiché : priorité au nom personnalisé, puis nom parsé, puis nom de fichier. */
   const displayName = customActivityName || enrichedActivity?.name || fileName;
 
+  /** Met à jour le nom de l'activité localement et dans l'historique d'entraînement. */
   const handleRename = (newName: string) => {
     if (!enrichedActivity) return;
     const date = enrichedActivity.startTime
@@ -343,17 +362,19 @@ function App() {
     const oldName = customActivityName || enrichedActivity.name || fileName;
     setCustomActivityName(newName);
     updateEntry(date, oldName, { name: newName });
-    setSavedToDrive(false); // allow re-save to Drive with new name
+    setSavedToDrive(false); // permet une re-sauvegarde Drive avec le nouveau nom
   };
 
+  /** Sauvegarde l'activité courante sur Google Drive avec ses métadonnées analytiques. */
   const handleSaveToDrive = async () => {
     if (!rawFileData || !enrichedActivity) return;
     const date = enrichedActivity.startTime
       ? enrichedActivity.startTime.toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
-    const intensityFactor = normalizedPower && ftp > 0 ? normalizedPower / ftp : null;
-    const tss = intensityFactor
-      ? Math.round((enrichedActivity.movingTime * normalizedPower! * intensityFactor) / (ftp * 3600) * 100)
+    // Recalcul local de l'IF/TSS pour les métadonnées Drive (indépendant du mémo global).
+    const localIntensityFactor = normalizedPower && ftp > 0 ? normalizedPower / ftp : null;
+    const tss = localIntensityFactor
+      ? Math.round((enrichedActivity.movingTime * normalizedPower! * localIntensityFactor) / (ftp * 3600) * 100)
       : undefined;
     await drive.save(rawFileData, fileName, {
       name: displayName,
@@ -377,6 +398,7 @@ function App() {
     setSavedToDrive(true);
   };
 
+  /** Formate une date en français long + heure (ex. « 7 juin 2025 à 08:30 »). */
   const formatDate = (date: Date | null): string => {
     if (!date) return "Date inconnue";
     return new Intl.DateTimeFormat("fr-FR", { dateStyle: "long", timeStyle: "short" }).format(date);
@@ -384,9 +406,11 @@ function App() {
 
   const hasHeartRate = enrichedActivity?.avgHeartRate != null;
 
+  /* ── JSX — rendu ── */
+
   return (
     <div className="app-container">
-      {/* Panneau profil athlète — déclenché depuis le burger, position:fixed indépendante du header */}
+      {/* Panneau profil athlète — déclenché depuis le burger, rendu en position:fixed indépendante du header */}
       <AthleteSettingsButton
         fcMax={fcMax}       onFcMaxChange={setFcMax}
         fcRest={fcRest}     onFcRestChange={setFcRest}
@@ -399,6 +423,8 @@ function App() {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
       />
+
+      {/* ── Header ── */}
       <header className="header">
         <div className="logo-container">
           <div className="logo-icon"><Activity size={22} /></div>
@@ -427,6 +453,7 @@ function App() {
               <span className="btn-text">Résumé IA</span>
             </button>
           )}
+          {/* Input fichier caché pour la fusion de segments */}
           <input
             ref={mergeInputRef}
             type="file"
@@ -446,9 +473,11 @@ function App() {
         </div>
       </header>
 
+      {/* ── Contenu principal ── */}
       <ErrorBoundary key={enrichedActivity?.name ?? 'accueil'}>
       <main className="main-content">
         {!activity ? (
+          /* ── Écran d'accueil ── */
           <div className="welcome-section animate-slide-up">
             <h1 className="welcome-title">
               Visualisez et analysez vos traces sportives
@@ -487,8 +516,9 @@ function App() {
             <DriveActivityList drive={drive} onLoad={handleActivityLoaded} />
           </div>
         ) : (
+          /* ── Dashboard activité ── */
           <>
-            {/* Merge notice */}
+            {/* Bannière de fusion */}
             {mergeNotice && (
               <div style={{
                 display: "flex", alignItems: "center", gap: "0.75rem",
@@ -508,7 +538,7 @@ function App() {
               </div>
             )}
 
-            {/* Activity title + session badge */}
+            {/* Titre + badge de classification de session */}
             <div className="card animate-slide-up activity-header">
               <div style={{ flex: 1, minWidth: 0 }}>
                 <ActivityNameEditor
@@ -526,6 +556,7 @@ function App() {
                   <span>•</span>
                   <span>Fichier : {fileName}</span>
                   <span>•</span>
+                  {/* Bouton bascule running ↔ vélo — utile si le type est mal détecté */}
                   <button
                     type="button"
                     title="Changer le type d'activité"
@@ -549,7 +580,7 @@ function App() {
                 </div>
               </div>
 
-              {/* Session classification badge */}
+              {/* Badge de classification de session (EF, Tempo, Seuil…) */}
               {session && (
                 <div style={{
                   display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "0.35rem",
@@ -573,7 +604,7 @@ function App() {
               )}
             </div>
 
-            {/* Primary KPI grid */}
+            {/* ── KPI primaires ── */}
             <div className="dashboard-grid">
               <MetricCard icon={<MapIcon size={22} />} label="Distance totale"
                 value={(enrichedActivity!.totalDistance / 1000).toFixed(2)} unit=" km" colorVar="speed" />
@@ -593,7 +624,7 @@ function App() {
               )}
             </div>
 
-            {/* Secondary KPIs */}
+            {/* ── KPI secondaires (visibles uniquement si FC disponible) ── */}
             {hasHeartRate && (
               <div className="secondary-kpis animate-slide-up">
                 {enrichedActivity!.activityType !== 'cycling' && (
@@ -606,6 +637,7 @@ function App() {
                 )}
                 {cardiacPaceResult?.avgCardiacPace != null && enrichedActivity!.activityType !== 'cycling' && (
                   <div className="card kpi-item">
+                    {/* Allure cardiaque = allure normalisée à 65% de réserve cardiaque (Karvonen) */}
                     <span className="kpi-label" title="Allure normalisée à 65% de réserve cardiaque">Allure cardiaque</span>
                     <strong className="kpi-value" style={{ color: "var(--color-cardiac)" }}>
                       {formatPace(cardiacPaceResult.avgCardiacPace)} /km
@@ -626,6 +658,7 @@ function App() {
                 </div>
                 {intensityFactor !== null && enrichedActivity!.activityType === 'cycling' && (
                   <div className="card kpi-item">
+                    {/* IF = NP / FTP — mesure l'intensité relative à la puissance seuil */}
                     <span className="kpi-label" title="Puissance normalisée / FTP">IF (Intensity Factor)</span>
                     <strong className="kpi-value" style={{ color: "var(--color-power, #f59e0b)" }}>
                       {intensityFactor.toFixed(2)}
@@ -636,6 +669,7 @@ function App() {
                   <div className="card kpi-item">
                     <span className="kpi-label">Cadence moyenne</span>
                     <strong className="kpi-value" style={{ color: "var(--color-cad)" }}>
+                      {/* Cadence GPX stockée en demi-pas/s pour la course ; ×2 pour obtenir ppm */}
                       {enrichedActivity!.activityType === 'cycling' ? enrichedActivity!.avgCadence : (enrichedActivity!.avgCadence ?? 0) * 2}
                       {" "}{enrichedActivity!.activityType === 'cycling' ? 'rpm' : 'ppm'}
                     </strong>
@@ -644,7 +678,10 @@ function App() {
               </div>
             )}
 
-            {/* Map + Charts */}
+            {/* Qualité des données — visible uniquement si anomalies détectées */}
+            <DataQuality quality={enrichedActivity!.dataQuality} hasHr={hasHeartRate} />
+
+            {/* ── Carte + Graphiques ── */}
             <div id="nav-map" className="content-layout">
               <ErrorBoundary section="Carte">
                 <div style={{ height: "100%" }}>
@@ -673,20 +710,20 @@ function App() {
               </ErrorBoundary>
             </div>
 
-            {/* HR Zones (Karvonen) */}
+            {/* ── Zones FC Karvonen ── */}
             {hasHeartRate && (
               <div id="nav-zones">
-              <HeartRateZones
-                points={enrichedActivity!.points}
-                fcMax={fcMax}
-                fcRest={fcRest}
-                onFcMaxChange={setFcMax}
-                onFcRestChange={setFcRest}
-              />
+                <HeartRateZones
+                  points={enrichedActivity!.points}
+                  fcMax={fcMax}
+                  fcRest={fcRest}
+                  onFcMaxChange={setFcMax}
+                  onFcRestChange={setFcRest}
+                />
               </div>
             )}
 
-            {/* Zones d'allure % VMA (running uniquement) */}
+            {/* Zones d'allure % VMA — running uniquement */}
             {enrichedActivity!.activityType !== 'cycling' && (
               <PaceZones
                 points={enrichedActivity!.points}
@@ -695,7 +732,7 @@ function App() {
               />
             )}
 
-            {/* Zones de puissance Coggan (vélo + puissance) */}
+            {/* Zones de puissance Coggan — vélo + capteur de puissance uniquement */}
             {hasPower && enrichedActivity!.activityType === 'cycling' && (
               <PowerZones
                 points={enrichedActivity!.points}
@@ -705,7 +742,7 @@ function App() {
               />
             )}
 
-            {/* Scatter plot Allure/Vitesse vs FC */}
+            {/* Nuage de points Allure (ou Vitesse) vs FC */}
             {hasHeartRate && (
               <ScatterPlot
                 points={enrichedActivity!.points}
@@ -718,14 +755,14 @@ function App() {
             {/* Dérive cardiaque / Efficiency Factor */}
             {drift && <CardiacDrift drift={drift} />}
 
-            {/* Charge d'entraînement TRIMP */}
+            {/* ── Charge d'entraînement ── */}
             {trimp && <TrainingLoad trimp={trimp} />}
 
-            {/* TSB / CTL / ATL — historique multi-séances */}
+            {/* TSB / CTL / ATL sur l'historique multi-séances */}
             <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
             <ProgressChart history={history} />
 
-            {/* Bilan FIT — TE, VO2max montre, récupération, EPOC, feeling, zones */}
+            {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (
               <FitSummary
                 fit={enrichedActivity!.fitSummary}
@@ -735,13 +772,13 @@ function App() {
               />
             )}
 
-            {/* VO2max estimation (running only) */}
+            {/* Estimation VO2max — running uniquement */}
             {vo2maxEst && <VO2maxEstimate estimate={vo2maxEst} />}
 
-            {/* VDOT predictions — Jack Daniels (running only, fiabilité ≥ moyenne) */}
+            {/* Prédictions VDOT Jack Daniels — running, fiabilité ≥ moyenne */}
             {vo2maxEst && <VDOTPredictor estimate={vo2maxEst} />}
 
-            {/* Power metrics (cycling + power data) */}
+            {/* Métriques de puissance NP/IF/TSS — vélo + capteur de puissance */}
             {normalizedPower !== null && enrichedActivity!.activityType === 'cycling' && (
               <PowerMetrics
                 np={normalizedPower}
@@ -752,7 +789,7 @@ function App() {
               />
             )}
 
-            {/* Interval analysis (auto-detected from GPX) */}
+            {/* Analyse des fractionnés — auto-détectés ou laps montre */}
             {intervals && intervals.length > 0 && (
               <IntervalAnalysis
                 intervals={intervals}
@@ -762,17 +799,17 @@ function App() {
               />
             )}
 
-            {/* Climb analysis */}
+            {/* Analyse des montées */}
             {climbs.length > 0 && (
               <ClimbAnalysis climbs={climbs} points={enrichedActivity!.points} />
             )}
 
-            {/* Hill repeats — running only, ≥2 séries détectées */}
+            {/* Répétitions de côtes — running uniquement, ≥ 2 séries détectées */}
             {hillRepeats.length > 0 && (
               <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
             )}
 
-            {/* Splits — with configurable distance */}
+            {/* ── Splits ── */}
             <div className="split-selector animate-slide-up">
               <span className="split-selector-label">Découpage :</span>
               <div style={{
@@ -808,6 +845,7 @@ function App() {
 
       <FloatingNav visible={!!activity} />
 
+      {/* ── Modale résumé IA ── */}
       {showAISummary && enrichedActivity && (
         <AISummaryModal
           text={generateSummary({
@@ -832,7 +870,8 @@ function App() {
         />
       )}
 
-      {/* Loading overlay — parse bloquant sur le thread principal via requestAnimationFrame */}
+      {/* ── Overlay de chargement ── */}
+      {/* Le parse GPX/FIT est synchrone sur le thread principal — requestAnimationFrame décale son démarrage. */}
       {isLoading && (
         <div style={{
           position: "fixed", inset: 0,
@@ -854,6 +893,7 @@ function App() {
         </div>
       )}
 
+      {/* ── Footer ── */}
       <footer style={{
         backgroundColor: "var(--bg-secondary)", borderTop: "1px solid var(--border-color)",
         padding: "1.5rem 2rem", textAlign: "center",

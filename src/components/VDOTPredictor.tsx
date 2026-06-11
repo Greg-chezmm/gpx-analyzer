@@ -4,6 +4,7 @@ import type { VO2maxEstimate } from "../utils/gpxParser";
 import { computeVDOT } from "../utils/vdot";
 import { formatPace, formatDuration } from "./SplitsTable";
 
+/** Couleurs par type d'allure Jack Daniels (E/M/T/I/R). */
 const PACE_COLORS: Record<string, string> = {
   E: "#60a5fa",
   M: "#34d399",
@@ -16,6 +17,11 @@ interface Props {
   estimate: VO2maxEstimate;
 }
 
+/**
+ * Affiche les prédictions de temps de course et allures d'entraînement calculées
+ * via le modèle VDOT de Jack Daniels à partir du VO2max estimé.
+ * Non rendu si la fiabilité du VO2max est faible.
+ */
 export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
   if (estimate.confidence === "low") return null;
 
@@ -43,7 +49,7 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "1.5rem" }}>
 
-        {/* ── Temps prédits ─────────────────────────────────────────────── */}
+        {/* ── Temps prédits par distance ─────────────────────────────────── */}
         <div>
           <p style={{
             fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)",
@@ -52,21 +58,21 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
             Temps prédits
           </p>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            {races.map((r, i) => (
-              <div key={r.label} style={{
+            {races.map((race, i) => (
+              <div key={race.label} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "baseline",
                 padding: "0.5rem 0",
                 borderBottom: i < races.length - 1 ? "1px solid var(--border-color)" : "none",
               }}>
                 <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, minWidth: "70px" }}>
-                  {r.label}
+                  {race.label}
                 </span>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem" }}>
                   <span style={{ fontFamily: "var(--font-heading)", fontWeight: 800, color: "var(--text-primary)", fontSize: "0.95rem" }}>
-                    {formatDuration(r.timeS)}
+                    {formatDuration(race.timeS)}
                   </span>
                   <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
-                    {formatPace(r.timeS / (r.distance / 1000))} /km
+                    {formatPace(race.timeS / (race.distance / 1000))} /km
                   </span>
                 </div>
               </div>
@@ -74,7 +80,7 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
           </div>
         </div>
 
-        {/* ── Allures d'entraînement ────────────────────────────────────── */}
+        {/* ── Allures d'entraînement E/M/T/I/R ─────────────────────────── */}
         <div>
           <p style={{
             fontSize: "0.75rem", fontWeight: 700, color: "var(--text-secondary)",
@@ -83,15 +89,16 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
             Allures d'entraînement
           </p>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            {paces.map((p, i) => {
-              const color = PACE_COLORS[p.label] ?? "var(--accent-primary)";
-              const isSingle = Math.abs(p.minPaceSecPerKm - p.maxPaceSecPerKm) < 2;
+            {paces.map((pace, i) => {
+              const color = PACE_COLORS[pace.label] ?? "var(--accent-primary)";
+              // Si l'écart min/max < 2 s/km, afficher une valeur unique plutôt qu'une plage
+              const isSingle = Math.abs(pace.minPaceSecPerKm - pace.maxPaceSecPerKm) < 2;
               const paceStr = isSingle
-                ? `${formatPace(p.minPaceSecPerKm)} /km`
-                : `${formatPace(p.minPaceSecPerKm)} – ${formatPace(p.maxPaceSecPerKm)} /km`;
+                ? `${formatPace(pace.minPaceSecPerKm)} /km`
+                : `${formatPace(pace.minPaceSecPerKm)} – ${formatPace(pace.maxPaceSecPerKm)} /km`;
 
               return (
-                <div key={p.label} style={{
+                <div key={pace.label} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
                   padding: "0.5rem 0",
                   borderBottom: i < paces.length - 1 ? "1px solid var(--border-color)" : "none",
@@ -105,10 +112,10 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
                       fontSize: "0.75rem", fontWeight: 800, color,
                       fontFamily: "var(--font-heading)",
                     }}>
-                      {p.label}
+                      {pace.label}
                     </span>
                     <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {p.description}
+                      {pace.description}
                     </span>
                   </div>
                   <span style={{
