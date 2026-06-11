@@ -67,8 +67,7 @@ export function useGoogleDrive(): DriveHandle {
         scope: SCOPE,
         callback: (resp) => {
           if (!resp.access_token) {
-            // Reconnexion silencieuse bloquée (popup-blocker ou cookies tiers)
-            // On ne supprime PAS la clé — l'utilisateur pourra reconnecter en un clic
+            // Reconnexion bloquée (popup-blocker, cookies tiers) — on ne supprime pas la clé
             setStatus('disconnected');
             return;
           }
@@ -78,7 +77,7 @@ export function useGoogleDrive(): DriveHandle {
         },
       });
 
-      // Auto-reconnect silently if previously authorized
+      // Auto-reconnect silencieux si déjà autorisé — prompt vide = pas d'écran de consentement
       if (localStorage.getItem(AUTHORIZED_KEY) === '1') {
         setStatus('connecting');
         clientRef.current.requestAccessToken({ prompt: '' });
