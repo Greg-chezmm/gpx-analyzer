@@ -4,6 +4,7 @@ import { karvonenBounds } from './session';
 
 // ─── Cardiac Drift ───────────────────────────────────────────────────────────
 
+/** Résultat de l'analyse de dérive cardiaque (cardiac drift / decoupling aérobie). */
 export interface CardiacDrift {
   ef1: number;        // Efficiency Factor first half (speed×1000/HR)
   ef2: number;        // Efficiency Factor second half
@@ -15,6 +16,11 @@ export interface CardiacDrift {
   efOverall: number;
 }
 
+/**
+ * Calcule la dérive cardiaque (cardiac decoupling) en comparant l'Efficiency Factor
+ * de la 1ère et 2ème moitié de la séance.
+ * EF = vitesse × 1000 / FC. Dérive < 5% = bonne endurance aérobie ; > 9% = fatigue/sous-entraînement.
+ */
 export function calcCardiacDrift(activity: GPXActivity): CardiacDrift | null {
   const pts = activity.points.filter(
     (p: GPXTrackPoint) => p.hr !== null && p.speed !== null && p.speed > 0.5 && p.time !== null
@@ -31,6 +37,7 @@ export function calcCardiacDrift(activity: GPXActivity): CardiacDrift | null {
   const stats = (pts: GPXTrackPoint[]) => {
     const avgSpd = pts.reduce((s, p) => s + (p.speed ?? 0), 0) / pts.length;
     const avgHR  = pts.reduce((s, p) => s + (p.hr  ?? 0), 0) / pts.length;
+    // EF = vitesse (m/s) × 1000 / FC — mesure l'efficacité cardiovasculaire
     return { ef: avgHR > 0 ? avgSpd * 1000 / avgHR : 0, avgSpd, avgHR };
   };
 
@@ -38,6 +45,7 @@ export function calcCardiacDrift(activity: GPXActivity): CardiacDrift | null {
   const r2 = stats(half2);
   const rAll = stats(pts);
 
+  // Décroissance de l'EF entre 1ère et 2ème moitié (positif = dérive)
   const decoupling = r1.ef > 0 ? ((r1.ef - r2.ef) / r1.ef) * 100 : 0;
 
   return {
@@ -54,6 +62,7 @@ export function calcCardiacDrift(activity: GPXActivity): CardiacDrift | null {
 
 // ─── TSB / CTL / ATL — Training Stress Balance ───────────────────────────────
 
+/** Point de données quotidien pour le graphique CTL/ATL/TSB. */
 export interface TSBDay {
   date:  string;
   trimp: number;
@@ -62,6 +71,7 @@ export interface TSBDay {
   tsb:   number;
 }
 
+/** Résultat du calcul CTL/ATL/TSB avec les 90 derniers jours pour le graphique. */
 export interface TSBResult {
   atl:       number;
   ctl:       number;
@@ -69,11 +79,17 @@ export interface TSBResult {
   chartData: TSBDay[]; // last 90 days
 }
 
+/**
+ * Calcule CTL (forme), ATL (fatigue) et TSB (fraîcheur) par EMA (moyenne mobile exponentielle) sur l'historique TRIMP.
+ * Constantes Banister : ATL τ = 7 jours (LA = 2/8), CTL τ = 42 jours (LF = 2/43).
+ * TSB = CTL − ATL (positif = frais, négatif = fatigué).
+ */
 export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
   if (history.length === 0) return { atl: 0, ctl: 0, tsb: 0, chartData: [] };
 
-  const LA = 2 / (7  + 1);  // ATL — 7-day decay
-  const LF = 2 / (42 + 1);  // CTL — 42-day decay
+  // Constantes de lissage EMA : λ = 2/(τ+1) avec τ=7j (ATL) et τ=42j (CTL)
+  const LA = 2 / (7  + 1);  // ATL — 7-day decay (fatigue à court terme)
+  const LF = 2 / (42 + 1);  // CTL — 42-day decay (forme chronique)
 
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
   const trimpMap = new Map<string, number>();
@@ -100,6 +116,7 @@ export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
 
 // ─── TRIMP — Training Impulse ─────────────────────────────────────────────────
 
+/** Résultat du calcul TRIMP (charge d'entraînement) selon les méthodes Edwards et Banister. */
 export interface TRIMPResult {
   edwards: number;       // zone-weighted load
   banister: number;      // Banister formula
@@ -107,13 +124,20 @@ export interface TRIMPResult {
   totalMinutes: number;
 }
 
+/**
+ * Calcule la charge d'entraînement TRIMP selon deux méthodes :
+ * - Edwards : somme pondérée par zone (Z1×1, Z2×2, Z3×3, Z4×4, Z5×5).
+ * - Banister (1991) : TRIMP = T × ΔFC × k, où k = a × e^(b × ΔFC),
+ *   ΔFC = (FC_moy − FC_repos) / (FC_max − FC_repos) (fraction de réserve cardiaque),
+ *   Hommes : a=0,64, b=1,92 ; Femmes : a=0,86, b=1,67.
+ */
 export function calcTRIMP(
   points: GPXTrackPoint[],
   fcMax: number,
   fcRest: number,
   sex: Sex = 'M',
 ): TRIMPResult | null {
-  // Karvonen bounds — same zones as HeartRateZones display so times match
+  // Zones Karvonen — cohérentes avec l'affichage HeartRateZones
   const bounds = karvonenBounds(fcMax, fcRest);
   const zoneTime = [0, 0, 0, 0, 0]; // seconds
   let hrSum = 0, totalTime = 0;
@@ -138,9 +162,10 @@ export function calcTRIMP(
   const WEIGHTS = [1, 2, 3, 4, 5];
   const edwards = zoneTime.reduce((s, t, i) => s + (t / 60) * WEIGHTS[i], 0);
 
-  // Banister: TRIMP = T × ΔFC × k,  k = a×e^(b×ΔFC)
+  // Banister : TRIMP = T × ΔFC × k,  k = a×e^(b×ΔFC)
   // Hommes: a=0.64, b=1.92 — Femmes: a=0.86, b=1.67  (Banister 1991)
   const avgHR = hrSum / totalTime;
+  // ΔFC = fraction de réserve cardiaque utilisée (0 = repos, 1 = FCmax)
   const dfc = Math.max(0, Math.min(1, (avgHR - fcRest) / (fcMax - fcRest)));
   const a = sex === 'F' ? 0.86 : 0.64;
   const b = sex === 'F' ? 1.67 : 1.92;
@@ -156,18 +181,24 @@ export function calcTRIMP(
 
 // ─── Allure cardiaque ─────────────────────────────────────────────────────────
 
-// Allure normalisée par l'effort cardiaque (HRR%).
-// Formule : allure_cardiaque = allure_réelle × (HRR_ref / HRR_actuel)
-// HRR_ref = 65% (seuil aérobie Z2/Z3 de référence).
-// Interprétation : si HRR > 65%, on travaille plus que la référence
-// → allure cardiaque plus rapide (on "vaut mieux" que ce que la vitesse brute montre).
-
+/**
+ * Allure normalisée par l'effort cardiaque (HRR%).
+ * Formule : allure_cardiaque = allure_réelle × (HRR_ref / HRR_actuel)
+ * HRR_ref = 65% (seuil aérobie Z2/Z3 de référence).
+ * Interprétation : si HRR > 65%, on travaille plus que la référence
+ * → allure cardiaque plus rapide (on "vaut mieux" que ce que la vitesse brute montre).
+ */
 const CARDIAC_REF_HRR = 0.65;
 
+/** Résultat du calcul d'allure cardiaque (vitesse normalisée par % HRR). */
 export interface CardiacPaceResult {
   avgCardiacPace: number | null; // s/km — moyenne pondérée sur la séance
 }
 
+/**
+ * Calcule l'allure cardiaque moyenne : allure brute corrigée par le ratio HRR_ref / HRR_actuel.
+ * Filtre les points hors de la plage HRR 20–99% (repos ou effort maximal).
+ */
 export function calcCardiacPace(
   points: GPXTrackPoint[],
   fcMax: number,
@@ -189,11 +220,17 @@ export function calcCardiacPace(
 
 // ─── Normalized Power ─────────────────────────────────────────────────────────
 
+/**
+ * Calcule la Puissance Normalisée (NP) selon la méthode Coggan :
+ * 1) Moyenne mobile 30 s sur la puissance brute.
+ * 2) Élevé à la puissance 4, puis moyenne, puis racine 4ème.
+ * NP > puissance moyenne = la variabilité de l'effort est prise en compte.
+ */
 export function calcNormalizedPower(points: GPXTrackPoint[]): number | null {
   const pwrPts = points.filter(p => p.power !== null && p.time !== null);
   if (pwrPts.length < 60) return null;
 
-  const WINDOW_MS = 30_000;
+  const WINDOW_MS = 30_000; // fenêtre 30 s (Coggan)
   const avg30s: number[] = [];
 
   for (let i = 0; i < pwrPts.length; i++) {
@@ -208,12 +245,14 @@ export function calcNormalizedPower(points: GPXTrackPoint[]): number | null {
   }
 
   if (avg30s.length === 0) return null;
+  // NP = (moyenne des puissances^4)^(1/4) — donne plus de poids aux efforts intenses
   const sum4 = avg30s.reduce((s, v) => s + v ** 4, 0);
   return Math.round((sum4 / avg30s.length) ** 0.25);
 }
 
 // ─── VO2max estimation ────────────────────────────────────────────────────────
 
+/** Estimation du VO2max depuis une séance courante, avec niveau de confiance et paramètres du segment utilisé. */
 export interface VO2maxEstimate {
   value: number;          // mL/kg/min
   confidence: 'high' | 'medium' | 'low';
@@ -222,6 +261,13 @@ export interface VO2maxEstimate {
   windowMin: number;      // duration of the stable segment used (minutes)
 }
 
+/**
+ * Estime le VO2max à partir du segment le plus stable de la séance (CV HR et vitesse minimaux sur terrain plat).
+ * Formule Swain & Leutholtz (1997) : VO2max = VO2net / HRR% + 3,5 mL/kg/min (VO2 de repos).
+ * VO2net = coût ACSM course à plat : 0,2 × vitesse (m/min).
+ * Plage HRR valide : 55%–97% (en dehors, l'extrapolation linéaire est trop imprécise).
+ * Segments avec pente moyenne > 5% exclus (biais GAP et FC sur descentes/montées).
+ */
 export function estimateVO2max(
   activity: GPXActivity,
   fcMax: number,
@@ -234,7 +280,7 @@ export function estimateVO2max(
   );
   if (pts.length < 60) return null;
 
-  // Prefix sums for O(1) window mean/variance + average absolute grade
+  // Sommes préfixées pour calcul O(1) de moyenne/variance et pente absolue moyenne
   const m = pts.length;
   const prefHR        = new Float64Array(m + 1);
   const prefHR2       = new Float64Array(m + 1);
@@ -258,14 +304,14 @@ export function estimateVO2max(
     const avgAbsGrade = (prefAbsGrade[j + 1] - prefAbsGrade[i]) / n;
     return {
       mHR, mSpd, avgAbsGrade,
-      cvHR:  Math.sqrt(Math.max(0, varHR))  / mHR,
-      cvSpd: Math.sqrt(Math.max(0, varSpd)) / mSpd,
+      cvHR:  Math.sqrt(Math.max(0, varHR))  / mHR,   // coefficient de variation FC
+      cvSpd: Math.sqrt(Math.max(0, varSpd)) / mSpd,  // coefficient de variation vitesse
     };
   };
 
-  // Two-pointer: find most stable flat window of at least minMs duration.
-  // Score = 2×CV(HR) + CV(speed). Windows with avg |grade| > 5% are rejected:
-  // downhill GAP boost and uphill HR spike both corrupt the ACSM flat formula.
+  // Two-pointer : cherche la fenêtre la plus stable (CV HR + CV vitesse minimaux) d'au moins minMs.
+  // Score = 2×CV(HR) + CV(vitesse). Fenêtres avec pente moy > 5% exclues :
+  // descentes gonflent la vitesse via GAP, montées gonflent la FC → formule ACSM non valide.
   const findBestWindow = (minMs: number) => {
     let j = 0;
     let bestScore = Infinity, bestI = -1, bestJ = -1;
@@ -288,12 +334,13 @@ export function estimateVO2max(
   const { mHR: avgHR, mSpd: avgSpd, cvHR, cvSpd } = winStats(bestI, bestJ);
 
   const hrrPct = (avgHR - fcRest) / (fcMax - fcRest);
-  // Below 0.55 HRR the linear extrapolation error explodes (×1.8 amplification);
-  // above 0.97 the athlete is essentially at max.
+  // En dessous de 55% HRR, l'erreur d'extrapolation linéaire explose (×1,8) ;
+  // au-dessus de 97%, l'athlète est quasi à FCmax → formule non valide.
   if (hrrPct < 0.55 || hrrPct > 0.97) return null;
 
-  // Swain & Leutholtz (1997): resting VO2 (3.5 mL/kg/min) is constant,
-  // only net (exercise) VO2 scales with HRR%.
+  // Swain & Leutholtz (1997) : VO2 repos = 3,5 mL/kg/min (constante),
+  // seul le VO2 net (exercice) est proportionnel au %HRR.
+  // VO2net = 0,2 × vitesse (m/min) — formule ACSM course à plat
   const vo2net = 0.2 * (avgSpd * 60);
   const vo2max = vo2net / hrrPct + 3.5;
 
@@ -301,6 +348,7 @@ export function estimateVO2max(
 
   const win20exists = cvHR < 0.05 ? findBestWindow(20 * 60_000) !== null : false;
 
+  // Confiance élevée : fenêtre ≥20 min, CV(HR) < 5%, CV(vitesse) < 10%, HRR 60–87%
   const confidence: 'high' | 'medium' | 'low' =
     win20exists && cvHR < 0.05 && cvSpd < 0.10 && hrrPct >= 0.60 && hrrPct <= 0.87 ? 'high' :
     cvHR < 0.12 ? 'medium' : 'low';

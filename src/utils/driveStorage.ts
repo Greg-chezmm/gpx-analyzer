@@ -1,3 +1,4 @@
+/** Entrée de l'index d'activités stocké sur Google Drive (metadata + stats résumées). */
 export interface ActivityIndexEntry {
   fileId: string | null;
   name: string;
@@ -25,6 +26,7 @@ export interface ActivityIndexEntry {
   avgCadence?: number;
 }
 
+/** Structure du fichier d'index JSON sauvegardé sur Drive (activities-index.json). */
 interface DriveIndex {
   version: 1;
   folderId: string;
@@ -35,6 +37,7 @@ const INDEX_NAME = 'activities-index.json';
 const FOLDER_NAME = 'GPX Analyzer';
 const BASE = 'https://www.googleapis.com';
 
+/** Effectue une requête authentifiée vers l'API Google Drive ; lève une erreur si le statut HTTP n'est pas OK. */
 async function req(url: string, token: string, opts?: RequestInit): Promise<Response> {
   const res = await fetch(url, {
     ...opts,
@@ -47,6 +50,7 @@ async function req(url: string, token: string, opts?: RequestInit): Promise<Resp
   return res;
 }
 
+/** Récupère ou crée le dossier "GPX Analyzer" dans le Drive de l'utilisateur, retourne son id. */
 async function getOrCreateFolder(token: string): Promise<string> {
   const q = encodeURIComponent(
     `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`
@@ -64,6 +68,7 @@ async function getOrCreateFolder(token: string): Promise<string> {
   return id;
 }
 
+/** Charge le fichier d'index JSON depuis Drive ; retourne un index vide si inexistant. */
 async function loadIndex(token: string, folderId: string): Promise<{ id: string | null; data: DriveIndex }> {
   const q = encodeURIComponent(`name='${INDEX_NAME}' and '${folderId}' in parents and trashed=false`);
   const r = await req(`${BASE}/drive/v3/files?q=${q}&fields=files(id)`, token);
@@ -75,6 +80,7 @@ async function loadIndex(token: string, folderId: string): Promise<{ id: string 
   return { id: files[0].id, data: await r2.json() as DriveIndex };
 }
 
+/** Construit un corps multipart/related (format requis par l'API Drive upload) depuis les métadonnées et le contenu du fichier. */
 function buildMultipart(
   boundary: string,
   meta: object,
@@ -90,6 +96,7 @@ function buildMultipart(
   return new Blob([head, body, tail]);
 }
 
+/** Sauvegarde (crée ou met à jour) le fichier d'index JSON sur Drive. */
 async function saveIndex(token: string, folderId: string, id: string | null, data: DriveIndex): Promise<void> {
   const boundary = 'gpxanalyzer_idx_314159';
   const meta = id ? { name: INDEX_NAME } : { name: INDEX_NAME, parents: [folderId] };
@@ -104,6 +111,7 @@ async function saveIndex(token: string, folderId: string, id: string | null, dat
   });
 }
 
+/** Uploade un fichier d'activité (GPX ou FIT) sur Drive et met à jour l'index. Si l'activité existe déjà (même date+nom), seules les métadonnées sont rafraîchies sans ré-upload. */
 export async function uploadActivity(
   token: string,
   rawData: string | ArrayBuffer,
@@ -147,12 +155,14 @@ export async function uploadActivity(
   await saveIndex(token, folderId, indexId, index);
 }
 
+/** Récupère la liste des activités depuis l'index Drive (tri chronologique inversé conservé). */
 export async function fetchActivityList(token: string): Promise<ActivityIndexEntry[]> {
   const folderId = await getOrCreateFolder(token);
   const { data } = await loadIndex(token, folderId);
   return data.activities;
 }
 
+/** Télécharge le contenu brut d'un fichier d'activité depuis Drive (ArrayBuffer pour FIT, string pour GPX). */
 export async function fetchActivityFile(token: string, fileId: string, fileName: string): Promise<ArrayBuffer | string> {
   const r = await req(`${BASE}/drive/v3/files/${fileId}?alt=media`, token);
   if (fileName.toLowerCase().endsWith('.fit')) return r.arrayBuffer();
@@ -161,6 +171,7 @@ export async function fetchActivityFile(token: string, fileId: string, fileName:
 
 // ── Training history (TSB/CTL/ATL) ───────────────────────────────────
 
+/** Entrée de l'historique d'entraînement utilisée pour le calcul CTL/ATL/TSB. */
 export interface DriveTrainingEntry {
   date: string;
   trimp: number;
@@ -169,6 +180,7 @@ export interface DriveTrainingEntry {
 
 const HISTORY_NAME = 'training-history.json';
 
+/** Sauvegarde ou met à jour un fichier JSON générique dans le dossier Drive. */
 async function saveJsonFile<T>(
   token: string,
   folderId: string,
@@ -193,6 +205,7 @@ async function saveJsonFile<T>(
   });
 }
 
+/** Charge un fichier JSON générique depuis le dossier Drive ; retourne null si inexistant. */
 async function loadJsonFile<T>(
   token: string,
   folderId: string,
@@ -206,11 +219,13 @@ async function loadJsonFile<T>(
   return r2.json() as Promise<T>;
 }
 
+/** Sauvegarde l'historique d'entraînement (TRIMP par jour) sur Drive. */
 export async function saveTrainingHistory(token: string, history: DriveTrainingEntry[]): Promise<void> {
   const folderId = await getOrCreateFolder(token);
   await saveJsonFile(token, folderId, HISTORY_NAME, history);
 }
 
+/** Charge l'historique d'entraînement depuis Drive ; retourne un tableau vide si absent. */
 export async function fetchTrainingHistory(token: string): Promise<DriveTrainingEntry[]> {
   const folderId = await getOrCreateFolder(token);
   const data = await loadJsonFile<DriveTrainingEntry[]>(token, folderId, HISTORY_NAME);
@@ -219,6 +234,7 @@ export async function fetchTrainingHistory(token: string): Promise<DriveTraining
 
 // ── User settings ─────────────────────────────────────────────────────
 
+/** Paramètres physiologiques de l'utilisateur synchronisés sur Drive. */
 export interface DriveUserSettings {
   fcMax: number;
   fcRest: number;
@@ -231,11 +247,13 @@ export interface DriveUserSettings {
 
 const SETTINGS_NAME = 'user-settings.json';
 
+/** Sauvegarde les paramètres utilisateur sur Drive. */
 export async function saveUserSettings(token: string, settings: DriveUserSettings): Promise<void> {
   const folderId = await getOrCreateFolder(token);
   await saveJsonFile(token, folderId, SETTINGS_NAME, settings);
 }
 
+/** Charge les paramètres utilisateur depuis Drive ; retourne null si jamais sauvegardés. */
 export async function fetchUserSettings(token: string): Promise<DriveUserSettings | null> {
   const folderId = await getOrCreateFolder(token);
   return loadJsonFile<DriveUserSettings>(token, folderId, SETTINGS_NAME);
@@ -243,6 +261,7 @@ export async function fetchUserSettings(token: string): Promise<DriveUserSetting
 
 // ── Delete activity ────────────────────────────────────────────────────
 
+/** Supprime une activité de Drive : efface le fichier GPX/FIT, la retire de l'index et de l'historique TRIMP. */
 export async function deleteActivity(
   token: string,
   fileId: string | null,

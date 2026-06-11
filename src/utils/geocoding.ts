@@ -1,3 +1,4 @@
+/** Structure de réponse partielle de l'API Nominatim (OpenStreetMap). */
 interface NominatimResult {
   address?: {
     city?: string;
@@ -10,6 +11,7 @@ interface NominatimResult {
   };
 }
 
+/** Traduit des coordonnées GPS en nom de lieu via l'API Nominatim (OSM), en français. Retourne null en cas d'échec. */
 export async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}&format=json&zoom=10&accept-language=fr`;

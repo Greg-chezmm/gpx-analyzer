@@ -1,6 +1,6 @@
 import type { GPXActivity } from './gpxCore';
 
-// Interval analysis (effort / recovery repeats)
+/** Un intervalle d'effort ou de récupération détecté dans une activité (fractionné). */
 export interface GPXInterval {
   number: number;
   type: 'effort' | 'recovery';
@@ -21,6 +21,11 @@ export interface GPXInterval {
   endPointIndex: number;
 }
 
+/**
+ * Détecte automatiquement les intervalles (efforts/récupérations) dans une activité par machine à états hystérétique sur la vitesse.
+ * Seuil effort : médiane × 1,15 ; seuil retour : médiane × 0,90.
+ * Retourne null si moins de 2 efforts significatifs ou si le ratio effort/récup est insuffisant (<1,10).
+ */
 export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
   const { points } = activity;
   if (points.length < 60) return null;
@@ -30,6 +35,8 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
   const median = movingSpeeds[Math.floor(movingSpeeds.length / 2)];
   if (median <= 0) return null;
 
+  // Seuils d'hystérésis : on passe en "effort" au-dessus de +15% médiane,
+  // on repasse en "récupération" en-dessous de -10% médiane → évite les oscillations rapides
   const hiThresh = median * 1.15;
   const loThresh = median * 0.90;
 
@@ -58,6 +65,7 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
     return a && b ? (b.getTime() - a.getTime()) / 1000 : 0;
   };
 
+  // Filtrer les segments trop courts (effort < 20 s, récupération < 10 s)
   const filtered = segments.filter(s =>
     s.type === 'effort' ? segDuration(s) >= 20 : segDuration(s) >= 10
   );
@@ -65,7 +73,7 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
   const effortSegs = filtered.filter(s => s.type === 'effort');
   if (effortSegs.length < 2) return null;
 
-  // Validate: efforts must be meaningfully faster than recoveries
+  // Validate: efforts must be meaningfully faster than recoveries (ratio > 1,10)
   const avgOf = (segs: typeof filtered, key: 'effort' | 'recovery') => {
     const relevant = segs.filter(s => s.type === key);
     if (relevant.length === 0) return 0;

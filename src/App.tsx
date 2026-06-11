@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, lazy, Suspense } from "react";
 import {
   parseGPX, calculateSplits, detectIntervals,
   detectClimbs, classifySession, calcCardiacDrift,
@@ -6,7 +6,6 @@ import {
   calcCardiacPace, detectHillRepeats,
   type GPXActivity,
 } from "./utils/gpxParser";
-import { parseFIT } from "./utils/fitParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
 import { reverseGeocode } from "./utils/geocoding";
 import { useUserSettings } from "./hooks/useUserSettings";
@@ -15,13 +14,15 @@ import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHisto
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
-import { ActivityMap } from "./components/ActivityMap";
 import { ChartViewer } from "./components/ChartViewer";
 import { SplitsTable, formatDuration, formatPace } from "./components/SplitsTable";
 import { HeartRateZones } from "./components/HeartRateZones";
-import { IntervalAnalysis } from "./components/IntervalAnalysis";
-import { ClimbAnalysis } from "./components/ClimbAnalysis";
-import { HillRepeats } from "./components/HillRepeats";
+
+// Chargés à la demande — Leaflet (~150 KB) et fit-file-parser (~80 KB) absents du bundle initial
+const ActivityMap     = lazy(() => import("./components/ActivityMap").then(m => ({ default: m.ActivityMap })));
+const IntervalAnalysis = lazy(() => import("./components/IntervalAnalysis").then(m => ({ default: m.IntervalAnalysis })));
+const ClimbAnalysis   = lazy(() => import("./components/ClimbAnalysis").then(m => ({ default: m.ClimbAnalysis })));
+const HillRepeats     = lazy(() => import("./components/HillRepeats").then(m => ({ default: m.HillRepeats })));
 import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
@@ -287,7 +288,7 @@ function App() {
     requestAnimationFrame(() => setTimeout(async () => {
       try {
         const parsed = isFit && data instanceof ArrayBuffer
-          ? await parseFIT(data, nameWithoutExtension)
+          ? await import("./utils/fitParser").then(m => m.parseFIT(data, nameWithoutExtension))
           : parseGPX(data as string, nameWithoutExtension);
         setActivity(parsed);
         setFileName(name);
@@ -329,7 +330,7 @@ function App() {
       let second: GPXActivity;
       if (file.name.toLowerCase().endsWith('.fit')) {
         const buf = await file.arrayBuffer();
-        second = await parseFIT(buf, file.name.replace(/\.fit$/i, ''));
+        second = await import("./utils/fitParser").then(m => m.parseFIT(buf, file.name.replace(/\.fit$/i, '')));
       } else {
         const text = await file.text();
         second = parseGPX(text, file.name.replace(/\.gpx$/i, ''));
@@ -684,14 +685,16 @@ function App() {
             {/* ── Carte + Graphiques ── */}
             <div id="nav-map" className="content-layout">
               <ErrorBoundary section="Carte">
-                <div style={{ height: "100%" }}>
-                  <ActivityMap
-                    points={enrichedActivity!.points}
-                    hoveredPointIndex={hoveredPointIndex}
-                    onHoverPointChange={setHoveredPointIndex}
-                    hasHeartRate={hasHeartRate}
-                  />
-                </div>
+                <Suspense fallback={<div style={{ height: "100%", minHeight: 320, background: "var(--bg-secondary)", borderRadius: "var(--radius-md)" }} />}>
+                  <div style={{ height: "100%" }}>
+                    <ActivityMap
+                      points={enrichedActivity!.points}
+                      hoveredPointIndex={hoveredPointIndex}
+                      onHoverPointChange={setHoveredPointIndex}
+                      hasHeartRate={hasHeartRate}
+                    />
+                  </div>
+                </Suspense>
               </ErrorBoundary>
               <ErrorBoundary section="Graphiques">
                 <div id="nav-charts" style={{ height: "100%" }}>
@@ -791,22 +794,28 @@ function App() {
 
             {/* Analyse des fractionnés — auto-détectés ou laps montre */}
             {intervals && intervals.length > 0 && (
-              <IntervalAnalysis
-                intervals={intervals}
-                activityType={enrichedActivity!.activityType}
-                points={enrichedActivity!.points}
-                source={enrichedActivity!.fitLaps?.length ? 'fit' : 'detected'}
-              />
+              <Suspense fallback={null}>
+                <IntervalAnalysis
+                  intervals={intervals}
+                  activityType={enrichedActivity!.activityType}
+                  points={enrichedActivity!.points}
+                  source={enrichedActivity!.fitLaps?.length ? 'fit' : 'detected'}
+                />
+              </Suspense>
             )}
 
             {/* Analyse des montées */}
             {climbs.length > 0 && (
-              <ClimbAnalysis climbs={climbs} points={enrichedActivity!.points} />
+              <Suspense fallback={null}>
+                <ClimbAnalysis climbs={climbs} points={enrichedActivity!.points} />
+              </Suspense>
             )}
 
             {/* Répétitions de côtes — running uniquement, ≥ 2 séries détectées */}
             {hillRepeats.length > 0 && (
-              <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
+              <Suspense fallback={null}>
+                <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
+              </Suspense>
             )}
 
             {/* ── Splits ── */}

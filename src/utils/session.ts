@@ -2,6 +2,7 @@ import type { GPXTrackPoint } from './gpxCore';
 
 // ─── Session classification ───────────────────────────────────────────────────
 
+/** Types de séances détectables automatiquement par classification cardiaque ou vitesse. */
 export type SessionType =
   | 'Récupération'
   | 'Endurance aérobie'
@@ -11,6 +12,7 @@ export type SessionType =
   | 'Fractionné'
   | 'VO2max';
 
+/** Résultat de la classification d'une séance : type, couleur, emoji, description et répartition par zone. */
 export interface SessionClassification {
   type: SessionType;
   color: string;
@@ -20,12 +22,17 @@ export interface SessionClassification {
   zonePcts: number[]; // [Z1..Z5] percentage of time
 }
 
-// Karvonen zone boundaries — returns bpm thresholds [z1min, z2min, z3min, z4min, z5min, z5max]
+/**
+ * Calcule les bornes de fréquence cardiaque des zones Z1–Z5 selon la méthode Karvonen (% de la réserve cardiaque).
+ * Formule : FC_zone = FC_repos + %HRR × (FC_max − FC_repos).
+ * Bornes retournées : [50%, 60%, 70%, 80%, 90%] de HRR (bpm absolus).
+ */
 export function karvonenBounds(fcMax: number, fcRest: number): number[] {
   const r = fcMax - fcRest;
   return [0.50, 0.60, 0.70, 0.80, 0.90].map(p => Math.round(fcRest + p * r));
 }
 
+/** Retourne l'index de zone (0–4) pour une FC donnée selon les bornes Karvonen. */
 function getZoneKarvonen(hr: number, bounds: number[]): number {
   // bounds = [z1min, z2min, z3min, z4min, z5min]
   if (hr >= bounds[4]) return 4; // Z5
@@ -35,6 +42,11 @@ function getZoneKarvonen(hr: number, bounds: number[]): number {
   return 0;                       // Z1
 }
 
+/**
+ * Classifie une séance en type d'entraînement à partir de la distribution temporelle par zones cardiaques (priorité)
+ * ou par zones d'allure % VMA (fallback si données FC insuffisantes).
+ * La classification cardiaque utilise les bornes Karvonen ; la classification vitesse utilise des seuils % VMA.
+ */
 export function classifySession(
   points: GPXTrackPoint[],
   fcMax: number,
@@ -68,6 +80,7 @@ export function classifySession(
     let emoji: string;
     let description: string;
 
+    // Critères de classification par priorité décroissante
     if (pcts[4] >= 15) {
       type = 'VO2max'; color = '#ef4444'; emoji = '🔴';
       description = `${pcts[4].toFixed(0)}% en Z5 — effort maximal`;
@@ -94,7 +107,7 @@ export function classifySession(
     return { type, color, emoji, description, basis: 'hr', zonePcts: pcts };
   }
 
-  // Fallback: speed-based classification
+  // Fallback: speed-based classification (zones % VMA)
   const vmaMs = vma / 3.6;
   const speedTime = [0, 0, 0, 0, 0];
   let totalSpeedTime = 0;

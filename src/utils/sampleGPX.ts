@@ -1,4 +1,4 @@
-// Helper to generate a realistic running route around Paris for instant testing
+/** Génère un fichier GPX synthétique d'une course à pied d'1h autour de la Tour Eiffel, avec FC, cadence et puissance simulées, pour les tests de développement. */
 export function generateSampleGPX(): string {
   const startLat = 48.858844; // Eiffel Tower
   const startLon = 2.294350;
@@ -22,25 +22,25 @@ export function generateSampleGPX(): string {
   let currentLat = startLat;
   let currentLon = startLon;
   let currentEle = 35.0; // base height in Paris (meters)
-  
+
   // Generating a beautiful loop track: Tower -> river banks -> Trocadero -> back
   for (let i = 0; i < numPoints; i++) {
     const progress = i / (numPoints - 1);
-    
+
     // Angle for looping coordinate calculations
     const angle = progress * Math.PI * 2;
-    
+
     // Programmatic path coordinates
     currentLat = startLat + 0.005 * Math.sin(angle) + 0.002 * Math.cos(angle * 2);
     currentLon = startLon + 0.012 * Math.sin(angle * 2) - 0.004 * Math.cos(angle);
-    
+
     // Realistic rolling hills (Elevation)
     // Eiffel tower base is ~35m, we climb up to Trocadero heights ~65m
     currentEle = 35.0 + Math.sin(angle) * 15.0 + Math.cos(angle * 3) * 3.0;
-    
+
     // Timestamp
     const ptTime = new Date(startTime.getTime() + (progress * durationSec * 1000));
-    
+
     // Heart rate logic: starts at 120, drifts up, peaks on elevation hills
     const hrNoise = Math.sin(angle * 10) * 4;
     const hrElevFactor = Math.max(0, currentEle - 35.0) * 1.2;

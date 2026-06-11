@@ -3,11 +3,13 @@ import { calculateDistance } from './gpxCore';
 import { computeTrackStats } from './trackProcessing';
 import type { GPXInterval } from './intervals';
 
+/** Informations sur l'écart entre deux activités fusionnées. */
 export interface MergeInfo {
   gapSeconds: number;  // temps de pause entre les deux fichiers
   gapMeters: number;   // distance GPS entre fin fichier 1 et début fichier 2
 }
 
+/** Fusionne deux activités GPX/FIT en une seule, en les triant chronologiquement et en recalculant toutes les statistiques. */
 export function mergeActivities(
   first: GPXActivity,
   second: GPXActivity,
@@ -37,9 +39,9 @@ export function mergeActivities(
   const mergedPoints = [...a.points, ...bPoints];
   const totalDist = mergedPoints[mergedPoints.length - 1].distFromStart;
 
-  // Stats vitesse/durée depuis les points fusionnés
-  // Note: computeTrackStats ignore les intervalles > 30s entre points consécutifs
-  // pour movingTime → le gap de redémarrage montre ne pollue pas le temps de mouvement
+  // Stats vitesse/durée depuis les points fusionnés.
+  // computeTrackStats ignore les intervalles > 30 s entre points consécutifs
+  // pour movingTime → le gap de redémarrage ne pollue pas le temps de mouvement.
   const stats = computeTrackStats(mergedPoints, totalDist);
 
   // Moyennes FC / cadence / puissance / température depuis les points

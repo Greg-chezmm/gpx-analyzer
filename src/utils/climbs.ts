@@ -2,8 +2,10 @@ import type { GPXActivity } from './gpxCore';
 
 // ─── Climb analysis ──────────────────────────────────────────────────────────
 
+/** Catégorie de pente d'une montée détectée. */
 export type ClimbCategory = 'moderate' | 'steep' | 'very_steep';
 
+/** Segment de montée extrait d'une activité, avec métriques physiologiques et géographiques. */
 export interface ClimbSegment {
   category: ClimbCategory;
   startIndex: number;
@@ -18,12 +20,14 @@ export interface ClimbSegment {
   avgHR: number | null;
 }
 
+/** Seuils de pente et couleurs d'affichage par catégorie (modéré 5–12%, raide 12–20%, très raide >20%). */
 export const CLIMB_CATEGORIES: Record<ClimbCategory, { label: string; minGrade: number; maxGrade: number; color: string }> = {
   moderate:   { label: "Modéré",     minGrade:  5, maxGrade: 12, color: "#34d399" },
   steep:      { label: "Raide",      minGrade: 12, maxGrade: 20, color: "#fbbf24" },
   very_steep: { label: "Très raide", minGrade: 20, maxGrade: Infinity, color: "#f97316" },
 };
 
+/** Détecte et caractérise les montées d'une activité (seuil ≥5%, min 80 m, min 8 m D+). */
 export function detectClimbs(activity: GPXActivity): ClimbSegment[] {
   const pts = activity.points;
   if (pts.length < 10) return [];
@@ -76,9 +80,9 @@ export function detectClimbs(activity: GPXActivity): ClimbSegment[] {
     if (dist < MIN_DIST || elevGain < MIN_ELEV) continue;
 
     const avgGrade = (elevGain / dist) * 100;
-    // maxGrade: independent 15 m half-window scan (30 m total) computed directly
-    // from elevation. Short enough to capture steep sections, long enough to filter
-    // point-to-point GPS noise. Does NOT use the 60 m per-point grade values.
+    // maxGrade: fenêtre indépendante ±15 m (30 m total) calculée directement sur
+    // l'altitude brute. Assez courte pour capturer les passages raides, assez longue
+    // pour filtrer le bruit GPS point-à-point. N'utilise PAS les grades per-point à 60 m.
     let maxGrade = 0;
     const MAX_HALF_M = 15;
     for (let i = s.start; i <= s.end; i++) {
@@ -119,6 +123,7 @@ export function detectClimbs(activity: GPXActivity): ClimbSegment[] {
       maxGrade:  Math.round(maxGrade * 10) / 10,
       duration:  Math.round(duration),
       avgPace:   dist > 0 && duration > 0 ? (duration / (dist / 1000)) : 0,
+      // VAM (Vitesse Ascensionnelle Moyenne) = D+ en m/h
       vam:       duration > 0 ? Math.round(elevGain / (duration / 3600)) : 0,
       avgHR:     hrVals.length > 0 ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : null,
     });

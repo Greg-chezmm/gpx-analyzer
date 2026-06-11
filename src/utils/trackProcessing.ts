@@ -8,16 +8,21 @@ import type { GPXTrackPoint } from './gpxCore';
 
 // ── 1. enrichPoints ──────────────────────────────────────────────────────────
 // Mutates points in-place:
-//   a) Elevation smoothing — 11-point symmetric moving average.
-//      Required for DEM-corrected GPX (Strava): per-point noise < 0.25 m but
-//      real terrain accumulates over km. A naive threshold massively under-counts.
+//   a) Elevation smoothing — fenêtre symétrique ±5 points (11 points au total).
+//      Nécessaire pour les GPX corrigés DEM (ex. Strava) : le bruit per-point
+//      est < 0,25 m mais s'accumule sur les km. Un seuil naïf sous-compte massivement.
 //   b) Elevation gain / loss accumulation from smoothed values.
 //   c) Raw speed from consecutive distFromStart / time deltas.
-//   d) Speed smoothing — 5-point moving average (kills GPS spikes).
-//   e) Grade — 60 m distance window regardless of recording frequency.
+//   d) Speed smoothing — moyenne mobile 5 points (supprime les pics GPS).
+//   e) Grade — fenêtre de 60 m indépendante de la fréquence d'enregistrement.
 //
 // Returns the rounded elevationGain / elevationLoss (meters).
 
+/**
+ * Enrichit les points in-place : lissage altitude (±5 pts), calcul D+/D−,
+ * vitesse brute, lissage vitesse (±2 pts), et pente sur fenêtre 60 m.
+ * Retourne D+, D−, nombre d'outliers altitude corrigés et couverture altitude.
+ */
 export function enrichPoints(points: GPXTrackPoint[]): {
   elevationGain: number;
   elevationLoss: number;
@@ -29,9 +34,9 @@ export function enrichPoints(points: GPXTrackPoint[]): {
   // a) Elevation smoothing
   const rawEle = points.map(p => p.ele);
 
-  // Pre-pass: reject isolated GPS altitude outliers before smoothing.
-  // A point deviating > 50 m from its neighbors' midpoint is almost certainly
-  // sensor noise (GPS altitude accuracy is typically ±10-20 m, not ±100 m).
+  // Pré-passe : rejette les outliers altitude GPS isolés avant le lissage.
+  // Un point déviant de > 50 m de la moyenne de ses voisins est quasi-certainement
+  // du bruit capteur (précision GPS altitude typique : ±10–20 m, pas ±100 m).
   let elevOutliers = 0;
   for (let i = 1; i < rawEle.length - 1; i++) {
     if (rawEle[i] === null) continue;
@@ -45,6 +50,7 @@ export function enrichPoints(points: GPXTrackPoint[]): {
   const elevWithData = rawEle.filter(e => e !== null).length;
   const elevCoverage = Math.round(elevWithData / points.length * 100);
 
+  // Lissage 11 points (±5) sur les altitudes nettoyées
   const ELE_WIN = 5;
   for (let i = 0; i < points.length; i++) {
     if (rawEle[i] === null) continue;
@@ -57,7 +63,7 @@ export function enrichPoints(points: GPXTrackPoint[]): {
     points[i].ele = cnt > 0 ? sum / cnt : rawEle[i];
   }
 
-  // b) Elevation gain / loss
+  // b) Elevation gain / loss (from smoothed values)
   let elevationGain = 0, elevationLoss = 0;
   for (let i = 1; i < points.length; i++) {
     const diff = (points[i].ele ?? 0) - (points[i - 1].ele ?? 0);
@@ -67,7 +73,7 @@ export function enrichPoints(points: GPXTrackPoint[]): {
     }
   }
 
-  // c) Raw speed
+  // c) Raw speed (Δdistance / Δtime point-à-point)
   points[0].rawSpeed = 0;
   for (let i = 1; i < points.length; i++) {
     const curr = points[i], prev = points[i - 1];
@@ -77,7 +83,7 @@ export function enrichPoints(points: GPXTrackPoint[]): {
     curr.rawSpeed = timeDiff > 0 && distDiff > 0 ? distDiff / timeDiff : 0;
   }
 
-  // d) Speed smoothing (5-point moving average)
+  // d) Speed smoothing (moyenne mobile 5 points — supprime pics GPS)
   const SPD_WIN = 5;
   const half = Math.floor(SPD_WIN / 2);
   for (let i = 0; i < points.length; i++) {
@@ -91,7 +97,8 @@ export function enrichPoints(points: GPXTrackPoint[]): {
   }
   points[0].speed = 0;
 
-  // e) Grade — 60 m window (±30 m each side)
+  // e) Grade — fenêtre de 60 m (±30 m de chaque côté)
+  // Indépendante de la fréquence d'enregistrement : stable à 1 s comme à 5 s.
   const HALF_M = 30;
   for (let i = 0; i < points.length; i++) {
     const base = points[i].distFromStart;
@@ -118,6 +125,11 @@ export function enrichPoints(points: GPXTrackPoint[]): {
 // Computes global timing / speed statistics from enriched points.
 // fallbackDistance: totalDistance in meters (used when timestamps are absent).
 
+/**
+ * Calcule les statistiques globales de l'activité depuis les points enrichis :
+ * durée totale, temps en mouvement (vitesse > 0,5 m/s et Δt < 30 s),
+ * vitesse max, vitesse et allure moyennes, nombre et durée max des pauses GPS.
+ */
 export function computeTrackStats(points: GPXTrackPoint[], fallbackDistance: number) {
   const startTime = points[0].time;
   const endTime   = points[points.length - 1].time;
@@ -132,6 +144,7 @@ export function computeTrackStats(points: GPXTrackPoint[], fallbackDistance: num
     const timeDiff = curr.time && prev.time
       ? (curr.time.getTime() - prev.time.getTime()) / 1000 : 0;
 
+    // Pause GPS : intervalle ≥ 30 s entre deux points consécutifs
     if (timeDiff >= 30) {
       gapCount++;
       if (timeDiff > longestGap) longestGap = timeDiff;

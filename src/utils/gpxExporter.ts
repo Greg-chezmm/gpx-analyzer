@@ -1,11 +1,13 @@
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 import type { GPXInterval } from './intervals';
 
+/** Échappe les caractères spéciaux XML dans une chaîne. */
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 }
 
+/** Sérialise un point de tracé GPX en XML avec ses extensions Garmin TrackPointExtension (FC, cadence, puissance, température). */
 function trkpt(p: GPXTrackPoint, ind: string): string {
   const lines: string[] = [];
   lines.push(`${ind}<trkpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">`);
@@ -25,6 +27,7 @@ function trkpt(p: GPXTrackPoint, ind: string): string {
   return lines.join('\n');
 }
 
+/** Sérialise un segment de tracé GPX (`<trkseg>`) avec un label de commentaire optionnel. */
 function trkseg(pts: GPXTrackPoint[], label: string): string {
   if (pts.length < 2) return '';
   const lines = [`    <trkseg>`];
@@ -36,6 +39,7 @@ function trkseg(pts: GPXTrackPoint[], label: string): string {
 
 interface Seg { pts: GPXTrackPoint[]; label: string }
 
+/** Découpe les points en segments nommés (Échauffement, Effort N, Récupération N, Retour au calme) selon les intervalles détectés. */
 function buildSegments(points: GPXTrackPoint[], intervals: GPXInterval[] | null): Seg[] {
   if (!intervals || intervals.length === 0) {
     return [{ pts: points, label: '' }];
@@ -77,6 +81,7 @@ function buildSegments(points: GPXTrackPoint[], intervals: GPXInterval[] | null)
   return segs;
 }
 
+/** Génère la chaîne XML GPX 1.1 complète d'une activité, avec segments d'intervalles labellisés si fournis. */
 export function exportToGPX(activity: GPXActivity, intervals: GPXInterval[] | null): string {
   const { points, name, startTime, activityType } = activity;
   const safeName = escapeXml(name || 'Activité');
@@ -107,6 +112,7 @@ export function exportToGPX(activity: GPXActivity, intervals: GPXInterval[] | nu
   return [...header, ...body, ...footer].join('\n');
 }
 
+/** Déclenche le téléchargement navigateur d'un fichier GPX généré depuis l'activité. */
 export function downloadGPX(activity: GPXActivity, intervals: GPXInterval[] | null): void {
   const xml  = exportToGPX(activity, intervals);
   const blob = new Blob([xml], { type: 'application/gpx+xml;charset=utf-8' });

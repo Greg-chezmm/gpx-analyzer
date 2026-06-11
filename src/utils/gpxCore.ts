@@ -1,5 +1,6 @@
 import { enrichPoints, computeTrackStats } from './trackProcessing';
 
+/** Point de tracé GPS enrichi : coordonnées, altitude, FC, cadence, puissance, température, distance, vitesse et pente. */
 export interface GPXTrackPoint {
   lat: number;
   lon: number;
@@ -15,6 +16,7 @@ export interface GPXTrackPoint {
   grade: number | null;   // slope %
 }
 
+/** Données de synthèse extraites d'un fichier FIT (montre Garmin/Suunto) : Training Effect, VO2max estimé, récupération, EPOC, ressenti. */
 export interface FitSummary {
   trainingEffect: number | null;  // 0–5
   estimatedVO2max: number | null; // mL/kg/min (estimation montre)
@@ -25,6 +27,7 @@ export interface FitSummary {
   timeInHrZone: number[] | null;  // secondes [Z1..Z5], zones % FCmax montre
 }
 
+/** Indicateurs de qualité du fichier GPS (couverture FC, altitude, outliers, pauses GPS). */
 export interface DataQuality {
   hrCoverage: number;    // % points avec FC (0–100)
   elevCoverage: number;  // % points avec altitude valide (0–100)
@@ -34,6 +37,7 @@ export interface DataQuality {
   gpsDropped: number;    // enregistrements sans GPS valide (FIT only, 0 pour GPX)
 }
 
+/** Activité complète analysée : tous les points enrichis, statistiques globales, type d'activité et qualité des données. */
 export interface GPXActivity {
   name: string;
   startTime: Date | null;
@@ -60,7 +64,10 @@ export interface GPXActivity {
   fitLaps?: import('./intervals').GPXInterval[];
 }
 
-// Calculate distance between two GPS coordinates using Haversine formula
+/**
+ * Calcule la distance en mètres entre deux points GPS avec la formule de Haversine.
+ * R = 6 371 000 m (rayon terrestre moyen). Précision < 0,3% pour les distances sportives.
+ */
 export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3; // Earth radius in meters
   const phi1 = (lat1 * Math.PI) / 180;
@@ -76,6 +83,7 @@ export function calculateDistance(lat1: number, lon1: number, lat2: number, lon2
   return R * c; // in meters
 }
 
+/** Parse un fichier GPX (XML) et retourne une GPXActivity enrichie avec toutes les métriques calculées. */
 export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): GPXActivity {
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(gpxText, "application/xml");
@@ -184,7 +192,7 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
       }
     }
 
-    // Distance calculation
+    // Distance calculation (Haversine point-à-point)
     if (i > 0) {
       const prevPt = points[i - 1];
       const distDiff = calculateDistance(prevPt.lat, prevPt.lon, lat, lon);
@@ -225,8 +233,7 @@ export function parseGPX(gpxText: string, defaultName = "Activité sans nom"): G
       activityType = 'cycling';
     }
   }
-  // Fallback: speed-based detection
-  // avgSpeed > 4.2 m/s (15 km/h) OR maxSpeed > 9 m/s (32 km/h) → cycling
+  // Fallback heuristique vitesse : avgSpeed > 4,2 m/s (15 km/h) OU maxSpeed > 9 m/s (32 km/h) → vélo
   if (activityType === 'unknown' && avgSpeed > 0) {
     activityType = (avgSpeed > 4.2 || maxSpeed > 9.0) ? 'cycling' : 'running';
   }

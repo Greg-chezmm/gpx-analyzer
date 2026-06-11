@@ -8,6 +8,7 @@ import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
 import { computeVDOT } from "./vdot";
 
+/** Options d'entrée pour la génération du résumé IA. */
 interface SummaryOptions {
   activity: GPXActivity;
   splits: GPXSplit[];
@@ -30,6 +31,12 @@ interface SummaryOptions {
 }
 
 // ── Zones cardiaques Karvonen ────────────────────────────────────────────────
+
+/**
+ * Calcule les bornes absolues (bpm) des 5 zones cardiaques Karvonen.
+ * Formule : FC_zone = FC_repos + %HRR × (FC_max − FC_repos).
+ * Seuils : Z1 < 60%, Z2 60–70%, Z3 70–80%, Z4 80–90%, Z5 ≥ 90% HRR.
+ */
 function hrZoneBounds(fcMax: number, fcRest: number) {
   const hRR = fcMax - fcRest;
   return [
@@ -41,6 +48,7 @@ function hrZoneBounds(fcMax: number, fcRest: number) {
   ];
 }
 
+/** Calcule la répartition du temps (% et secondes) par zone cardiaque Karvonen pour les points de l'activité. */
 function zoneStats(points: GPXActivity["points"], fcMax: number, fcRest: number) {
   const zones = hrZoneBounds(fcMax, fcRest);
   const counts = zones.map(() => 0);
@@ -66,6 +74,8 @@ function zoneStats(points: GPXActivity["points"], fcMax: number, fcRest: number)
 }
 
 // ── Zones d'allure % VMA ────────────────────────────────────────────────────
+
+/** Définition des zones d'allure en % VMA (course à pied). */
 const PACE_ZONES = [
   { label: "Z1 — Récupération",          pctMin: 0,    pctMax: 0.50 },
   { label: "Z2 — Endurance fondamentale",pctMin: 0.50, pctMax: 0.65 },
@@ -74,6 +84,7 @@ const PACE_ZONES = [
   { label: "Z5 — VO2max / Fractionné",   pctMin: 0.90, pctMax: Infinity },
 ];
 
+/** Calcule la répartition du temps par zone d'allure % VMA (interpolation temporelle point-à-point). */
 function paceZoneStats(points: GPXActivity["points"], vmaKmh: number) {
   const vmaMs = vmaKmh / 3.6;
   const secs = new Array<number>(PACE_ZONES.length).fill(0);
@@ -102,6 +113,12 @@ function paceZoneStats(points: GPXActivity["points"], vmaKmh: number) {
 }
 
 // ── Zones de puissance Coggan ────────────────────────────────────────────────
+
+/**
+ * Définition des 7 zones de puissance Coggan (vélo) en % FTP.
+ * Z1 < 55%, Z2 55–75%, Z3 75–90%, Z4 90–105% (seuil), Z5 105–120% (VO2max),
+ * Z6 120–150% (anaérobie), Z7 > 150% (neuromusculaire).
+ */
 const POWER_ZONES = [
   { label: "Z1 — Récupération active",  pctMin: 0,    pctMax: 0.55 },
   { label: "Z2 — Endurance",            pctMin: 0.55, pctMax: 0.75 },
@@ -112,6 +129,7 @@ const POWER_ZONES = [
   { label: "Z7 — Neuromusculaire",      pctMin: 1.50, pctMax: Infinity },
 ];
 
+/** Calcule la répartition du temps par zone de puissance Coggan (% FTP) pour les points de l'activité. */
 function powerZoneStats(points: GPXActivity["points"], ftp: number) {
   if (ftp <= 0) return null;
   const secs = new Array<number>(POWER_ZONES.length).fill(0);
@@ -138,6 +156,11 @@ function powerZoneStats(points: GPXActivity["points"], ftp: number) {
   }));
 }
 
+/**
+ * Génère un prompt texte complet pour analyse IA d'une séance : profil, données générales,
+ * zones cardiaques/allure/puissance, métriques physiologiques (TRIMP, VO2max, dérive),
+ * données montre FIT, montées, répétitions de côte, fractionnés et splits.
+ */
 export function generateSummary(opts: SummaryOptions): string {
   const { activity, splits, climbs, intervals, hillRepeats,
           fcMax, fcRest, vma, ftp, weight, birthYear,
@@ -182,6 +205,7 @@ export function generateSummary(opts: SummaryOptions): string {
     if (intensityFactor) {
       push(`• Intensity Factor (IF) : ${intensityFactor.toFixed(2)}`);
       if (ftp > 0 && activity.movingTime > 0) {
+        // TSS = (durée_s × NP × IF) / (FTP × 3600) × 100  (formule Coggan)
         const tss = Math.round((activity.movingTime * normalizedPower * intensityFactor) / (ftp * 3600) * 100);
         push(`• TSS : ${tss}`);
       }
@@ -235,6 +259,7 @@ export function generateSummary(opts: SummaryOptions): string {
     push("📈 CHARGE & MÉTRIQUES PHYSIOLOGIQUES");
     if (trimp) {
       push(`• TRIMP Edwards : ${trimp.edwards}  |  Banister : ${trimp.banister}`);
+      // Règle empirique : ~6h de récupération par 10 points TRIMP Edwards
       const recovH = Math.round(trimp.edwards / 10) * 6;
       push(`• Récupération estimée : ~${recovH}h (règle empirique TRIMP/10 × 6h)`);
     }
@@ -254,6 +279,7 @@ export function generateSummary(opts: SummaryOptions): string {
       if (easyPace) push(`• Allure endurance cible : ${formatPace(easyPace.minPaceSecPerKm)}–${formatPace(easyPace.maxPaceSecPerKm)} /km`);
     }
     if (drift) {
+      // Dérive < 5% = bonne endurance aérobie ; 5–9% = modérée ; > 9% = élevée
       const severity = drift.decoupling < 5 ? "faible" : drift.decoupling < 9 ? "modérée" : "élevée";
       push(`• Dérive cardiaque : ${drift.decoupling.toFixed(1)}% (${severity}) — EF1 ${drift.ef1.toFixed(2)} → EF2 ${drift.ef2.toFixed(2)}`);
     }

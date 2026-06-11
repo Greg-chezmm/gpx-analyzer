@@ -1,6 +1,7 @@
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 import type { ClimbSegment } from './climbs';
 
+/** Une répétition individuelle de côte au sein d'une série. */
 export interface HillRepetition {
   repIndex: number;
   startIndex: number;
@@ -14,6 +15,7 @@ export interface HillRepetition {
   recovery: { duration: number; distance: number } | null;
 }
 
+/** Groupe de répétitions similaires sur la même côte, avec statistiques agrégées et indice de fatigue. */
 export interface HillRepeatSeries {
   id: number;
   repCount: number;
@@ -28,6 +30,7 @@ export interface HillRepeatSeries {
   reps: HillRepetition[];
 }
 
+/** Calcule la distance Haversine (m) entre deux points GPS — copie locale pour éviter la dépendance circulaire avec gpxCore. */
 function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6_371_000;
   const phi1 = (lat1 * Math.PI) / 180;
@@ -40,6 +43,7 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
 
 type EnrichedClimb = ClimbSegment & { idx: number };
 
+/** Vérifie si deux montées sont suffisamment similaires pour appartenir à la même série de répétitions (D+ ±30%, distance ±35%, départ à moins de 250 m). */
 function areSimilar(a: EnrichedClimb, b: EnrichedClimb, pts: GPXTrackPoint[]): boolean {
   // Forme similaire : D+ ±30% et distance ±35%
   if (Math.min(a.elevGain, b.elevGain) / Math.max(a.elevGain, b.elevGain) < 0.70) return false;
@@ -54,6 +58,10 @@ function areSimilar(a: EnrichedClimb, b: EnrichedClimb, pts: GPXTrackPoint[]): b
   return true;
 }
 
+/**
+ * Détecte les séries de répétitions de côte dans une activité via Union-Find sur les montées similaires.
+ * Nécessite au moins 2 montées détectées. Calcule l'indice de fatigue (allure dernières vs premières rép.) si ≥4 répétitions.
+ */
 export function detectHillRepeats(
   climbs: ClimbSegment[],
   activity: GPXActivity,
@@ -134,7 +142,8 @@ export function detectHillRepeats(
     const hrReps = reps.filter(r => r.avgHR !== null);
     const avgHR = hrReps.length > 0 ? Math.round(hrReps.reduce((a, r) => a + r.avgHR!, 0) / hrReps.length) : null;
 
-    // Fatigue : dernières N répétitions vs premières N (≥4 reps nécessaires)
+    // Fatigue : allure moyenne des N dernières rép. vs N premières (nécessite ≥4 répétitions)
+    // fatiguePct > 0 → l'athlète ralentit en fin de série
     let fatiguePct: number | null = null;
     if (reps.length >= 4) {
       const n = Math.min(3, Math.floor(reps.length / 2));

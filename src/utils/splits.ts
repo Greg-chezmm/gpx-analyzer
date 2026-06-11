@@ -1,6 +1,6 @@
 import type { GPXActivity } from './gpxCore';
 
-// Generate split times (kilometers by kilometer analysis)
+/** Statistiques d'un segment kilométrique (ou de longueur personnalisée) d'une activité. */
 export interface GPXSplit {
   number: number;
   distance: number; // meters
@@ -26,18 +26,29 @@ export interface GPXSplit {
 
 // ─── GAP — Grade Adjusted Pace ───────────────────────────────────────────────
 
-// Minetti et al. 2002 metabolic cost on slopes
+/**
+ * Coût métabolique en J/kg/m en fonction de la pente (Minetti et al., 2002).
+ * Polynôme du 5e degré calibré sur tapis roulant de −45% à +45%.
+ * Sur plat (grade=0) : 3,6 J/kg/m (= FLAT_COST, référence GAP).
+ */
 function metabolicCost(grade: number): number {
   const i = Math.max(-0.45, Math.min(0.45, grade / 100));
   return 155.4*i**5 - 30.4*i**4 - 43.3*i**3 + 46.3*i**2 + 19.5*i + 3.6;
 }
-const FLAT_COST = metabolicCost(0); // 3.6 J/kg/m on flat
+/** Coût métabolique de référence sur terrain plat (Minetti 2002) : 3,6 J/kg/m. */
+const FLAT_COST = metabolicCost(0);
 
+/**
+ * Facteur de correction GAP pour une pente donnée : ratio coût_plat / coût_pente.
+ * gapFactor > 1 en descente (la pente "aide"), gapFactor < 1 en montée (la pente "pénalise").
+ * GAP_speed = speed_réelle × gapFactor → allure équivalente sur plat.
+ */
 export function gapFactor(grade: number): number {
   const cost = metabolicCost(grade);
   return cost > 0 ? FLAT_COST / cost : 1;
 }
 
+/** Calcule les splits par tranche de `splitDistance` mètres (défaut 1 000 m) avec toutes les métriques par segment. */
 export function calculateSplits(activity: GPXActivity, splitDistance = 1000): GPXSplit[] {
   const splits: GPXSplit[] = [];
   const points = activity.points;
@@ -122,14 +133,14 @@ export function calculateSplits(activity: GPXActivity, splitDistance = 1000): GP
       gradeCount++;
     }
 
-    // GAP: accumulate grade-adjusted speed per point
+    // GAP : vitesse ajustée pente point par point via le facteur Minetti
     if (pt.speed !== null && pt.speed > 0 && pt.grade !== null) {
       const gf = gapFactor(pt.grade);
       gapSpeedSum += pt.speed * gf;
       gapSpeedCount++;
     }
 
-    // Efficiency Factor: speed / HR
+    // Efficiency Factor (EF) : vitesse × 1000 / FC — indicateur de la qualité aérobie
     if (pt.speed !== null && pt.speed > 0 && pt.hr !== null && pt.hr > 0) {
       efSpeedSum += pt.speed;
       efHrSum += pt.hr;
@@ -178,6 +189,7 @@ export function calculateSplits(activity: GPXActivity, splitDistance = 1000): GP
         avgPower: powerCount > 0 ? Math.round(powerSum / powerCount) : null,
         avgTemp: tempCount > 0 ? Math.round((tempSum / tempCount) * 10) / 10 : null,
         avgGrade: gradeCount > 0 ? Math.round((gradeSum / gradeCount) * 10) / 10 : null,
+        // avgGAP : moyenne des vitesses ajustées converties en allure (s/km)
         avgGAP: gapSpeedCount > 0 ? Math.round(1000 / (gapSpeedSum / gapSpeedCount)) : null,
         ef: efCount > 0 ? Math.round((efSpeedSum / efCount) * 1000 / (efHrSum / efCount) * 100) / 100 : null,
         maxSpeed: splitMaxSpeed,
