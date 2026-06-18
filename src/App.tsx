@@ -874,6 +874,12 @@ function App() {
             drift,
             normalizedPower,
             intensityFactor,
+            tsbResult,
+            history,
+            activityDate: enrichedActivity.startTime
+              ? enrichedActivity.startTime.toISOString().slice(0, 10)
+              : undefined,
+            activityName: customActivityName || undefined,
           })}
           onClose={() => setShowAISummary(false)}
         />

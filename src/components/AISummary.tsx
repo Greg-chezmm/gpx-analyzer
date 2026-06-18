@@ -9,6 +9,7 @@ interface AISummaryProps {
 /** Modale affichant le résumé textuel de l'activité prêt à coller dans une IA (Claude, ChatGPT…). */
 export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
   const [copied, setCopied] = useState(false);
+  const [context, setContext] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Fermeture clavier via Escape.
@@ -18,10 +19,13 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
     return () => document.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  /** Copie le contenu du textarea (modifiable) plutôt que le texte d'origine. */
+  /** Copie le contexte (si renseigné) + le contenu du textarea. */
   const handleCopy = async () => {
     const val = textareaRef.current?.value ?? text;
-    await navigator.clipboard.writeText(val);
+    const full = context.trim()
+      ? `🎯 CONTEXTE / OBJECTIF DE LA SÉANCE\n${context.trim()}\n\n${val}`
+      : val;
+    await navigator.clipboard.writeText(full);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -68,6 +72,28 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
           }}>
             <X size={18} />
           </button>
+        </div>
+
+        {/* Champ contexte / objectif */}
+        <div style={{ padding: "0.75rem 1.25rem 0" }}>
+          <input
+            type="text"
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+            placeholder="Contexte / objectif (optionnel) — ex : sortie récupération, test allure seuil, J-14 marathon…"
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "0.55rem 0.85rem",
+              fontFamily: "inherit",
+              fontSize: "0.82rem",
+              background: "var(--bg-primary)",
+              color: "var(--text-primary)",
+              border: "1px solid var(--border-color)",
+              borderRadius: "var(--radius-md)",
+              outline: "none",
+            }}
+          />
         </div>
 
         {/* Zone de texte modifiable avant copie */}

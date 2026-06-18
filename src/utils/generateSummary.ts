@@ -4,6 +4,7 @@ import type {
 } from "./gpxParser";
 import type { FitSummary } from "./gpxCore";
 import type { HillRepeatSeries } from "./hillRepeats";
+import type { TrainingEntry } from "../hooks/useTrainingHistory";
 import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
 import { computeVDOT } from "./vdot";
@@ -28,6 +29,10 @@ interface SummaryOptions {
   fitSummary?: FitSummary | null;
   normalizedPower?: number | null;
   intensityFactor?: number | null;
+  tsbResult?: { atl: number; ctl: number; tsb: number } | null;
+  history?: TrainingEntry[];
+  activityDate?: string; // YYYY-MM-DD — pour exclure la séance courante de l'historique
+  activityName?: string; // nom personnalisé (override du nom original)
 }
 
 // ── Zones cardiaques Karvonen ────────────────────────────────────────────────
@@ -165,14 +170,16 @@ export function generateSummary(opts: SummaryOptions): string {
   const { activity, splits, climbs, intervals, hillRepeats,
           fcMax, fcRest, vma, ftp, weight, birthYear,
           sessionType, trimp, vo2max, drift, fitSummary,
-          normalizedPower, intensityFactor } = opts;
+          normalizedPower, intensityFactor,
+          tsbResult, history, activityDate, activityName } = opts;
 
   const isCycling = activity.activityType === "cycling";
   const lines: string[] = [];
   const push = (s: string) => lines.push(s);
   const sep = () => lines.push("");
 
-  push(`Voici les données de ma séance de ${isCycling ? "vélo" : "course à pied"}${activity.name ? ` "${activity.name}"` : ""}. Peux-tu analyser ma performance et me donner des recommandations personnalisées ?`);
+  const displayName = activityName || activity.name;
+  push(`Voici les données de ma séance de ${isCycling ? "vélo" : "course à pied"}${displayName ? ` "${displayName}"` : ""}. Peux-tu analyser ma performance et me donner des recommandations personnalisées ?`);
   sep();
 
   // ── Profil ──────────────────────────────────────────────────────────────────
@@ -255,8 +262,13 @@ export function generateSummary(opts: SummaryOptions): string {
   }
 
   // ── Charge d'entraînement ───────────────────────────────────────────────────
-  if (trimp || vo2max || drift) {
+  if (trimp || vo2max || drift || tsbResult) {
     push("📈 CHARGE & MÉTRIQUES PHYSIOLOGIQUES");
+    if (tsbResult) {
+      const { ctl, atl, tsb } = tsbResult;
+      const tsbState = tsb >= 10 ? "Frais (pic de forme)" : tsb >= 0 ? "En forme" : tsb >= -10 ? "Légèrement fatigué" : "Fatigué / surcharge";
+      push(`• CTL (forme chronique) : ${ctl}  |  ATL (fatigue aiguë) : ${atl}  |  TSB (fraîcheur) : ${tsb > 0 ? "+" : ""}${tsb} → ${tsbState}`);
+    }
     if (trimp) {
       push(`• TRIMP Edwards : ${trimp.edwards}  |  Banister : ${trimp.banister}`);
       // Règle empirique : ~6h de récupération par 10 points TRIMP Edwards
@@ -303,6 +315,35 @@ export function generateSummary(opts: SummaryOptions): string {
     sep();
   }
 
+  // ── Historique récent (7 jours) ─────────────────────────────────────────────
+  if (history && history.length > 0) {
+    const refDate = activityDate ?? new Date().toISOString().slice(0, 10);
+    const cutoff = new Date(refDate);
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    // Exclure la séance courante (même date + distance + durée)
+    const recent = history.filter(e => {
+      if (e.date < cutoffStr || e.date > refDate) return false;
+      if (e.date === activityDate &&
+          activity.totalDistance && e.distance && Math.abs(e.distance - activity.totalDistance) < 50 &&
+          activity.movingTime && e.duration && Math.abs(e.duration - activity.movingTime) < 10) return false;
+      return true;
+    });
+    if (recent.length > 0) {
+      const totalKm = recent.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0);
+      const totalTrimp = recent.reduce((s, e) => s + e.trimp, 0);
+      push("📅 CHARGE RÉCENTE (7 derniers jours, hors séance actuelle)");
+      push(`• ${recent.length} séance${recent.length > 1 ? "s" : ""}, ${totalKm.toFixed(1)} km, TRIMP cumulé ${Math.round(totalTrimp)}`);
+      const runs = recent.filter(e => !e.activityType || e.activityType === "running");
+      const bikes = recent.filter(e => e.activityType === "cycling");
+      if (runs.length > 0 && bikes.length > 0) {
+        push(`  • Course : ${runs.length} séance${runs.length > 1 ? "s" : ""}, ${runs.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0).toFixed(1)} km`);
+        push(`  • Vélo : ${bikes.length} séance${bikes.length > 1 ? "s" : ""}, ${bikes.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0).toFixed(1)} km`);
+      }
+      sep();
+    }
+  }
+
   // ── Montées ─────────────────────────────────────────────────────────────────
   if (climbs.length > 0) {
     push(`⛰️ MONTÉES DÉTECTÉES (${climbs.length})`);
@@ -334,8 +375,25 @@ export function generateSummary(opts: SummaryOptions): string {
   if (intervals && intervals.efforts.length > 0) {
     const eff = intervals.efforts;
     push(`⚡ FRACTIONNÉS DÉTECTÉS (${eff.length} répétitions)`);
+    // Détail de chaque effort
+    for (let i = 0; i < eff.length; i++) {
+      const iv = eff[i];
+      const distLabel = iv.distance >= 1000 ? `${(iv.distance / 1000).toFixed(2)} km` : `${Math.round(iv.distance)} m`;
+      let line = `  Rep. ${i + 1} : ${formatDuration(Math.round(iv.duration))}, ${distLabel}`;
+      if (isCycling) {
+        line += `, ${(iv.avgSpeed * 3.6).toFixed(1)} km/h`;
+        if (iv.avgPower) line += `, ${Math.round(iv.avgPower)} W`;
+      } else {
+        line += `, ${formatPace(iv.avgPace)} /km`;
+      }
+      if (iv.avgHeartRate) line += `, FC ${iv.avgHeartRate} bpm`;
+      if (iv.totalAscent) line += `, D+ ${Math.round(iv.totalAscent)} m`;
+      if (iv.totalDescent) line += `, D- ${Math.round(iv.totalDescent)} m`;
+      push(line);
+    }
+    // Résumé / fatigue
     if (isCycling) {
-      const avgSpeed = eff.reduce((s, iv) => s + (iv.avgSpeed ?? 0), 0) / eff.length;
+      const avgSpeed = eff.reduce((s, iv) => s + iv.avgSpeed, 0) / eff.length;
       push(`• Vitesse effort moy. : ${(avgSpeed * 3.6).toFixed(1)} km/h`);
       if (eff[0].avgPower) {
         const avgPow = eff.reduce((s, iv) => s + (iv.avgPower ?? 0), 0) / eff.length;
@@ -377,6 +435,8 @@ export function generateSummary(opts: SummaryOptions): string {
         if (s.avgGAP !== null && Math.abs(s.avgGAP - s.avgPace) > 3) line += `, GAP ${formatPace(s.avgGAP)} /km`;
       }
       if (s.avgHeartRate) line += `, FC ${s.avgHeartRate} bpm`;
+      if (s.elevationGain > 0) line += `, D+ ${Math.round(s.elevationGain)} m`;
+      if (s.elevationLoss > 0) line += `, D- ${Math.round(s.elevationLoss)} m`;
       push(line);
     }
     sep();
