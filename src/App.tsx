@@ -267,6 +267,16 @@ function App() {
     return () => { cancelled = true; };
   }, [enrichedActivity]);
 
+  /** Refait un appel météo en ignorant le cache (bouton de rafraîchissement) — ex. après un changement de modèle Météo-France. */
+  const handleRefreshWeather = () => {
+    const firstPoint = enrichedActivity?.points?.[0];
+    if (!enrichedActivity || !firstPoint || !enrichedActivity.startTime) return;
+    setWeatherLoading(true);
+    getActivityWeather(firstPoint.lat, firstPoint.lon, enrichedActivity.startTime, true)
+      .then(setWeather)
+      .finally(() => setWeatherLoading(false));
+  };
+
   // Synchronisation Drive → localStorage à la connexion (fusion remote + local, remote comble les trous).
   useEffect(() => {
     if (drive.status !== 'connected') return;
@@ -638,7 +648,7 @@ function App() {
             </div>
 
             {/* Météo + moment de la journée — Open-Meteo, basée sur le 1er point GPS + l'heure de départ */}
-            <WeatherCard weather={weather} loading={weatherLoading} date={enrichedActivity!.startTime} />
+            <WeatherCard weather={weather} loading={weatherLoading} date={enrichedActivity!.startTime} onRefresh={handleRefreshWeather} />
 
             {/* ── KPI primaires ── */}
             <div className="dashboard-grid">

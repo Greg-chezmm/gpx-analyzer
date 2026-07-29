@@ -1,3 +1,5 @@
+import type { WeatherSource } from './weather';
+
 /** Entrée de l'index d'activités stocké sur Google Drive (metadata + stats résumées). */
 export interface ActivityIndexEntry {
   fileId: string | null;
@@ -24,13 +26,14 @@ export interface ActivityIndexEntry {
   // Autres
   driftPct?: number;
   avgCadence?: number;
-  // Météo au moment de l'activité (Open-Meteo)
+  // Météo au moment de l'activité (Open-Meteo, modèles Météo-France)
   weatherTemp?: number;
   weatherWindSpeed?: number;
   weatherWindDirection?: number;
   weatherCloudCover?: number;
   weatherPrecipitation?: number;
   weatherCode?: number;
+  weatherSource?: WeatherSource;
 }
 
 /** Structure du fichier d'index JSON sauvegardé sur Drive (activities-index.json). */

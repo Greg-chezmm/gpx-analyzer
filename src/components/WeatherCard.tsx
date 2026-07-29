@@ -1,11 +1,12 @@
 import React from "react";
-import { Wind, CloudSun, Droplets, Loader2, Sunrise, Sun, Sunset, Moon } from "lucide-react";
-import { describeWeatherCode, windDirectionLabel, describeTimeOfDay, type WeatherInfo, type TimeOfDayPeriod } from "../utils/weather";
+import { Wind, CloudSun, Droplets, Loader2, Sunrise, Sun, Sunset, Moon, RefreshCw } from "lucide-react";
+import { describeWeatherCode, describeWeatherSource, windDirectionLabel, describeTimeOfDay, type WeatherInfo, type TimeOfDayPeriod } from "../utils/weather";
 
 interface Props {
   weather: WeatherInfo | null;
   loading: boolean;
   date: Date | null;
+  onRefresh?: () => void;
 }
 
 /** Style de badge partagé pour moment de la journée / vent / nébulosité / précipitations. */
@@ -29,7 +30,7 @@ const TIME_OF_DAY_ICONS: Record<TimeOfDayPeriod, React.ReactNode> = {
  * quand la donnée est déjà connue, ex. activité rechargée depuis Drive).
  * Le moment de la journée est calculé localement et s'affiche même si la météo échoue.
  */
-export const WeatherCard: React.FC<Props> = ({ weather, loading, date }) => {
+export const WeatherCard: React.FC<Props> = ({ weather, loading, date, onRefresh }) => {
   const timeOfDay = date ? describeTimeOfDay(date) : null;
   const weatherReady = !loading && weather != null && weather.temperature != null;
 
@@ -54,6 +55,16 @@ export const WeatherCard: React.FC<Props> = ({ weather, loading, date }) => {
           <Loader2 size={16} style={{ animation: "spin 0.8s linear infinite" }} />
           Météo en cours de récupération…
         </span>
+      )}
+
+      {!loading && !weatherReady && onRefresh && (
+        <button
+          onClick={onRefresh}
+          title="Réessayer la récupération météo"
+          style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.82rem", color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+        >
+          <RefreshCw size={14} /> Réessayer
+        </button>
       )}
 
       {weatherReady && weatherDesc && (
@@ -87,8 +98,17 @@ export const WeatherCard: React.FC<Props> = ({ weather, loading, date }) => {
             </span>
           )}
 
-          <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--text-tertiary)" }}>
-            Source : Open-Meteo · estimation modèle (±25 km)
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.72rem", color: "var(--text-tertiary)" }}>
+            Source : {describeWeatherSource(weather!.source)}
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                      title="Rafraîchir la météo (nouvel appel, ignore le cache)"
+                style={{ display: "flex", alignItems: "center", color: "var(--text-tertiary)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                <RefreshCw size={13} />
+              </button>
+            )}
           </span>
         </>
       )}

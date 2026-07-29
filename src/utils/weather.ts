@@ -13,6 +13,9 @@ interface OpenMeteoResponse {
   hourly?: OpenMeteoHourly;
 }
 
+/** Modèle/source ayant produit la donnée : AROME (France, haute résolution) ou ARPEGE (Europe/monde) via Météo-France pour le récent, ERA5 (réanalyse) pour l'historique lointain. */
+export type WeatherSource = 'meteofrance_arome' | 'meteofrance_arpege' | 'era5';
+
 /** Conditions météo à l'heure de l'activité, unités SI (°C, km/h, %, mm). */
 export interface WeatherInfo {
   temperature: number | null;
@@ -21,6 +24,7 @@ export interface WeatherInfo {
   cloudCover: number | null;
   precipitation: number | null;
   weatherCode: number | null;
+  source: WeatherSource | null;
 }
 
 /** Sous-ensemble des champs météo d'une entrée d'index Drive (voir driveStorage.ts). */
@@ -31,6 +35,7 @@ interface DriveWeatherFields {
   weatherCloudCover?: number;
   weatherPrecipitation?: number;
   weatherCode?: number;
+  weatherSource?: WeatherSource;
 }
 
 /** Convertit un WeatherInfo en champs plats pour l'index Drive (évite les `undefined` explicites en JSON). */
@@ -43,6 +48,7 @@ export function weatherToEntryFields(w: WeatherInfo | null): DriveWeatherFields 
   if (w.cloudCover != null)    fields.weatherCloudCover = w.cloudCover;
   if (w.precipitation != null) fields.weatherPrecipitation = w.precipitation;
   if (w.weatherCode != null)   fields.weatherCode = w.weatherCode;
+  if (w.source != null)        fields.weatherSource = w.source;
   return fields;
 }
 
@@ -56,6 +62,8 @@ export function entryToWeather(entry: DriveWeatherFields): WeatherInfo | undefin
     cloudCover: entry.weatherCloudCover ?? null,
     precipitation: entry.weatherPrecipitation ?? null,
     weatherCode: entry.weatherCode ?? null,
+    // Absent sur les entrées enregistrées avant l'ajout de ce champ.
+    source: entry.weatherSource ?? null,
   };
 }
 
@@ -64,17 +72,28 @@ const RECENT_THRESHOLD_DAYS = 5;
 const FORECAST_URL = 'https://api.open-meteo.com/v1/forecast';
 const ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive';
 
+// Domaine approximatif de couverture AROME (France + régions limitrophes) ; en-dehors, on bascule sur ARPEGE.
+const AROME_DOMAIN = { latMin: 37.5, latMax: 55.4, lonMin: -8, lonMax: 12 };
+
+function isWithinAromeDomain(lat: number, lon: number): boolean {
+  return lat >= AROME_DOMAIN.latMin && lat <= AROME_DOMAIN.latMax
+    && lon >= AROME_DOMAIN.lonMin && lon <= AROME_DOMAIN.lonMax;
+}
+
 const cache = new Map<string, Promise<WeatherInfo | null>>();
 
 /**
  * Récupère les conditions météo (Open-Meteo, gratuit, sans clé) au point GPS et à l'heure données.
  * Fonctionne dans le monde entier. Résultat mis en cache par heure/position pour éviter les doublons d'appel.
+ * `force: true` ignore le cache (bouton de rafraîchissement manuel).
  */
-export function getActivityWeather(lat: number, lon: number, date: Date): Promise<WeatherInfo | null> {
+export function getActivityWeather(lat: number, lon: number, date: Date, force = false): Promise<WeatherInfo | null> {
   const hourKey = date.toISOString().slice(0, 13);
   const cacheKey = `${lat.toFixed(3)},${lon.toFixed(3)},${hourKey}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
+  if (!force) {
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+  }
   const promise = fetchWeather(lat, lon, date);
   cache.set(cacheKey, promise);
   return promise;
@@ -83,7 +102,8 @@ export function getActivityWeather(lat: number, lon: number, date: Date): Promis
 async function fetchWeather(lat: number, lon: number, date: Date): Promise<WeatherInfo | null> {
   try {
     const daysAgo = (Date.now() - date.getTime()) / 86_400_000;
-    const baseUrl = daysAgo < RECENT_THRESHOLD_DAYS ? FORECAST_URL : ARCHIVE_URL;
+    const isRecent = daysAgo < RECENT_THRESHOLD_DAYS;
+    const baseUrl = isRecent ? FORECAST_URL : ARCHIVE_URL;
     const dateStr = date.toISOString().slice(0, 10);
     const params = new URLSearchParams({
       latitude: lat.toFixed(4),
@@ -93,6 +113,15 @@ async function fetchWeather(lat: number, lon: number, date: Date): Promise<Weath
       hourly: 'temperature_2m,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation,weather_code',
       timezone: 'UTC', // fixe la référence temporelle pour matcher directement les timestamps GPX (UTC)
     });
+    // Modèles Météo-France plutôt que le blend multi-modèles par défaut d'Open-Meteo :
+    // AROME (haute résolution) sur son domaine France/limitrophes, ARPEGE (Europe/monde) ailleurs.
+    // Non applicable à l'archive ERA5 (dataset fixe, sans paramètre `models`).
+    const source: WeatherSource = !isRecent
+      ? 'era5'
+      : isWithinAromeDomain(lat, lon) ? 'meteofrance_arome' : 'meteofrance_arpege';
+    if (isRecent) {
+      params.set('models', source === 'meteofrance_arome' ? 'meteofrance_arome_seamless' : 'meteofrance_arpege_seamless');
+    }
     const res = await fetch(`${baseUrl}?${params.toString()}`);
     if (!res.ok) return null;
     const data = await res.json() as OpenMeteoResponse;
@@ -110,6 +139,7 @@ async function fetchWeather(lat: number, lon: number, date: Date): Promise<Weath
       cloudCover: hourly.cloud_cover?.[idx] ?? null,
       precipitation: hourly.precipitation?.[idx] ?? null,
       weatherCode: hourly.weather_code?.[idx] ?? null,
+      source,
     };
   } catch {
     return null;
@@ -152,6 +182,17 @@ const WEATHER_CODES: Record<number, { emoji: string; label: string }> = {
 export function describeWeatherCode(code: number | null): { emoji: string; label: string } {
   if (code == null || !(code in WEATHER_CODES)) return { emoji: '🌡️', label: 'Conditions inconnues' };
   return WEATHER_CODES[code];
+}
+
+const WEATHER_SOURCE_LABELS: Record<WeatherSource, string> = {
+  meteofrance_arome: 'Météo-France · AROME (~2 km)',
+  meteofrance_arpege: 'Météo-France · ARPEGE (~10-25 km)',
+  era5: 'ERA5 · réanalyse historique (~25 km)',
+};
+
+/** Libellé lisible de la source météo (AROME/ARPEGE/ERA5) ; fallback générique si absente (entrées enregistrées avant son ajout). */
+export function describeWeatherSource(source: WeatherSource | null | undefined): string {
+  return source ? WEATHER_SOURCE_LABELS[source] : 'Open-Meteo · estimation modèle (±25 km)';
 }
 
 const COMPASS_POINTS = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
