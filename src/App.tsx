@@ -46,6 +46,8 @@ import { generateSummary } from "./utils/generateSummary";
 import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
 import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 import { DataQuality } from "./components/DataQuality";
+import { WeatherCard } from "./components/WeatherCard";
+import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -86,6 +88,10 @@ function App() {
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [weather, setWeather] = useState<WeatherInfo | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  // Météo déjà connue (ex. rechargée depuis Drive) — consommée par l'effet météo pour éviter un appel réseau inutile.
+  const pendingStoredWeatherRef = useRef<WeatherInfo | null>(null);
   // Drapeaux pour éviter les boucles infinie lors de la synchronisation Drive ↔ localStorage.
   const skipDriveHistorySync = useRef(false);
   const skipSettingsSync = useRef(false);
@@ -238,6 +244,29 @@ function App() {
       .finally(() => setLocationLoading(false));
   }, [enrichedActivity]);
 
+  // Météo au 1er point GPS + heure de départ. Court-circuite l'appel réseau si déjà connue
+  // (rechargement depuis Drive) ; sinon getActivityWeather() met aussi en cache par position/heure.
+  useEffect(() => {
+    const firstPoint = enrichedActivity?.points?.[0];
+    if (!enrichedActivity || !firstPoint || !enrichedActivity.startTime) {
+      setWeather(null);
+      setWeatherLoading(false);
+      return;
+    }
+    if (pendingStoredWeatherRef.current) {
+      setWeather(pendingStoredWeatherRef.current);
+      setWeatherLoading(false);
+      pendingStoredWeatherRef.current = null;
+      return;
+    }
+    let cancelled = false;
+    setWeatherLoading(true);
+    getActivityWeather(firstPoint.lat, firstPoint.lon, enrichedActivity.startTime)
+      .then(w => { if (!cancelled) setWeather(w); })
+      .finally(() => { if (!cancelled) setWeatherLoading(false); });
+    return () => { cancelled = true; };
+  }, [enrichedActivity]);
+
   // Synchronisation Drive → localStorage à la connexion (fusion remote + local, remote comble les trous).
   useEffect(() => {
     if (drive.status !== 'connected') return;
@@ -279,11 +308,13 @@ function App() {
 
   /* ── Handlers — chargement, fusion, renommage, export ── */
 
-  const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string) => {
+  const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string, storedWeather?: WeatherInfo) => {
     driveCustomNameRef.current = customName || '';
     const nameWithoutExtension = name.replace(/\.[^/.]+$/, "");
     const isFit = name.toLowerCase().endsWith(".fit");
     setIsLoading(true);
+    // Consommé par l'effet météo dès que la nouvelle activité est en état — évite un appel réseau si déjà connue.
+    pendingStoredWeatherRef.current = storedWeather ?? null;
     // Décale d'une frame + 30 ms pour laisser le spinner s'afficher avant le parse synchrone.
     requestAnimationFrame(() => setTimeout(async () => {
       try {
@@ -395,6 +426,7 @@ function App() {
       tss,
       driftPct: drift?.decoupling,
       avgCadence: enrichedActivity.avgCadence ?? undefined,
+      ...weatherToEntryFields(weather),
     });
     setSavedToDrive(true);
   };
@@ -604,6 +636,9 @@ function App() {
                 </div>
               )}
             </div>
+
+            {/* Météo + moment de la journée — Open-Meteo, basée sur le 1er point GPS + l'heure de départ */}
+            <WeatherCard weather={weather} loading={weatherLoading} date={enrichedActivity!.startTime} />
 
             {/* ── KPI primaires ── */}
             <div className="dashboard-grid">
@@ -880,6 +915,7 @@ function App() {
               ? enrichedActivity.startTime.toISOString().slice(0, 10)
               : undefined,
             activityName: customActivityName || undefined,
+            weather,
           })}
           onClose={() => setShowAISummary(false)}
         />

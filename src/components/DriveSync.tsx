@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2 } from 'lucide-react';
 import type { DriveHandle } from '../hooks/useGoogleDrive';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
+import { entryToWeather, type WeatherInfo } from '../utils/weather';
 
 /* ── Bouton header : connexion / accès à l'historique ──────────────────── */
 
 interface DriveSyncButtonProps {
   drive: DriveHandle;
-  onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
 }
 
 /**
@@ -24,7 +25,7 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
     try {
       const data = await drive.loadFile(entry.fileId, entry.fileName);
       setOpen(false);
-      onLoad(data, entry.fileName, entry.name);
+      onLoad(data, entry.fileName, entry.name, entryToWeather(entry));
     } catch {
       alert('Impossible de charger le fichier depuis Drive.');
     } finally {
@@ -139,7 +140,7 @@ export function DriveSaveButton({ drive, onSave, alreadySaved }: DriveSaveButton
 
 interface DriveActivityListProps {
   drive: DriveHandle;
-  onLoad: (data: ArrayBuffer | string, name: string, customName?: string) => void;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
 }
 
 /**
@@ -161,7 +162,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
     setLoadingId(entry.fileId);
     try {
       const data = await drive.loadFile(entry.fileId, entry.fileName);
-      onLoad(data, entry.fileName, entry.name);
+      onLoad(data, entry.fileName, entry.name, entryToWeather(entry));
     } catch {
       alert('Impossible de charger le fichier depuis Drive.');
     } finally {

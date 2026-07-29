@@ -8,6 +8,7 @@ import type { TrainingEntry } from "../hooks/useTrainingHistory";
 import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
 import { computeVDOT } from "./vdot";
+import { describeWeatherCode, windDirectionLabel, describeTimeOfDay, type WeatherInfo } from "./weather";
 
 /** Options d'entrée pour la génération du résumé IA. */
 interface SummaryOptions {
@@ -33,6 +34,7 @@ interface SummaryOptions {
   history?: TrainingEntry[];
   activityDate?: string; // YYYY-MM-DD — pour exclure la séance courante de l'historique
   activityName?: string; // nom personnalisé (override du nom original)
+  weather?: WeatherInfo | null;
 }
 
 // ── Zones cardiaques Karvonen ────────────────────────────────────────────────
@@ -171,7 +173,7 @@ export function generateSummary(opts: SummaryOptions): string {
           fcMax, fcRest, vma, ftp, weight, birthYear,
           sessionType, trimp, vo2max, drift, fitSummary,
           normalizedPower, intensityFactor,
-          tsbResult, history, activityDate, activityName } = opts;
+          tsbResult, history, activityDate, activityName, weather } = opts;
 
   const isCycling = activity.activityType === "cycling";
   const lines: string[] = [];
@@ -194,6 +196,12 @@ export function generateSummary(opts: SummaryOptions): string {
 
   // ── Données générales ────────────────────────────────────────────────────────
   push("📊 DONNÉES GÉNÉRALES");
+  if (activity.startTime) {
+    const tod = describeTimeOfDay(activity.startTime);
+    const hh = String(activity.startTime.getHours()).padStart(2, '0');
+    const mm = String(activity.startTime.getMinutes()).padStart(2, '0');
+    push(`• Moment de la journée : ${tod.label} (${hh}:${mm})`);
+  }
   push(`• Distance : ${(activity.totalDistance / 1000).toFixed(2)} km`);
   push(`• Durée totale : ${formatDuration(activity.totalDuration)}  |  Temps en mouvement : ${formatDuration(activity.movingTime)}`);
   if (!isCycling && activity.avgPace > 0) {
@@ -220,6 +228,17 @@ export function generateSummary(opts: SummaryOptions): string {
   }
   if (sessionType) push(`• Type de séance détecté : ${sessionType}`);
   sep();
+
+  // ── Météo ───────────────────────────────────────────────────────────────────
+  if (weather && weather.temperature != null) {
+    const { label } = describeWeatherCode(weather.weatherCode);
+    push("🌤️ MÉTÉO AU DÉPART");
+    push(`• ${label}, ${Math.round(weather.temperature)}°C`);
+    if (weather.windSpeed != null) push(`• Vent : ${Math.round(weather.windSpeed)} km/h ${windDirectionLabel(weather.windDirection)}`);
+    if (weather.cloudCover != null) push(`• Nébulosité : ${Math.round(weather.cloudCover)}%`);
+    if (weather.precipitation != null && weather.precipitation > 0) push(`• Précipitations : ${weather.precipitation.toFixed(1)} mm`);
+    sep();
+  }
 
   // ── Zones cardiaques ────────────────────────────────────────────────────────
   const zones = zoneStats(activity.points, fcMax, fcRest);

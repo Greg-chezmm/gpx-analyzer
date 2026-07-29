@@ -24,6 +24,13 @@ export interface ActivityIndexEntry {
   // Autres
   driftPct?: number;
   avgCadence?: number;
+  // Météo au moment de l'activité (Open-Meteo)
+  weatherTemp?: number;
+  weatherWindSpeed?: number;
+  weatherWindDirection?: number;
+  weatherCloudCover?: number;
+  weatherPrecipitation?: number;
+  weatherCode?: number;
 }
 
 /** Structure du fichier d'index JSON sauvegardé sur Drive (activities-index.json). */
