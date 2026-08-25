@@ -50,6 +50,8 @@ import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
+import { computeBestEfforts } from "./utils/bestEfforts";
+import { BestEffortsCurve } from "./components/BestEffortsCurve";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -439,6 +441,7 @@ function App() {
       tss,
       driftPct: drift?.decoupling,
       avgCadence: enrichedActivity.avgCadence ?? undefined,
+      bestEfforts: computeBestEfforts(enrichedActivity.points, enrichedActivity.activityType) ?? undefined,
       ...weatherToEntryFields(weather),
     });
     setSavedToDrive(true);
@@ -815,6 +818,9 @@ function App() {
 
             {/* Objectif course — projection TSB calibrée sur les anciennes courses (marquées 🏁 dans Drive) */}
             <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} drive={drive} />
+
+            {/* Meilleurs efforts — records par distance (course) / courbe de puissance (vélo), agrégés depuis Drive */}
+            <BestEffortsCurve drive={drive} />
 
             {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (

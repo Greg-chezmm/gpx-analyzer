@@ -1,4 +1,5 @@
 import type { WeatherSource } from './weather';
+import type { BestEffortsData } from './bestEfforts';
 
 /** Entrée de l'index d'activités stocké sur Google Drive (metadata + stats résumées). */
 export interface ActivityIndexEntry {
@@ -28,6 +29,8 @@ export interface ActivityIndexEntry {
   avgCadence?: number;
   // Objectif course — calibration TSB personnalisée (voir raceGoal.ts)
   isRace?: boolean;
+  // Meilleurs efforts — temps record (course) ou puissance/vitesse (vélo), voir bestEfforts.ts
+  bestEfforts?: BestEffortsData;
   // Météo au moment de l'activité (Open-Meteo, modèles Météo-France)
   weatherTemp?: number;
   weatherWindSpeed?: number;
