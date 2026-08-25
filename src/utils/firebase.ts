@@ -8,6 +8,7 @@
 import type { FirebaseApp } from 'firebase/app';
 import type { Auth, User } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
+import type { FirebaseStorage } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
@@ -45,15 +46,33 @@ export async function getFirebaseAuth(): Promise<Auth> {
 
 let dbPromise: Promise<Firestore> | null = null;
 
-/** Retourne l'instance Firestore (charge le module `firebase/firestore` à la demande). */
+/**
+ * Retourne l'instance Firestore (charge le module `firebase/firestore` à la demande).
+ * `ignoreUndefinedProperties` : les entrées d'activité ont beaucoup de champs optionnels
+ * (`vo2max`, `trimp`, `bestEfforts`...) valant `undefined` quand la donnée est absente —
+ * Firestore les rejette par défaut (contrairement à Drive, où JSON.stringify les ignore).
+ */
 export async function getFirestoreDb(): Promise<Firestore> {
   if (!dbPromise) {
     dbPromise = (async () => {
-      const [app, { getFirestore }] = await Promise.all([getApp(), import('firebase/firestore')]);
-      return getFirestore(app);
+      const [app, { initializeFirestore }] = await Promise.all([getApp(), import('firebase/firestore')]);
+      return initializeFirestore(app, { ignoreUndefinedProperties: true });
     })();
   }
   return dbPromise;
+}
+
+let storagePromise: Promise<FirebaseStorage> | null = null;
+
+/** Retourne l'instance Firebase Storage (charge le module `firebase/storage` à la demande). */
+export async function getFirebaseStorage(): Promise<FirebaseStorage> {
+  if (!storagePromise) {
+    storagePromise = (async () => {
+      const [app, { getStorage }] = await Promise.all([getApp(), import('firebase/storage')]);
+      return getStorage(app);
+    })();
+  }
+  return storagePromise;
 }
 
 /** Ouvre la popup de connexion Google via Firebase Auth ; retourne l'utilisateur connecté. */

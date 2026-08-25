@@ -1,0 +1,565 @@
+import { useState, type MouseEvent } from 'react';
+import { CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap, Flame } from 'lucide-react';
+import type { CloudHandle } from '../hooks/useFirebaseCloud';
+import type { ActivityIndexEntry } from '../utils/driveStorage';
+import { entryToWeather, type WeatherInfo } from '../utils/weather';
+import { parseGPX } from '../utils/gpxCore';
+import { computeBestEfforts } from '../utils/bestEfforts';
+import { calcTRIMP } from '../utils/trainingMetrics';
+
+/* ── Bouton header : connexion / accès à l'historique cloud ──────────────── */
+
+interface CloudSyncButtonProps {
+  cloud: CloudHandle;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
+  fcMax: number;
+  fcRest: number;
+  /** Déclenche la connexion Drive — nécessaire en complément de Firebase (fichier brut hébergé sur Drive). */
+  onConnectDrive: () => void;
+}
+
+/** Bouton principal de synchronisation cloud (Firebase) — connexion Google ou accès à l'historique. */
+export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive }: CloudSyncButtonProps) {
+  const [open, setOpen] = useState(false);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const handleLoad = async (entry: ActivityIndexEntry) => {
+    if (!entry.cloudId) return;
+    setLoadingId(entry.cloudId);
+    try {
+      const data = await cloud.loadFile(entry);
+      setOpen(false);
+      onLoad(data, entry.fileName, entry.name, entryToWeather(entry));
+    } catch {
+      alert('Impossible de charger le fichier depuis le cloud.');
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  if (cloud.status === 'unavailable') return null;
+
+  if (cloud.status === 'signed-out') {
+    return (
+      <button type="button" className="btn btn-outline" onClick={cloud.signIn}
+        title="Se connecter"
+        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', borderColor: '#f97316', color: '#f97316', backgroundColor: 'rgba(249,115,22,0.06)' }}
+      >
+        <Flame size={15} />
+        <span className="btn-text">Se connecter</span>
+      </button>
+    );
+  }
+
+  if (cloud.status === 'connecting') {
+    return (
+      <button type="button" className="btn btn-outline" disabled style={{ padding: '0.5rem 1rem', fontSize: '0.9rem' }}>
+        <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
+        <span className="btn-text">Connexion…</span>
+      </button>
+    );
+  }
+
+  if (cloud.status === 'needs-drive') {
+    return (
+      <button type="button" className="btn btn-outline" onClick={onConnectDrive}
+        title="Le fichier brut des activités est hébergé sur Drive — connecte aussi Drive pour sauvegarder/charger"
+        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', borderColor: '#f59e0b', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)' }}
+      >
+        <Flame size={15} />
+        <span className="btn-text">Connecter Drive aussi</span>
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button type="button" className="btn btn-outline" onClick={() => setOpen(true)}
+        title="Historique"
+        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', borderColor: '#f97316', color: '#f97316', backgroundColor: 'rgba(249,115,22,0.06)' }}
+      >
+        <Flame size={15} />
+        <span className="btn-text">
+          {cloud.history.length > 0 ? `${cloud.history.length} activité${cloud.history.length > 1 ? 's' : ''}` : 'Cloud'}
+        </span>
+      </button>
+
+      {open && (
+        <CloudHistoryPanel cloud={cloud} loadingId={loadingId} onLoad={handleLoad} onClose={() => setOpen(false)} fcMax={fcMax} fcRest={fcRest} />
+      )}
+    </>
+  );
+}
+
+/* ── Bouton sauvegarde : affiché dans le header quand une activité est ouverte ── */
+
+interface CloudSaveButtonProps {
+  cloud: CloudHandle;
+  onSave: () => Promise<void>;
+  alreadySaved: boolean;
+}
+
+/** Bouton de sauvegarde cloud — visible uniquement quand connecté ; désactivé si déjà sauvegardée. */
+export function CloudSaveButton({ cloud, onSave, alreadySaved }: CloudSaveButtonProps) {
+  if (cloud.status === 'needs-drive') {
+    return (
+      <button type="button" className="btn btn-outline" disabled
+        title="Connecte aussi Drive pour pouvoir sauvegarder (fichier brut hébergé sur Drive)"
+        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', opacity: 0.6 }}
+      >
+        <CloudUpload size={15} />
+        <span className="btn-text">Sauvegarder</span>
+      </button>
+    );
+  }
+  if (cloud.status !== 'connected') return null;
+
+  return (
+    <button type="button" className="btn btn-outline"
+      onClick={onSave}
+      disabled={cloud.isSaving || alreadySaved}
+      title={alreadySaved ? 'Déjà sauvegardée' : 'Sauvegarder'}
+      style={{
+        padding: '0.5rem 1rem', fontSize: '0.9rem',
+        borderColor: alreadySaved ? 'var(--color-ele)' : '#f97316',
+        color: alreadySaved ? 'var(--color-ele)' : '#f97316',
+        backgroundColor: alreadySaved ? 'rgba(5,150,105,0.06)' : 'rgba(249,115,22,0.06)',
+        opacity: cloud.isSaving ? 0.7 : 1,
+      }}
+    >
+      {cloud.isSaving
+        ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite' }} />
+        : alreadySaved
+          ? <Flame size={15} />
+          : <CloudUpload size={15} />
+      }
+      <span className="btn-text">
+        {cloud.isSaving ? 'Sauvegarde…' : alreadySaved ? 'Sauvegardé' : 'Sauvegarder'}
+      </span>
+    </button>
+  );
+}
+
+/** Bouton drapeau — marque/démarque une activité comme course (calibration TSB, voir RaceGoal.tsx). */
+function RaceFlagButton({ entry, cloud }: { entry: ActivityIndexEntry; cloud: CloudHandle }) {
+  const [pending, setPending] = useState(false);
+  const isRace = !!entry.isRace;
+
+  const toggle = async (e: MouseEvent) => {
+    e.stopPropagation();
+    setPending(true);
+    try {
+      await cloud.updateActivityMeta(entry, { isRace: !isRace });
+    } catch {
+      alert("Impossible de mettre à jour l'activité.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={toggle} disabled={pending}
+      title={isRace ? 'Retirer le marquage course' : 'Marquer comme course (calibration objectif)'}
+      style={{
+        padding: '0.35rem', background: 'transparent', border: 'none',
+        cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
+        display: 'flex', alignItems: 'center', opacity: pending ? 0.5 : 1,
+        color: isRace ? '#f472b6' : 'var(--text-tertiary)',
+      }}
+      onMouseEnter={e => { if (!isRace) (e.currentTarget as HTMLElement).style.color = '#f472b6'; }}
+      onMouseLeave={e => { if (!isRace) (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+    >
+      {pending ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Flag size={14} fill={isRace ? '#f472b6' : 'none'} />}
+    </button>
+  );
+}
+
+/** Bouton de recalcul des meilleurs efforts + zones FC pour une activité (télécharge et reparse le fichier). */
+function RecomputeBestEffortsButton({ entry, cloud, fcMax, fcRest }: { entry: ActivityIndexEntry; cloud: CloudHandle; fcMax: number; fcRest: number }) {
+  const [pending, setPending] = useState(false);
+  const done = !!entry.bestEfforts;
+
+  const recompute = async (e: MouseEvent) => {
+    e.stopPropagation();
+    if (pending) return;
+    setPending(true);
+    try {
+      const data = await cloud.loadFile(entry);
+      const isFit = entry.fileName.toLowerCase().endsWith('.fit');
+      const parsed = isFit
+        ? await import('../utils/fitParser').then(m => m.parseFIT(data as ArrayBuffer, entry.name))
+        : parseGPX(data as string, entry.name);
+      const bestEfforts = computeBestEfforts(parsed.points, entry.activityType) ?? undefined;
+      const zoneMinutes = calcTRIMP(parsed.points, fcMax, fcRest)?.zoneMinutes;
+      await cloud.updateActivityMeta(entry, { bestEfforts, zoneMinutes });
+    } catch {
+      alert("Impossible de calculer les meilleurs efforts pour cette activité.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={recompute} disabled={pending}
+      title={done ? 'Recalculer les meilleurs efforts et zones FC' : 'Calculer les meilleurs efforts et zones FC (télécharge et reparse le fichier)'}
+      style={{
+        padding: '0.35rem', background: 'transparent', border: 'none',
+        cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
+        display: 'flex', alignItems: 'center', opacity: pending ? 0.5 : 1,
+        color: done ? '#fbbf24' : 'var(--text-tertiary)',
+      }}
+      onMouseEnter={e => { if (!done) (e.currentTarget as HTMLElement).style.color = '#fbbf24'; }}
+      onMouseLeave={e => { if (!done) (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+    >
+      {pending ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Zap size={14} fill={done ? '#fbbf24' : 'none'} />}
+    </button>
+  );
+}
+
+/* ── Liste d'activités sur l'écran d'accueil ────────────────────────────── */
+
+interface CloudActivityListProps {
+  cloud: CloudHandle;
+  onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
+  fcMax: number;
+  fcRest: number;
+}
+
+/** Liste des activités récentes cloud affichée sur l'écran d'accueil. */
+export function CloudActivityList({ cloud, onLoad, fcMax, fcRest }: CloudActivityListProps) {
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+
+  if (cloud.status !== 'connected' || cloud.history.length === 0) return null;
+
+  const handleLoad = async (entry: ActivityIndexEntry) => {
+    if (!entry.cloudId) return;
+    setLoadingId(entry.cloudId);
+    try {
+      const data = await cloud.loadFile(entry);
+      onLoad(data, entry.fileName, entry.name, entryToWeather(entry));
+    } catch {
+      alert('Impossible de charger le fichier depuis le cloud.');
+    } finally {
+      setLoadingId(null);
+    }
+  };
+
+  const handleDelete = async (entry: ActivityIndexEntry, key: string) => {
+    setDeletingKey(key);
+    setConfirmKey(null);
+    try {
+      await cloud.deleteActivity(entry);
+    } catch {
+      alert('Impossible de supprimer l\'activité.');
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: '2rem', width: '100%', maxWidth: '680px' }}>
+      <h3 style={{
+        fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase',
+        letterSpacing: '0.06em', color: 'var(--text-secondary)',
+        marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem',
+      }}>
+        <History size={14} /> Activités récentes
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+        {cloud.history.slice(0, 8).map((entry) => {
+          const key = entry.cloudId!;
+          const isConfirming = confirmKey === key;
+          const isDeleting = deletingKey === key;
+          return (
+            <div key={key} style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)',
+              border: `1px solid ${isConfirming ? '#ef4444' : 'var(--border-color)'}`,
+              transition: 'border-color 0.15s',
+            }}>
+              <button type="button"
+                disabled={loadingId !== null || isDeleting}
+                onClick={() => handleLoad(entry)}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  padding: '0.75rem 1rem', textAlign: 'left',
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  opacity: loadingId === key || isDeleting ? 0.6 : 1,
+                  borderRadius: 'var(--radius-md) 0 0 var(--radius-md)',
+                  minWidth: 0,
+                }}
+                onMouseEnter={e => { if (!isDeleting) (e.currentTarget as HTMLElement).style.background = 'rgba(249,115,22,0.04)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              >
+                <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                  {entry.activityType === 'cycling' ? '🚴' : '🏃'}
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontWeight: 600, fontSize: '0.9rem',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    color: 'var(--text-primary)',
+                  }}>
+                    {entry.name}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
+                    {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
+                    {' · '}
+                    {(entry.distance / 1000).toFixed(1)} km
+                    {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
+                    {entry.trimp ? ` · TRIMP ${Math.round(entry.trimp)}` : ''}
+                  </div>
+                </div>
+                {loadingId === key
+                  ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#f97316', flexShrink: 0 }} />
+                  : <Download size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                }
+              </button>
+
+              <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                <RaceFlagButton entry={entry} cloud={cloud} />
+                <RecomputeBestEffortsButton entry={entry} cloud={cloud} fcMax={fcMax} fcRest={fcRest} />
+                {isConfirming ? (
+                  <>
+                    <button type="button" onClick={() => handleDelete(entry, key)} title="Confirmer la suppression"
+                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                      Supprimer
+                    </button>
+                    <button type="button" onClick={() => setConfirmKey(null)} title="Annuler"
+                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                      Annuler
+                    </button>
+                  </>
+                ) : isDeleting ? (
+                  <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
+                ) : (
+                  <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer"
+                    style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center' }}
+                    onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                    onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Panneau latéral d'historique (slide-in) ────────────────────────────── */
+
+interface CloudHistoryPanelProps {
+  cloud: CloudHandle;
+  loadingId: string | null;
+  onLoad: (entry: ActivityIndexEntry) => void;
+  onClose: () => void;
+  fcMax: number;
+  fcRest: number;
+}
+
+/** Panneau latéral pleine hauteur listant toutes les activités cloud — chargement, suppression, recherche. */
+function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest }: CloudHistoryPanelProps) {
+  const [confirmKey, setConfirmKey] = useState<string | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+
+  /** Filtre une activité sur son nom, sa date (fr) ou sa discipline. */
+  const matchesQuery = (entry: ActivityIndexEntry) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date));
+    const typeStr = entry.activityType === 'cycling' ? 'vélo cyclisme' : 'course running';
+    return entry.name.toLowerCase().includes(q)
+      || entry.date.includes(q)
+      || dateStr.toLowerCase().includes(q)
+      || typeStr.includes(q);
+  };
+
+  const handleDelete = async (entry: ActivityIndexEntry, key: string) => {
+    setDeletingKey(key);
+    setConfirmKey(null);
+    try {
+      await cloud.deleteActivity(entry);
+    } catch {
+      alert('Impossible de supprimer l\'activité.');
+    } finally {
+      setDeletingKey(null);
+    }
+  };
+
+  const filtered = cloud.history.filter(matchesQuery);
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1100,
+        background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'flex-end',
+      }}
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{
+        width: '420px', maxWidth: '100vw', height: '100vh',
+        background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-color)',
+        display: 'flex', flexDirection: 'column', overflowY: 'auto',
+      }}>
+        <div style={{
+          padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'sticky', top: 0, background: 'var(--bg-secondary)', zIndex: 1,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Flame size={20} style={{ color: '#f97316' }} />
+            <div>
+              <h3 style={{ fontWeight: 700, fontSize: '1rem', margin: 0, color: 'var(--text-primary)' }}>
+                Activités
+              </h3>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                {cloud.history.length} séance{cloud.history.length > 1 ? 's' : ''} sauvegardée{cloud.history.length > 1 ? 's' : ''}
+                {cloud.userEmail ? ` · ${cloud.userEmail}` : ''}
+              </span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button type="button" className="btn btn-outline" onClick={cloud.signOut} title="Déconnecter"
+              style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              <X size={13} />
+            </button>
+            <button type="button" className="btn btn-outline" onClick={onClose} style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}>
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {cloud.history.length > 0 && (
+          <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={14} style={{ position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)', pointerEvents: 'none' }} />
+              <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="Rechercher par nom, date, discipline…"
+                style={{
+                  width: '100%', padding: '0.5rem 0.6rem 0.5rem 2rem', fontSize: '0.85rem',
+                  borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                }}
+              />
+              {query && (
+                <button type="button" onClick={() => setQuery('')} title="Effacer"
+                  style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex', padding: '0.2rem' }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ flex: 1, padding: '1rem' }}>
+          {cloud.history.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
+              <History size={40} style={{ opacity: 0.25, marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600 }}>Aucune activité sauvegardée</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-tertiary)', marginTop: '0.5rem' }}>
+                Chargez un fichier GPX/FIT et cliquez sur "Sauvegarder"
+              </p>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: 'var(--text-secondary)' }}>
+              <Search size={40} style={{ opacity: 0.25, marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600 }}>Aucun résultat pour « {query} »</p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {filtered.map((entry) => {
+                const key = entry.cloudId!;
+                const isConfirming = confirmKey === key;
+                const isDeleting = deletingKey === key;
+                return (
+                  <div key={key} style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    background: 'var(--bg-primary)', borderRadius: 'var(--radius-md)',
+                    border: `1px solid ${isConfirming ? '#ef4444' : 'var(--border-color)'}`,
+                    transition: 'border-color 0.15s',
+                  }}>
+                    <button type="button"
+                      disabled={loadingId !== null || isDeleting}
+                      onClick={() => onLoad(entry)}
+                      style={{
+                        flex: 1, display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        padding: '0.9rem 1rem', textAlign: 'left',
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        opacity: loadingId === key || isDeleting ? 0.6 : 1,
+                        borderRadius: 'var(--radius-md) 0 0 var(--radius-md)',
+                        minWidth: 0,
+                      }}
+                    >
+                      <span style={{ fontSize: '1.1rem', flexShrink: 0 }}>
+                        {entry.activityType === 'cycling' ? '🚴' : '🏃'}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {entry.name}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                          {new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date))}
+                          {' · '}
+                          {(entry.distance / 1000).toFixed(1)} km
+                          {entry.elevationGain > 0 ? ` · +${entry.elevationGain} m` : ''}
+                        </div>
+                        {(entry.avgHeartRate || entry.trimp) && (
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', marginTop: '0.15rem' }}>
+                            {entry.avgHeartRate ? `FC moy. ${entry.avgHeartRate} bpm` : ''}
+                            {entry.avgHeartRate && entry.trimp ? ' · ' : ''}
+                            {entry.trimp ? `TRIMP ${Math.round(entry.trimp)}` : ''}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ flexShrink: 0 }}>
+                        {loadingId === key
+                          ? <Loader2 size={15} style={{ animation: 'spin 0.8s linear infinite', color: '#f97316' }} />
+                          : <Download size={14} style={{ color: 'var(--text-tertiary)' }} />
+                        }
+                      </div>
+                    </button>
+
+                    <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                      <RaceFlagButton entry={entry} cloud={cloud} />
+                      <RecomputeBestEffortsButton entry={entry} cloud={cloud} fcMax={fcMax} fcRest={fcRest} />
+                      {isConfirming ? (
+                        <>
+                          <button type="button" onClick={() => handleDelete(entry, key)} title="Confirmer la suppression"
+                            style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                            Supprimer
+                          </button>
+                          <button type="button" onClick={() => setConfirmKey(null)} title="Annuler"
+                            style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                            Annuler
+                          </button>
+                        </>
+                      ) : isDeleting ? (
+                        <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
+                      ) : (
+                        <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer"
+                          style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center' }}
+                          onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
+                          onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -30,6 +30,9 @@ export type DriveStatus = 'unavailable' | 'disconnected' | 'connecting' | 'conne
 export interface DriveHandle {
   status: DriveStatus;
   wasAuthorized: boolean;
+  // Jeton d'accès brut — utilisé par useFirebaseCloud.ts pour l'upload/téléchargement de fichier
+  // (solution hybride : fichier brut sur Drive, métadonnées sur Firestore).
+  token: string | null;
   history: ActivityIndexEntry[];
   isSaving: boolean;
   signIn(): void;
@@ -181,5 +184,5 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, wasAuthorized, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
+  return { status, wasAuthorized, token, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
 }

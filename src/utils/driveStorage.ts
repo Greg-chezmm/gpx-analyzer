@@ -1,12 +1,16 @@
 import type { WeatherSource } from './weather';
 import type { BestEffortsData } from './bestEfforts';
 
-/** Entrée de l'index d'activités — Google Drive (metadata + stats résumées) ou Firebase (cloud primaire). */
+/**
+ * Entrée d'activité — Google Drive seul (`fileId` = index legacy) ou solution hybride cloud
+ * (`fileId` = fichier brut sur Drive, `cloudId` = métadonnées sur Firestore). Le fichier brut
+ * reste sur Drive dans les deux cas ; Firebase Storage nécessite un forfait payant non actif
+ * actuellement (voir firestoreStorage.ts / useFirebaseCloud.ts).
+ */
 export interface ActivityIndexEntry {
   fileId: string | null;
-  // Présents uniquement pour les entrées issues de Firebase (voir firestoreStorage.ts)
+  // Présent uniquement pour les entrées dont les métadonnées vivent sur Firestore
   cloudId?: string;
-  storagePath?: string;
   name: string;
   date: string;           // "YYYY-MM-DD"
   distance: number;       // metres
@@ -172,6 +176,35 @@ export async function uploadActivity(
 
   index.activities.unshift({ ...entry, fileId });
   await saveIndex(token, folderId, indexId, index);
+}
+
+// ── Fichier brut isolé — utilisé par la solution hybride cloud (métadonnées Firestore) ────────
+// N'écrit/lit jamais activities-index.json, contrairement à uploadActivity/fetchActivityList.
+
+/** Upload un fichier brut (GPX/FIT) sur Drive sans toucher à l'index ; retourne l'id du fichier créé. */
+export async function uploadRawFileToDrive(token: string, rawData: string | ArrayBuffer, fileName: string): Promise<string> {
+  const folderId = await getOrCreateFolder(token);
+  const isFit = fileName.toLowerCase().endsWith('.fit');
+  const mime = isFit ? 'application/octet-stream' : 'application/gpx+xml';
+  const boundary = 'gpxanalyzer_cloudfile_141421';
+  const fileMeta = { name: fileName, parents: [folderId], mimeType: mime };
+  const fileBody = buildMultipart(boundary, fileMeta, rawData, mime);
+  const r = await req(`${BASE}/upload/drive/v3/files?uploadType=multipart&fields=id`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
+    body: fileBody,
+  });
+  const { id } = await r.json() as { id: string };
+  return id;
+}
+
+/** Supprime un fichier brut sur Drive par son id, sans toucher à l'index — best-effort. */
+export async function deleteRawFileFromDrive(token: string, fileId: string): Promise<void> {
+  try {
+    await req(`${BASE}/drive/v3/files/${fileId}`, token, { method: 'DELETE' });
+  } catch {
+    // Déjà supprimé ou inaccessible — on continue
+  }
 }
 
 /** Récupère la liste des activités depuis l'index Drive (tri chronologique inversé conservé). */

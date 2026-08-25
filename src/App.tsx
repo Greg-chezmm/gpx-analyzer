@@ -14,6 +14,7 @@ import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHisto
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { useRaceGoal } from "./hooks/useRaceGoal";
 import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
+import { useFirebaseCloud } from "./hooks/useFirebaseCloud";
 import { loadFirestoreSettings, saveFirestoreSettings } from "./utils/firestoreStorage";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
@@ -31,7 +32,6 @@ import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { AthletePage } from "./components/AthletePage";
-import { FirebaseSmokeTest } from "./components/FirebaseSmokeTest";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -43,6 +43,7 @@ import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
 import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./components/DriveSync";
+import { CloudSyncButton, CloudSaveButton, CloudActivityList } from "./components/CloudSync";
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { HeaderMenu } from "./components/HeaderMenu";
 import { generateSummary } from "./utils/generateSummary";
@@ -77,6 +78,7 @@ function App() {
   const drive = useGoogleDrive();
   const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
   const firebaseAuth = useFirebaseAuth();
+  const cloud = useFirebaseCloud(firebaseAuth, drive.token);
 
   /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -87,6 +89,7 @@ function App() {
   const [showAISummary, setShowAISummary] = useState(false);
   const [rawFileData, setRawFileData] = useState<string | ArrayBuffer | null>(null);
   const [savedToDrive, setSavedToDrive] = useState(false);
+  const [savedToCloud, setSavedToCloud] = useState(false);
   const [customActivityName, setCustomActivityName] = useState<string>('');
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
@@ -375,6 +378,7 @@ function App() {
         setSplitDistance(1000);
         setRawFileData(data);
         setSavedToDrive(false);
+        setSavedToCloud(false);
         setOverrideActivityType(null);
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
@@ -394,6 +398,7 @@ function App() {
     setSplitDistance(1000);
     setRawFileData(null);
     setSavedToDrive(false);
+    setSavedToCloud(false);
     setMergeNotice(null);
     setOverrideActivityType(null);
     setCustomActivityName('');
@@ -418,7 +423,8 @@ function App() {
       setActivity(merged);
       setMergeNotice(info);
       setSavedToDrive(false);
-      // rawFileData devient le GPX fusionné — Drive sauvegarde l'activité complète.
+      setSavedToCloud(false);
+      // rawFileData devient le GPX fusionné — sauvegarde l'activité complète.
       const mergedGpx = exportToGPX(merged, merged.fitLaps ?? null);
       setRawFileData(mergedGpx);
       const mergedFileName = merged.name.replace(/[^a-zA-Z0-9_\-.]/g, '_') + '.gpx';
@@ -442,21 +448,22 @@ function App() {
     const oldName = customActivityName || enrichedActivity.name || fileName;
     setCustomActivityName(newName);
     updateEntry(date, oldName, { name: newName });
-    setSavedToDrive(false); // permet une re-sauvegarde Drive avec le nouveau nom
+    setSavedToDrive(false); // permet une re-sauvegarde avec le nouveau nom
+    setSavedToCloud(false);
   };
 
-  /** Sauvegarde l'activité courante sur Google Drive avec ses métadonnées analytiques. */
-  const handleSaveToDrive = async () => {
-    if (!rawFileData || !enrichedActivity) return;
+  /** Construit les métadonnées analytiques communes aux sauvegardes Drive et cloud. */
+  const buildActivityMeta = () => {
+    if (!enrichedActivity) return null;
     const date = enrichedActivity.startTime
       ? enrichedActivity.startTime.toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10);
-    // Recalcul local de l'IF/TSS pour les métadonnées Drive (indépendant du mémo global).
+    // Recalcul local de l'IF/TSS pour les métadonnées sauvegardées (indépendant du mémo global).
     const localIntensityFactor = normalizedPower && ftp > 0 ? normalizedPower / ftp : null;
     const tss = localIntensityFactor
       ? Math.round((enrichedActivity.movingTime * normalizedPower! * localIntensityFactor) / (ftp * 3600) * 100)
       : undefined;
-    await drive.save(rawFileData, fileName, {
+    return {
       name: displayName,
       date,
       distance: enrichedActivity.totalDistance,
@@ -477,7 +484,22 @@ function App() {
       avgCadence: enrichedActivity.avgCadence ?? undefined,
       bestEfforts: computeBestEfforts(enrichedActivity.points, enrichedActivity.activityType) ?? undefined,
       ...weatherToEntryFields(weather),
-    });
+    };
+  };
+
+  /** Sauvegarde l'activité courante sur Firebase (source principale). */
+  const handleSaveToCloud = async () => {
+    const meta = buildActivityMeta();
+    if (!rawFileData || !meta) return;
+    await cloud.save(rawFileData, fileName, meta);
+    setSavedToCloud(true);
+  };
+
+  /** Sauvegarde l'activité courante sur Google Drive (export manuel de secours). */
+  const handleSaveToDrive = async () => {
+    const meta = buildActivityMeta();
+    if (!rawFileData || !meta) return;
+    await drive.save(rawFileData, fileName, meta);
     setSavedToDrive(true);
   };
 
@@ -532,6 +554,11 @@ function App() {
             <LayoutDashboard size={15} />
             <span className="btn-text">Bilan athlète</span>
           </button>
+          <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} />
+          {enrichedActivity && (
+            <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
+          )}
+          {/* Drive gardé en accès de secours pendant la migration — voir plan Firebase étape E */}
           <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
           {enrichedActivity && (
             <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
@@ -620,6 +647,8 @@ function App() {
             </div>
 
             <Dropzone onActivityLoaded={handleActivityLoaded} onLoadSample={handleLoadSample} />
+            <CloudActivityList cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
+            {/* Drive gardé en accès de secours pendant la migration — voir plan Firebase étape E */}
             <DriveActivityList drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
           </div>
         ) : (
@@ -1028,9 +1057,6 @@ function App() {
           Traitement 100% côté client pour garantir la confidentialité absolue de vos données physiques et de géolocalisation.
         </p>
       </footer>
-
-      {/* Étape A/B du plan Firebase — panneau de test temporaire, à retirer à l'étape C */}
-      <FirebaseSmokeTest auth={firebaseAuth} />
     </div>
   );
 }
