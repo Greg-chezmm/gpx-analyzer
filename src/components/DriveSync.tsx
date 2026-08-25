@@ -5,19 +5,22 @@ import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
 import { parseGPX } from '../utils/gpxCore';
 import { computeBestEfforts } from '../utils/bestEfforts';
+import { calcTRIMP } from '../utils/trainingMetrics';
 
 /* ── Bouton header : connexion / accès à l'historique ──────────────────── */
 
 interface DriveSyncButtonProps {
   drive: DriveHandle;
   onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
+  fcMax: number;
+  fcRest: number;
 }
 
 /**
  * Bouton Drive dans la barre de navigation — se connecte, se reconnecte,
  * ou ouvre le panneau historique selon l'état de connexion.
  */
-export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
+export function DriveSyncButton({ drive, onLoad, fcMax, fcRest }: DriveSyncButtonProps) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -91,6 +94,8 @@ export function DriveSyncButton({ drive, onLoad }: DriveSyncButtonProps) {
           loadingId={loadingId}
           onLoad={handleLoad}
           onClose={() => setOpen(false)}
+          fcMax={fcMax}
+          fcRest={fcRest}
         />
       )}
     </>
@@ -178,7 +183,7 @@ function RaceFlagButton({ entry, drive }: { entry: ActivityIndexEntry; drive: Dr
  * fichier — plus coûteux qu'à la sauvegarde initiale (déjà en mémoire), donc laissé à l'initiative de Greg
  * activité par activité plutôt qu'en masse.
  */
-function RecomputeBestEffortsButton({ entry, drive }: { entry: ActivityIndexEntry; drive: DriveHandle }) {
+function RecomputeBestEffortsButton({ entry, drive, fcMax, fcRest }: { entry: ActivityIndexEntry; drive: DriveHandle; fcMax: number; fcRest: number }) {
   const [pending, setPending] = useState(false);
   const done = !!entry.bestEfforts;
 
@@ -193,7 +198,8 @@ function RecomputeBestEffortsButton({ entry, drive }: { entry: ActivityIndexEntr
         ? await import('../utils/fitParser').then(m => m.parseFIT(data as ArrayBuffer, entry.name))
         : parseGPX(data as string, entry.name);
       const bestEfforts = computeBestEfforts(parsed.points, entry.activityType) ?? undefined;
-      await drive.updateActivityMeta({ date: entry.date, name: entry.name }, { bestEfforts });
+      const zoneMinutes = calcTRIMP(parsed.points, fcMax, fcRest)?.zoneMinutes;
+      await drive.updateActivityMeta({ date: entry.date, name: entry.name }, { bestEfforts, zoneMinutes });
     } catch {
       alert("Impossible de calculer les meilleurs efforts pour cette activité.");
     } finally {
@@ -203,7 +209,7 @@ function RecomputeBestEffortsButton({ entry, drive }: { entry: ActivityIndexEntr
 
   return (
     <button type="button" onClick={recompute} disabled={pending || !entry.fileId}
-      title={done ? 'Recalculer les meilleurs efforts' : 'Calculer les meilleurs efforts (télécharge et reparse le fichier)'}
+      title={done ? 'Recalculer les meilleurs efforts et zones FC' : 'Calculer les meilleurs efforts et zones FC (télécharge et reparse le fichier)'}
       style={{
         padding: '0.35rem', background: 'transparent', border: 'none',
         cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
@@ -223,13 +229,15 @@ function RecomputeBestEffortsButton({ entry, drive }: { entry: ActivityIndexEntr
 interface DriveActivityListProps {
   drive: DriveHandle;
   onLoad: (data: ArrayBuffer | string, name: string, customName?: string, storedWeather?: WeatherInfo) => void;
+  fcMax: number;
+  fcRest: number;
 }
 
 /**
  * Liste des activités récentes Drive affichée sur l'écran d'accueil —
  * permet de charger ou supprimer une activité.
  */
-export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
+export function DriveActivityList({ drive, onLoad, fcMax, fcRest }: DriveActivityListProps) {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
@@ -337,7 +345,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
               {/* Zone de suppression avec confirmation en deux clics */}
               <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                 <RaceFlagButton entry={entry} drive={drive} />
-                <RecomputeBestEffortsButton entry={entry} drive={drive} />
+                <RecomputeBestEffortsButton entry={entry} drive={drive} fcMax={fcMax} fcRest={fcRest} />
                 {isConfirming ? (
                   <>
                     <button type="button"
@@ -397,13 +405,15 @@ interface DriveHistoryPanelProps {
   loadingId: string | null;
   onLoad: (entry: ActivityIndexEntry) => void;
   onClose: () => void;
+  fcMax: number;
+  fcRest: number;
 }
 
 /**
  * Panneau latéral pleine hauteur listant toutes les activités Drive —
  * s'ouvre depuis DriveSyncButton, permet le chargement et la suppression.
  */
-function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPanelProps) {
+function DriveHistoryPanel({ drive, loadingId, onLoad, onClose, fcMax, fcRest }: DriveHistoryPanelProps) {
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -600,7 +610,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
                     {/* Zone de suppression avec confirmation en deux clics */}
                     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                       <RaceFlagButton entry={entry} drive={drive} />
-                      <RecomputeBestEffortsButton entry={entry} drive={drive} />
+                      <RecomputeBestEffortsButton entry={entry} drive={drive} fcMax={fcMax} fcRest={fcRest} />
                       {isConfirming ? (
                         <>
                           <button type="button"

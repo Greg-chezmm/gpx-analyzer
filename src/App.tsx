@@ -432,6 +432,7 @@ function App() {
       avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
       trimp: trimp?.edwards,
       trimpBanister: trimp?.banister,
+      zoneMinutes: trimp?.zoneMinutes,
       vo2max: vo2maxEst?.value,
       vo2maxConfidence: vo2maxEst?.confidence,
       sessionType: session?.type,
@@ -496,7 +497,7 @@ function App() {
             <LayoutDashboard size={15} />
             <span className="btn-text">Bilan athlète</span>
           </button>
-          <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} />
+          <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
           {enrichedActivity && (
             <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
           )}
@@ -584,7 +585,7 @@ function App() {
             </div>
 
             <Dropzone onActivityLoaded={handleActivityLoaded} onLoadSample={handleLoadSample} />
-            <DriveActivityList drive={drive} onLoad={handleActivityLoaded} />
+            <DriveActivityList drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
           </div>
         ) : (
           /* ── Dashboard activité ── */
