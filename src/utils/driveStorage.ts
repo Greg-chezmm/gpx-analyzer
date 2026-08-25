@@ -16,6 +16,7 @@ export interface ActivityIndexEntry {
   // Charge
   trimp?: number;
   trimpBanister?: number;
+  zoneMinutes?: number[]; // [Z1..Z5] Karvonen, minutes — voir polarization.ts
   // VO2max
   vo2max?: number;
   vo2maxConfidence?: string;

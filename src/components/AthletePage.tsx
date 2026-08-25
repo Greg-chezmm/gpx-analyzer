@@ -5,6 +5,7 @@ import type { TrainingEntry } from "../hooks/useTrainingHistory";
 import type { RaceGoalConfig } from "../hooks/useRaceGoal";
 import type { TSBResult } from "../utils/trainingMetrics";
 import { AthleteProfile } from "./AthleteProfile";
+import { PolarizationChart } from "./PolarizationChart";
 import { CriticalSpeed } from "./CriticalSpeed";
 import { BestEffortsCurve } from "./BestEffortsCurve";
 import { TrainingBalance } from "./TrainingBalance";
@@ -50,6 +51,7 @@ export const AthletePage: React.FC<Props> = ({ drive, history, tsb, raceGoal, se
       )}
 
       <AthleteProfile drive={drive} />
+      <PolarizationChart drive={drive} />
       <CriticalSpeed drive={drive} />
       <BestEffortsCurve drive={drive} />
       <TrainingBalance tsb={tsb} history={history} onClear={onClearHistory} />
