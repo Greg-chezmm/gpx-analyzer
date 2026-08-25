@@ -55,8 +55,9 @@ import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
-import { computeFingerprint } from "./utils/segments";
+import { computeFingerprint, matchStoredSegment, toCachedAttempt } from "./utils/segments";
 import { useSegmentPicker } from "./hooks/useSegmentPicker";
+import { useStoredSegments } from "./hooks/useStoredSegments";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -83,6 +84,7 @@ function App() {
   const firebaseAuth = useFirebaseAuth();
   const cloud = useFirebaseCloud(firebaseAuth, drive.token);
   const segmentPicker = useSegmentPicker();
+  const storedSegments = useStoredSegments(firebaseAuth.user?.uid ?? null);
 
   /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -436,12 +438,33 @@ function App() {
     };
   };
 
+  /**
+   * Compare l'activité tout juste sauvegardée aux segments manuels existants (même type
+   * d'activité) et met à jour leur classement en cache — en mémoire, aucun téléchargement.
+   * Évite d'avoir à relancer un scan complet de l'historique après chaque nouvelle sortie
+   * (voir useStoredSegmentScan.ts pour le scan complet, plus coûteux).
+   */
+  const mergeIntoStoredSegments = async () => {
+    if (!enrichedActivity || enrichedActivity.activityType === 'unknown') return;
+    const date = enrichedActivity.startTime ? enrichedActivity.startTime.toISOString().slice(0, 10) : '';
+    const matching = storedSegments.segments.filter(s => s.activityType === enrichedActivity.activityType);
+    for (const seg of matching) {
+      const m = matchStoredSegment(seg.points, seg.distance, { points: enrichedActivity.points, date });
+      if (!m) continue;
+      // Remplace un éventuel passage existant à la même date (re-sauvegarde) plutôt que d'ajouter un doublon
+      const withoutSameDate = (seg.attempts ?? []).filter(a => a.date !== date);
+      const merged = [...withoutSameDate, toCachedAttempt(m)].sort((a, b) => a.duration - b.duration).slice(0, 10);
+      await storedSegments.updateAttempts(seg.id, merged);
+    }
+  };
+
   /** Sauvegarde l'activité courante sur Firebase (source principale). */
   const handleSaveToCloud = async () => {
     const meta = buildActivityMeta();
     if (!rawFileData || !meta) return;
     await cloud.save(rawFileData, fileName, meta);
     setSavedToCloud(true);
+    await mergeIntoStoredSegments();
   };
 
   /** Sauvegarde l'activité courante sur Google Drive (export manuel de secours). */
@@ -930,8 +953,8 @@ function App() {
                     activity={enrichedActivity!}
                     history={cloud.history.filter(e => e.activityType === enrichedActivity!.activityType)}
                     loadFile={cloud.loadFile}
-                    uid={firebaseAuth.user?.uid ?? null}
                     picker={segmentPicker}
+                    storedSegments={storedSegments}
                   />
                 </Suspense>
               </>

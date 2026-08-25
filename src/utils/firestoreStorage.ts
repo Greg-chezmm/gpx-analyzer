@@ -2,6 +2,7 @@ import { getFirestoreDb } from './firebase';
 import type { Sex } from '../hooks/useUserSettings';
 import type { RaceGoalConfig } from '../hooks/useRaceGoal';
 import type { ActivityIndexEntry } from './driveStorage';
+import type { CachedSegmentAttempt } from './segments';
 
 /** Document de réglages athlète stocké sur Firestore (`users/{uid}/settings/main`). */
 export interface FirestoreUserSettings {
@@ -112,6 +113,11 @@ export interface StoredSegment {
   distance: number; // m
   elevGain: number;  // m
   createdDate: string; // "YYYY-MM-DD" — date de l'activité sur laquelle il a été défini
+  // Cache du classement (top 10, tri croissant par durée) — évite de rescanner tout l'historique
+  // à chaque ouverture. Mis à jour soit par un scan complet explicite, soit incrémentalement à
+  // chaque nouvelle activité sauvegardée (voir App.tsx handleSaveToCloud + useStoredSegmentScan.ts).
+  attempts?: CachedSegmentAttempt[];
+  lastFullScanAt?: string; // ISO — informatif, dernière fois qu'un scan complet de l'historique a été fait
 }
 
 /** Récupère tous les segments manuels d'un utilisateur. */
@@ -133,4 +139,15 @@ export async function createStoredSegment(uid: string, segment: Omit<StoredSegme
 export async function deleteStoredSegment(uid: string, id: string): Promise<void> {
   const [db, { doc, deleteDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
   await deleteDoc(doc(db, 'users', uid, 'segments', id));
+}
+
+/** Met à jour le classement en cache d'un segment (top 10) — après un scan complet ou une mise à jour incrémentale. */
+export async function updateStoredSegmentAttempts(
+  uid: string, id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string,
+): Promise<void> {
+  const [db, { doc, updateDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
+  await updateDoc(doc(db, 'users', uid, 'segments', id), {
+    attempts,
+    ...(lastFullScanAt ? { lastFullScanAt } : {}),
+  });
 }

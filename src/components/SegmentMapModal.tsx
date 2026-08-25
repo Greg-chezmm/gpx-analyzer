@@ -1,11 +1,13 @@
 import React, { useEffect, useRef } from "react";
 import L from "leaflet";
 import { X } from "lucide-react";
-import type { GPXTrackPoint } from "../utils/gpxParser";
+
+/** Seules lat/lon sont utilisées ici — un GPXTrackPoint[] ou un CachedSegmentAttempt.points[] conviennent tous les deux. */
+interface MapPoint { lat: number; lon: number; }
 
 interface SegmentMapModalProps {
   /** Points du tracé complet (fond de carte gris) */
-  points: GPXTrackPoint[];
+  points: MapPoint[];
   /** Index de début du segment coloré dans points[] */
   startIndex: number;
   /** Index de fin du segment coloré dans points[] */

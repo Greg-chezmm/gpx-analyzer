@@ -1,13 +1,17 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
-  fetchStoredSegments, createStoredSegment, deleteStoredSegment, type StoredSegment,
+  fetchStoredSegments, createStoredSegment, deleteStoredSegment, updateStoredSegmentAttempts,
+  type StoredSegment,
 } from '../utils/firestoreStorage';
+import type { CachedSegmentAttempt } from '../utils/segments';
 
 export interface StoredSegmentsHandle {
   segments: StoredSegment[];
   loading: boolean;
   create: (segment: Omit<StoredSegment, 'id'>) => Promise<void>;
   remove: (id: string) => Promise<void>;
+  /** Persiste le classement en cache d'un segment et met à jour l'état local sans re-fetch complet. */
+  updateAttempts: (id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string) => Promise<void>;
 }
 
 /** Liste + CRUD des segments définis manuellement par l'utilisateur (Firestore, `users/{uid}/segments`). */
@@ -39,5 +43,11 @@ export function useStoredSegments(uid: string | null): StoredSegmentsHandle {
     await refresh();
   }, [uid, refresh]);
 
-  return { segments, loading, create, remove };
+  const updateAttempts = useCallback(async (id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string) => {
+    if (!uid) return;
+    await updateStoredSegmentAttempts(uid, id, attempts, lastFullScanAt);
+    setSegments(prev => prev.map(s => s.id === id ? { ...s, attempts, ...(lastFullScanAt ? { lastFullScanAt } : {}) } : s));
+  }, [uid]);
+
+  return { segments, loading, create, remove, updateAttempts };
 }

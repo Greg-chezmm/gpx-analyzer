@@ -235,6 +235,35 @@ export interface SegmentSource {
   date: string;
 }
 
+/**
+ * Version allégée d'un passage, persistable sur Firestore : géométrie déjà découpée (juste le
+ * sous-tracé du passage, pas l'activité complète comme SegmentAttempt.points), sans les champs
+ * volumineux (ele/hr/time/etc de tous les points). Sert à la fois de cache de leaderboard (top 10
+ * persisté par segment, voir StoredSegment.attempts) et de format d'affichage unifié — la carte
+ * (SegmentMapModal) n'a jamais eu besoin de plus que lat/lon.
+ */
+export interface CachedSegmentAttempt {
+  points: { lat: number; lon: number }[];
+  date: string;
+  duration: number;
+  avgPace: number;
+  avgSpeed: number;
+  avgHR: number | null;
+  distance: number;
+  elevGain: number;
+  isCurrent: boolean;
+}
+
+/** Convertit un passage calculé en direct (référence à l'activité complète) en format cache/affichage léger. */
+export function toCachedAttempt(a: SegmentAttempt): CachedSegmentAttempt {
+  const slice = a.points.slice(a.startIndex, a.endIndex + 1);
+  return {
+    points: slice.map(p => ({ lat: p.lat, lon: p.lon })),
+    date: a.date, duration: a.duration, avgPace: a.avgPace, avgSpeed: a.avgSpeed,
+    avgHR: a.avgHR, distance: a.distance, elevGain: a.elevGain, isCurrent: a.isCurrent,
+  };
+}
+
 function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: number, date: string, isCurrent: boolean): SegmentAttempt {
   const slice = points.slice(startIndex, endIndex + 1);
   const distance = slice.length > 1 ? slice[slice.length - 1].distFromStart - slice[0].distFromStart : 0;

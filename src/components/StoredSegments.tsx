@@ -1,11 +1,11 @@
-import React, { useState } from "react";
-import { Route, Plus, X, Search, Loader2, Trophy, Trash2 } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2 } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { StoredSegment } from "../utils/firestoreStorage";
-import type { SegmentAttempt } from "../utils/segments";
+import type { CachedSegmentAttempt } from "../utils/segments";
 import { buildSegmentGeometry } from "../utils/segments";
-import { useStoredSegments } from "../hooks/useStoredSegments";
+import type { StoredSegmentsHandle } from "../hooks/useStoredSegments";
 import { useStoredSegmentScan } from "../hooks/useStoredSegmentScan";
 import type { SegmentPickerHandle } from "../hooks/useSegmentPicker";
 import { formatDuration, formatPace } from "./SplitsTable";
@@ -15,12 +15,13 @@ interface StoredSegmentsProps {
   activity: GPXActivity;
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
-  uid: string | null;
   picker: SegmentPickerHandle;
+  /** Levé au niveau App — partagé avec la mise à jour incrémentale du cache à chaque sauvegarde (voir App.tsx mergeIntoStoredSegments). */
+  storedSegments: StoredSegmentsHandle;
 }
 
 interface AttemptRowProps {
-  attempt: SegmentAttempt;
+  attempt: CachedSegmentAttempt;
   rank: number;
   activityType: GPXActivity['activityType'];
   onClick: () => void;
@@ -63,11 +64,27 @@ interface StoredSegmentCardProps {
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   onDelete: () => void;
-  onSelectAttempt: (attempt: SegmentAttempt) => void;
+  onUpdateAttempts: (id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string) => Promise<void>;
+  onSelectAttempt: (attempt: CachedSegmentAttempt) => void;
 }
 
-function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onSelectAttempt }: StoredSegmentCardProps) {
-  const { status, progress, attempts, skippedCount, scan } = useStoredSegmentScan(segment, activity, history, loadFile);
+function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt }: StoredSegmentCardProps) {
+  const { status, progress, attempts, skippedCount, scan } = useStoredSegmentScan(
+    segment, activity, history, loadFile,
+    top => { onUpdateAttempts(segment.id, top, new Date().toISOString()); },
+  );
+  const hasCache = (segment.attempts?.length ?? 0) > 0 || attempts.length > 0;
+
+  // Segment tout juste créé (jamais scanné) — remplit le classement initial automatiquement,
+  // une seule fois par segment, pour éviter un clic manuel en plus juste après la création.
+  const autoScanned = useRef(false);
+  useEffect(() => {
+    if (segment.attempts === undefined && !autoScanned.current) {
+      autoScanned.current = true;
+      scan();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment.id]);
 
   return (
     <div style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", overflow: "hidden", marginBottom: "0.75rem" }}>
@@ -87,12 +104,18 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onS
           className="btn btn-outline"
           onClick={scan}
           disabled={status === "scanning"}
+          title={hasCache ? "Relancer une comparaison complète — le classement affiché est en cache depuis la dernière analyse" : "Comparer à l'historique"}
           style={{ padding: "0.35rem 0.7rem", fontSize: "0.78rem" }}
         >
           {status === "scanning" ? (
             <>
               <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
               <span>{progress ? `${progress.done}/${progress.total}` : "…"}</span>
+            </>
+          ) : hasCache ? (
+            <>
+              <RefreshCw size={13} />
+              <span>Actualiser</span>
             </>
           ) : (
             <>
@@ -110,6 +133,14 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onS
           <Trash2 size={15} />
         </button>
       </div>
+
+      {status !== "scanning" && hasCache && (
+        <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", padding: "0.4rem 1rem 0", margin: 0 }}>
+          {segment.lastFullScanAt
+            ? `Classement en cache — dernière comparaison complète le ${new Date(segment.lastFullScanAt).toLocaleDateString("fr-FR")}. Les nouvelles activités sauvegardées y sont ajoutées automatiquement.`
+            : "Classement en cache, mis à jour automatiquement à chaque nouvelle activité sauvegardée."}
+        </p>
+      )}
 
       {status === "done" && attempts.length === 0 && (
         <p style={{ fontSize: "0.8rem", color: "var(--text-secondary)", padding: "0.6rem 1rem", margin: 0 }}>
@@ -147,14 +178,14 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onS
   );
 }
 
-/** Segments définis manuellement (deux clics sur la carte) et comparés à la demande à l'historique — complément de la détection automatique (RecurringSegments). */
-export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, uid, picker }) => {
-  const { segments, create, remove } = useStoredSegments(uid);
+/** Segments définis manuellement (deux clics sur la carte ou le graphique) et comparés à l'historique — complément de la détection automatique (RecurringSegments). Le classement (top 10) est mis en cache sur Firestore, voir useStoredSegments/useStoredSegmentScan. */
+export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, picker, storedSegments }) => {
+  const { segments, create, remove, updateAttempts } = storedSegments;
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState<SegmentAttempt | null>(null);
+  const [selected, setSelected] = useState<CachedSegmentAttempt | null>(null);
 
-  if (!uid || activity.activityType === "unknown") return null;
+  if (activity.activityType === "unknown") return null;
   const activityType = activity.activityType;
 
   const relevant = segments.filter(s => s.activityType === activityType);
@@ -252,6 +283,7 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
               history={history}
               loadFile={loadFile}
               onDelete={() => remove(seg.id)}
+              onUpdateAttempts={updateAttempts}
               onSelectAttempt={setSelected}
             />
           ))}
@@ -261,8 +293,8 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
       {selected && (
         <SegmentMapModal
           points={selected.points}
-          startIndex={selected.startIndex}
-          endIndex={selected.endIndex}
+          startIndex={0}
+          endIndex={selected.points.length - 1}
           segmentColor="#8b5cf6"
           icon={<Route size={18} style={{ color: "#8b5cf6" }} />}
           title={selected.isCurrent ? "Passage actuel" : new Date(selected.date).toLocaleDateString("fr-FR")}
