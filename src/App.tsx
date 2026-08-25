@@ -26,6 +26,7 @@ const ActivityMap     = lazy(() => import("./components/ActivityMap").then(m => 
 const IntervalAnalysis = lazy(() => import("./components/IntervalAnalysis").then(m => ({ default: m.IntervalAnalysis })));
 const ClimbAnalysis   = lazy(() => import("./components/ClimbAnalysis").then(m => ({ default: m.ClimbAnalysis })));
 const HillRepeats     = lazy(() => import("./components/HillRepeats").then(m => ({ default: m.HillRepeats })));
+const RecurringSegments = lazy(() => import("./components/RecurringSegments").then(m => ({ default: m.RecurringSegments })));
 import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
@@ -53,6 +54,7 @@ import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
+import { computeFingerprint } from "./utils/segments";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -424,6 +426,7 @@ function App() {
       driftPct: drift?.decoupling,
       avgCadence: enrichedActivity.avgCadence ?? undefined,
       bestEfforts: computeBestEfforts(enrichedActivity.points, enrichedActivity.activityType) ?? undefined,
+      fingerprint: computeFingerprint(enrichedActivity.points),
       ...weatherToEntryFields(weather),
     };
   };
@@ -889,6 +892,13 @@ function App() {
             {hillRepeats.length > 0 && (
               <Suspense fallback={null}>
                 <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
+              </Suspense>
+            )}
+
+            {/* Segments récurrents — nécessite le cloud (Firebase) connecté avec au moins une autre activité sauvegardée */}
+            {cloud.status === 'connected' && cloud.history.length > 0 && (
+              <Suspense fallback={null}>
+                <RecurringSegments activity={enrichedActivity!} history={cloud.history} loadFile={cloud.loadFile} />
               </Suspense>
             )}
 

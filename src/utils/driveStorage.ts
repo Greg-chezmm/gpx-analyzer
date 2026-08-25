@@ -50,6 +50,10 @@ export interface ActivityIndexEntry {
   weatherPrecipitation?: number;
   weatherCode?: number;
   weatherSource?: WeatherSource;
+  // Empreinte géographique (cellules geohash) — pré-filtrage bon marché pour la détection de
+  // segments récurrents, voir utils/segments.ts. Absente sur les activités sauvegardées avant
+  // l'ajout de cette fonctionnalité.
+  fingerprint?: string[];
 }
 
 /** Structure du fichier d'index JSON sauvegardé sur Drive (activities-index.json). */
