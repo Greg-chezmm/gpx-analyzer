@@ -43,33 +43,39 @@ export async function fetchCloudActivities(uid: string): Promise<ActivityIndexEn
   return snap.docs.map(d => ({ ...(d.data() as Omit<ActivityIndexEntry, 'cloudId'>), cloudId: d.id }));
 }
 
+/** Résultat d'une recherche d'activité existante (même jour + même nom ou nom de fichier). */
+export interface ExistingCloudActivity {
+  cloudId: string;
+  fileId: string | null;
+}
+
 /**
- * Crée ou met à jour les métadonnées d'une activité (le fichier brut, déjà uploadé sur Drive,
- * est référencé par `entry.fileId`). Si une activité du même jour porte déjà le même nom ou nom
- * de fichier (renommage), ses métadonnées sont mises à jour en place. Recherche limitée au jour
- * (pas de requête composite date+nom) pour éviter un index Firestore composite ; le volume par
- * jour (quelques activités max) rend le filtrage côté client négligeable.
+ * Recherche une activité déjà sauvegardée le même jour, sous le même nom ou le même nom de
+ * fichier (renommage) — source de vérité unique pour la déduplication, toujours interrogée
+ * fraîche sur Firestore (jamais l'état local React, qui peut être périmé juste après un
+ * rechargement de page et provoquerait sinon un re-upload Drive inutile, voir useFirebaseCloud.ts).
+ * Recherche limitée au jour (pas de requête composite date+nom) pour éviter un index Firestore
+ * composite ; le volume par jour (quelques activités max) rend le filtrage côté client négligeable.
  */
-export async function upsertCloudActivityMeta(
-  uid: string,
-  entry: Omit<ActivityIndexEntry, 'cloudId'>,
-): Promise<string> {
-  const [db, { collection, getDocs, query, where, doc, setDoc, updateDoc }] = await Promise.all([
+export async function findExistingCloudActivity(
+  uid: string, date: string, name: string, fileName: string,
+): Promise<ExistingCloudActivity | null> {
+  const [db, { collection, getDocs, query, where }] = await Promise.all([
     getFirestoreDb(), import('firebase/firestore'),
   ]);
   const col = collection(db, 'users', uid, 'activities');
-  const sameDay = await getDocs(query(col, where('date', '==', entry.date)));
+  const sameDay = await getDocs(query(col, where('date', '==', date)));
   const existing = sameDay.docs.find(d => {
     const data = d.data() as ActivityIndexEntry;
-    return data.name === entry.name || data.fileName === entry.fileName;
+    return data.name === name || data.fileName === fileName;
   });
+  return existing ? { cloudId: existing.id, fileId: (existing.data() as ActivityIndexEntry).fileId } : null;
+}
 
-  if (existing) {
-    await updateDoc(existing.ref, { ...entry });
-    return existing.id;
-  }
-
-  const ref = doc(col);
+/** Crée un nouveau document d'activité ; retourne son id. À n'appeler qu'après avoir vérifié via `findExistingCloudActivity` qu'aucun doublon n'existe. */
+export async function createCloudActivityMeta(uid: string, entry: Omit<ActivityIndexEntry, 'cloudId'>): Promise<string> {
+  const [db, { collection, doc, setDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
+  const ref = doc(collection(db, 'users', uid, 'activities'));
   await setDoc(ref, entry);
   return ref.id;
 }

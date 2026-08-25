@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import {
-  fetchCloudActivities, upsertCloudActivityMeta,
+  fetchCloudActivities, findExistingCloudActivity, createCloudActivityMeta,
   updateCloudActivityMeta, deleteCloudActivityDoc,
 } from '../utils/firestoreStorage';
 import {
@@ -63,16 +63,21 @@ export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, drive
     if (!auth.user || !driveToken) return;
     setIsSaving(true);
     try {
-      // Réutilise le fichier Drive existant si l'activité est déjà connue (même date+nom/fileName,
-      // ex. renommage) — sinon upload d'un nouveau fichier.
-      const existing = history.find(e => e.date === meta.date && (e.name === meta.name || e.fileName === meta.fileName));
+      // Toujours vérifié fraîchement sur Firestore (jamais l'état local `history`, qui peut être
+      // périmé juste après un rechargement de page) — évite un re-upload Drive orphelin ou un
+      // doublon d'activité si l'état local n'est pas encore synchronisé.
+      const existing = await findExistingCloudActivity(auth.user.uid, meta.date, meta.name, meta.fileName);
       const fileId = existing?.fileId ?? await uploadRawFileToDrive(driveToken, rawData, fileName);
-      await upsertCloudActivityMeta(auth.user.uid, { ...meta, fileId });
+      if (existing) {
+        await updateCloudActivityMeta(auth.user.uid, existing.cloudId, { ...meta, fileId });
+      } else {
+        await createCloudActivityMeta(auth.user.uid, { ...meta, fileId });
+      }
       await refresh();
     } finally {
       setIsSaving(false);
     }
-  }, [auth.user, driveToken, history, refresh]);
+  }, [auth.user, driveToken, refresh]);
 
   const loadFile = useCallback(async (entry: ActivityIndexEntry) => {
     if (!driveToken || !entry.fileId) throw new Error('Activité invalide (fichier introuvable) ou Drive non connecté');
