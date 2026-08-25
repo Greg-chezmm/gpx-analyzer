@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2 } from 'lucide-react';
+import { useState, type MouseEvent } from 'react';
+import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search } from 'lucide-react';
 import type { DriveHandle } from '../hooks/useGoogleDrive';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
@@ -136,6 +136,40 @@ export function DriveSaveButton({ drive, onSave, alreadySaved }: DriveSaveButton
   );
 }
 
+/** Bouton drapeau — marque/démarque une activité Drive comme course (calibration TSB, voir RaceGoal.tsx). */
+function RaceFlagButton({ entry, drive }: { entry: ActivityIndexEntry; drive: DriveHandle }) {
+  const [pending, setPending] = useState(false);
+  const isRace = !!entry.isRace;
+
+  const toggle = async (e: MouseEvent) => {
+    e.stopPropagation();
+    setPending(true);
+    try {
+      await drive.updateActivityMeta({ date: entry.date, name: entry.name }, { isRace: !isRace });
+    } catch {
+      alert("Impossible de mettre à jour l'activité.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={toggle} disabled={pending}
+      title={isRace ? 'Retirer le marquage course' : 'Marquer comme course (calibration objectif)'}
+      style={{
+        padding: '0.35rem', background: 'transparent', border: 'none',
+        cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
+        display: 'flex', alignItems: 'center', opacity: pending ? 0.5 : 1,
+        color: isRace ? '#f472b6' : 'var(--text-tertiary)',
+      }}
+      onMouseEnter={e => { if (!isRace) (e.currentTarget as HTMLElement).style.color = '#f472b6'; }}
+      onMouseLeave={e => { if (!isRace) (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+    >
+      {pending ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Flag size={14} fill={isRace ? '#f472b6' : 'none'} />}
+    </button>
+  );
+}
+
 /* ── Liste d'activités sur l'écran d'accueil ────────────────────────────── */
 
 interface DriveActivityListProps {
@@ -254,6 +288,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
 
               {/* Zone de suppression avec confirmation en deux clics */}
               <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                <RaceFlagButton entry={entry} drive={drive} />
                 {isConfirming ? (
                   <>
                     <button type="button"
@@ -322,8 +357,21 @@ interface DriveHistoryPanelProps {
 function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPanelProps) {
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   const entryKey = (entry: ActivityIndexEntry, i: number) => entry.fileId ?? `${entry.date}-${i}`;
+
+  /** Filtre une activité sur son nom, sa date (fr) ou sa discipline. */
+  const matchesQuery = (entry: ActivityIndexEntry) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date));
+    const typeStr = entry.activityType === 'cycling' ? 'vélo cyclisme' : 'course running';
+    return entry.name.toLowerCase().includes(q)
+      || entry.date.includes(q)
+      || dateStr.toLowerCase().includes(q)
+      || typeStr.includes(q);
+  };
 
   const handleDelete = async (entry: ActivityIndexEntry, key: string) => {
     setDeletingKey(key);
@@ -386,6 +434,39 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
           </div>
         </div>
 
+        {/* Recherche */}
+        {drive.history.length > 0 && (
+          <div style={{
+            padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)',
+            background: 'var(--bg-secondary)',
+          }}>
+            <div style={{ position: 'relative' }}>
+              <Search size={14} style={{
+                position: 'absolute', left: '0.65rem', top: '50%', transform: 'translateY(-50%)',
+                color: 'var(--text-tertiary)', pointerEvents: 'none',
+              }} />
+              <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+                placeholder="Rechercher par nom, date, discipline…"
+                style={{
+                  width: '100%', padding: '0.5rem 0.6rem 0.5rem 2rem', fontSize: '0.85rem',
+                  borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                  background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                }}
+              />
+              {query && (
+                <button type="button" onClick={() => setQuery('')} title="Effacer"
+                  style={{
+                    position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)',
+                    display: 'flex', padding: '0.2rem',
+                  }}>
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Liste */}
         <div style={{ flex: 1, padding: '1rem' }}>
           {drive.history.length === 0 ? (
@@ -399,9 +480,17 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
                 Chargez un fichier GPX/FIT et cliquez sur "Sauvegarder"
               </p>
             </div>
+          ) : [...drive.history].filter(matchesQuery).length === 0 ? (
+            <div style={{
+              textAlign: 'center', padding: '3rem 1rem',
+              color: 'var(--text-secondary)',
+            }}>
+              <Search size={40} style={{ opacity: 0.25, marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600 }}>Aucun résultat pour « {query} »</p>
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {[...drive.history].sort((a, b) => b.date.localeCompare(a.date)).map((entry, i) => {
+              {[...drive.history].filter(matchesQuery).sort((a, b) => b.date.localeCompare(a.date)).map((entry, i) => {
                 const key = entryKey(entry, i);
                 const isConfirming = confirmKey === key;
                 const isDeleting = deletingKey === key;
@@ -461,6 +550,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
 
                     {/* Zone de suppression avec confirmation en deux clics */}
                     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
+                      <RaceFlagButton entry={entry} drive={drive} />
                       {isConfirming ? (
                         <>
                           <button type="button"

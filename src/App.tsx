@@ -12,6 +12,7 @@ import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
 import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHistory";
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
+import { useRaceGoal } from "./hooks/useRaceGoal";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
 import { ChartViewer } from "./components/ChartViewer";
@@ -28,6 +29,7 @@ import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { TrainingBalance } from "./components/TrainingBalance";
+import { RaceGoal } from "./components/RaceGoal";
 import { ProgressChart } from "./components/ProgressChart";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
@@ -71,6 +73,7 @@ function App() {
   const { isDark, toggleTheme } = useTheme();
   const { history, addEntry, updateEntry, replaceHistory, clearHistory } = useTrainingHistory();
   const drive = useGoogleDrive();
+  const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
 
   /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -809,6 +812,9 @@ function App() {
             {/* TSB / CTL / ATL sur l'historique multi-séances */}
             <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
             <ProgressChart history={history} />
+
+            {/* Objectif course — projection TSB calibrée sur les anciennes courses (marquées 🏁 dans Drive) */}
+            <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} drive={drive} />
 
             {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (

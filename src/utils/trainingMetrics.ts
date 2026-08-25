@@ -84,8 +84,10 @@ export interface TSBResult {
  * Constantes Banister/Coggan (formule PMC standard TrainingPeaks) : λ = 1/τ, avec τ=7j (ATL) et τ=42j (CTL).
  * TSB(jour) = CTL − ATL calculés à partir de la VEILLE (fraîcheur avant la séance du jour), pas du jour même —
  * sinon le TSB du jour chuterait artificiellement dès qu'on charge la séance qui vient d'être faite.
+ * `asOfDate` (YYYY-MM-DD, défaut = aujourd'hui) permet de rejouer le calcul jusqu'à une date passée (calibration
+ * sur une ancienne course) ou future (projection avec un historique complété de séances hypothétiques).
  */
-export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
+export function calcTSB(history: { date: string; trimp: number }[], asOfDate?: string): TSBResult {
   if (history.length === 0) return { atl: 0, ctl: 0, tsb: 0, chartData: [] };
 
   // Constantes de lissage EMA : λ = 1/τ avec τ=7j (ATL) et τ=42j (CTL)
@@ -96,12 +98,12 @@ export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
   const trimpMap = new Map<string, number>();
   for (const e of sorted) trimpMap.set(e.date, (trimpMap.get(e.date) ?? 0) + e.trimp);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const endStr = asOfDate ?? new Date().toISOString().slice(0, 10);
   let atl = 0, ctl = 0;
   const all: TSBDay[] = [];
 
   const d = new Date(sorted[0].date);
-  const end = new Date(today);
+  const end = new Date(endStr);
   while (d <= end) {
     const ds = d.toISOString().slice(0, 10);
     const t = trimpMap.get(ds) ?? 0;

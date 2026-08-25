@@ -4,6 +4,7 @@ import {
   saveTrainingHistory, fetchTrainingHistory,
   saveUserSettings, fetchUserSettings,
   deleteActivity as deleteActivityStorage,
+  updateActivityMeta as updateActivityMetaStorage,
   type ActivityIndexEntry, type DriveTrainingEntry, type DriveUserSettings,
 } from '../utils/driveStorage';
 
@@ -36,6 +37,7 @@ export interface DriveHandle {
   save(rawData: string | ArrayBuffer, fileName: string, meta: Omit<ActivityIndexEntry, 'fileId'>): Promise<void>;
   loadFile(fileId: string, fileName: string): Promise<ArrayBuffer | string>;
   deleteActivity(fileId: string | null, entry: Pick<ActivityIndexEntry, 'date' | 'name'>): Promise<void>;
+  updateActivityMeta(entry: Pick<ActivityIndexEntry, 'date' | 'name'>, updates: Partial<ActivityIndexEntry>): Promise<void>;
   refresh(): Promise<void>;
   saveHistory(history: DriveTrainingEntry[]): Promise<void>;
   loadHistory(): Promise<DriveTrainingEntry[]>;
@@ -170,5 +172,14 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, wasAuthorized, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
+  const updateActivityMeta = useCallback(async (
+    entry: Pick<ActivityIndexEntry, 'date' | 'name'>,
+    updates: Partial<ActivityIndexEntry>,
+  ) => {
+    if (!token) return;
+    await updateActivityMetaStorage(token, entry, updates);
+    await refresh();
+  }, [token, refresh]);
+
+  return { status, wasAuthorized, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
 }

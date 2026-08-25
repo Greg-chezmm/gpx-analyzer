@@ -26,6 +26,8 @@ export interface ActivityIndexEntry {
   // Autres
   driftPct?: number;
   avgCadence?: number;
+  // Objectif course — calibration TSB personnalisée (voir raceGoal.ts)
+  isRace?: boolean;
   // Météo au moment de l'activité (Open-Meteo, modèles Météo-France)
   weatherTemp?: number;
   weatherWindSpeed?: number;
@@ -170,6 +172,20 @@ export async function fetchActivityList(token: string): Promise<ActivityIndexEnt
   const folderId = await getOrCreateFolder(token);
   const { data } = await loadIndex(token, folderId);
   return data.activities;
+}
+
+/** Met à jour uniquement les métadonnées d'une entrée de l'index (ex. drapeau "course") sans toucher au fichier. */
+export async function updateActivityMeta(
+  token: string,
+  entry: Pick<ActivityIndexEntry, 'date' | 'name'>,
+  updates: Partial<ActivityIndexEntry>,
+): Promise<void> {
+  const folderId = await getOrCreateFolder(token);
+  const { id: indexId, data: index } = await loadIndex(token, folderId);
+  const idx = index.activities.findIndex(a => a.date === entry.date && a.name === entry.name);
+  if (idx < 0) return;
+  index.activities[idx] = { ...index.activities[idx], ...updates };
+  await saveIndex(token, folderId, indexId, index);
 }
 
 /** Télécharge le contenu brut d'un fichier d'activité depuis Drive (ArrayBuffer pour FIT, string pour GPX). */
