@@ -198,7 +198,7 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
         {picker.stage === "idle" && (
           <button type="button" className="btn btn-outline" onClick={picker.begin} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>
             <Plus size={14} />
-            <span>Définir un segment sur la carte</span>
+            <span>Définir un segment</span>
           </button>
         )}
         {(picking || picker.stage === "ready") && (
@@ -211,7 +211,9 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
 
       {picking && (
         <p style={{ fontSize: "0.85rem", color: "var(--accent-primary)", fontWeight: 600, marginTop: "0.75rem" }}>
-          {picker.stage === "pick-start" ? "Clique le point de départ du segment sur la carte." : "Clique maintenant le point d'arrivée."}
+          {picker.stage === "pick-start"
+            ? "Clique le point de départ du segment sur la carte ou le graphique."
+            : "Clique maintenant le point d'arrivée (carte ou graphique)."}
         </p>
       )}
 
@@ -236,7 +238,7 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
 
       {relevant.length === 0 && picker.stage === "idle" && (
         <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: "0.75rem" }}>
-          Aucun segment défini pour ce type d'activité. Clique « Définir un segment sur la carte », puis choisis le point de départ et le point d'arrivée directement sur le tracé.
+          Aucun segment défini pour ce type d'activité. Clique « Définir un segment », puis choisis le point de départ et le point d'arrivée directement sur la carte ou sur le graphique (altitude, allure...).
         </p>
       )}
 

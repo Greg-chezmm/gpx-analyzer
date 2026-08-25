@@ -797,6 +797,12 @@ function App() {
                     activityType={enrichedActivity!.activityType}
                     fcMax={fcMax}
                     fcRest={fcRest}
+                    onPointClick={segmentPicker.stage === 'pick-start' || segmentPicker.stage === 'pick-end' ? segmentPicker.handleClick : undefined}
+                    pickerHint={
+                      segmentPicker.stage === 'pick-start' ? "Clique le point de départ du segment"
+                      : segmentPicker.stage === 'pick-end' ? "Clique maintenant le point d'arrivée"
+                      : undefined
+                    }
                   />
                 </div>
               </ErrorBoundary>

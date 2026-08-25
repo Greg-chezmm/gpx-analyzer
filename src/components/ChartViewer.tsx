@@ -15,6 +15,10 @@ interface ChartViewerProps {
   activityType: 'running' | 'cycling' | 'unknown';
   fcMax?: number;
   fcRest?: number;
+  /** Reçoit l'index du point survolé lors d'un clic (hors glisser-zoomer) — utilisé par la sélection manuelle de segment (voir useSegmentPicker). */
+  onPointClick?: (index: number) => void;
+  /** Bandeau d'instruction affiché en haut du graphique pendant une sélection en cours. */
+  pickerHint?: string;
 }
 
 type ChartType = "elevation" | "speed" | "pace" | "hr" | "cad" | "dual" | "cardiac" | "power";
@@ -241,6 +245,8 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   activityType,
   fcMax = 195,
   fcRest = 52,
+  onPointClick,
+  pickerHint,
 }) => {
   const defaultTab = (type: typeof activityType): ChartType =>
     type === 'cycling' ? 'speed' : type === 'running' ? 'pace' : 'elevation';
@@ -477,6 +483,9 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
       const d1 = zStart + Math.max(0, pct1) * range;
       const d2 = zStart + Math.min(1, pct2) * range;
       if (d2 - d1 > 50) setZoomRange([d1, d2]);
+    } else if (onPointClick && hoveredPointIndex !== null) {
+      // Clic sans glissement significatif — sélection d'un point (pas un zoom)
+      onPointClick(hoveredPointIndex);
     }
     setSelBox(null);
   };
@@ -689,6 +698,17 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
             )}
           </div>
         </div>
+
+        {pickerHint && (
+          <div style={{
+            padding: "0.5rem 0.85rem", marginTop: "0.5rem",
+            background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.3)",
+            borderRadius: "var(--radius-sm)", fontSize: "0.82rem", fontWeight: 600,
+            color: "var(--accent-primary)",
+          }}>
+            {pickerHint}
+          </div>
+        )}
 
         {/* Zone SVG — axes, tracés, bulle de survol */}
         <div className="chart-container">
