@@ -13,6 +13,8 @@ import { useTheme } from "./hooks/useTheme";
 import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHistory";
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { useRaceGoal } from "./hooks/useRaceGoal";
+import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
+import { loadFirestoreSettings, saveFirestoreSettings } from "./utils/firestoreStorage";
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
 import { ChartViewer } from "./components/ChartViewer";
@@ -29,6 +31,7 @@ import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { AthletePage } from "./components/AthletePage";
+import { FirebaseSmokeTest } from "./components/FirebaseSmokeTest";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -73,6 +76,7 @@ function App() {
   const { history, addEntry, updateEntry, replaceHistory, clearHistory } = useTrainingHistory();
   const drive = useGoogleDrive();
   const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
+  const firebaseAuth = useFirebaseAuth();
 
   /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -99,6 +103,8 @@ function App() {
   const skipDriveHistorySync = useRef(false);
   const skipSettingsSync = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipFirestoreSettingsSync = useRef(false);
+  const firestoreSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Mémorise le nom personnalisé venant de Drive avant que l'activité soit chargée.
   const driveCustomNameRef = useRef<string>('');
 
@@ -231,6 +237,35 @@ function App() {
     }, 800);
     return () => { if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current); };
   }, [fcMax, fcRest, vma, ftp, weight, birthYear, sex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Étape B (migration Firebase) — charge les réglages + l'objectif course depuis Firestore à la connexion.
+  useEffect(() => {
+    if (firebaseAuth.status !== 'signed-in' || !firebaseAuth.user) return;
+    skipFirestoreSettingsSync.current = true;
+    loadFirestoreSettings(firebaseAuth.user.uid).then(remote => {
+      if (!remote) { skipFirestoreSettingsSync.current = false; return; }
+      if (remote.fcMax   > 0)   setFcMax(remote.fcMax);
+      if (remote.fcRest  > 0)   setFcRest(remote.fcRest);
+      if (remote.vma     > 0)   setVma(remote.vma);
+      if (remote.ftp     > 0)   setFtp(remote.ftp);
+      if (remote.weight  > 0)   setWeight(remote.weight);
+      if (remote.birthYear > 0) setBirthYear(remote.birthYear);
+      if (remote.sex === 'M' || remote.sex === 'F') setSex(remote.sex);
+      if (remote.raceGoal) setRaceGoal(remote.raceGoal);
+      setTimeout(() => { skipFirestoreSettingsSync.current = false; }, 200);
+    }).catch(() => { skipFirestoreSettingsSync.current = false; });
+  }, [firebaseAuth.status, firebaseAuth.user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Étape B (migration Firebase) — sauvegarde débouncée des réglages + objectif course vers Firestore.
+  useEffect(() => {
+    if (firebaseAuth.status !== 'signed-in' || !firebaseAuth.user || skipFirestoreSettingsSync.current) return;
+    const uid = firebaseAuth.user.uid;
+    if (firestoreSettingsSaveTimer.current) clearTimeout(firestoreSettingsSaveTimer.current);
+    firestoreSettingsSaveTimer.current = setTimeout(() => {
+      saveFirestoreSettings(uid, { fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal });
+    }, 800);
+    return () => { if (firestoreSettingsSaveTimer.current) clearTimeout(firestoreSettingsSaveTimer.current); };
+  }, [firebaseAuth.status, firebaseAuth.user, fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Géocodage inversé du premier point GPS pour proposer le lieu dans le renommage.
   useEffect(() => {
@@ -993,6 +1028,9 @@ function App() {
           Traitement 100% côté client pour garantir la confidentialité absolue de vos données physiques et de géolocalisation.
         </p>
       </footer>
+
+      {/* Étape A/B du plan Firebase — panneau de test temporaire, à retirer à l'étape C */}
+      <FirebaseSmokeTest auth={firebaseAuth} />
     </div>
   );
 }

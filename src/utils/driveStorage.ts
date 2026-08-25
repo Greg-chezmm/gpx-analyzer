@@ -1,9 +1,12 @@
 import type { WeatherSource } from './weather';
 import type { BestEffortsData } from './bestEfforts';
 
-/** Entrée de l'index d'activités stocké sur Google Drive (metadata + stats résumées). */
+/** Entrée de l'index d'activités — Google Drive (metadata + stats résumées) ou Firebase (cloud primaire). */
 export interface ActivityIndexEntry {
   fileId: string | null;
+  // Présents uniquement pour les entrées issues de Firebase (voir firestoreStorage.ts)
+  cloudId?: string;
+  storagePath?: string;
   name: string;
   date: string;           // "YYYY-MM-DD"
   distance: number;       // metres
