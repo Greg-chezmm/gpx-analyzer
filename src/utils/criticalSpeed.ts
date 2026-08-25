@@ -13,6 +13,8 @@ export interface CSPoint {
   label: string;
   meters: number;
   timeSeconds: number;
+  entryName: string;
+  entryDate: string;
 }
 
 export interface CriticalSpeedResult {
@@ -66,7 +68,10 @@ export function estimateCriticalSpeedFromHistory(
   history: { activityType: string; bestEfforts?: BestEffortsData; name: string; date: string }[],
 ): CriticalSpeedResult | null {
   const best = aggregateBestRunEfforts(history);
-  return estimateCriticalSpeed(best.map(b => ({ key: b.key, label: b.label, meters: b.meters, timeSeconds: b.timeSeconds })));
+  return estimateCriticalSpeed(best.map(b => ({
+    key: b.key, label: b.label, meters: b.meters, timeSeconds: b.timeSeconds,
+    entryName: b.entryName, entryDate: b.entryDate,
+  })));
 }
 
 /** Interprète l'ordre de grandeur de D' (réserve anaérobie) par rapport aux valeurs typiques chez les coureurs entraînés (~150-400 m). */

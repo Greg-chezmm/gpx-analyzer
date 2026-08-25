@@ -28,9 +28,7 @@ import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
-import { TrainingBalance } from "./components/TrainingBalance";
-import { RaceGoal } from "./components/RaceGoal";
-import { ProgressChart } from "./components/ProgressChart";
+import { AthletePage } from "./components/AthletePage";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -51,13 +49,10 @@ import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
-import { BestEffortsCurve } from "./components/BestEffortsCurve";
-import { CriticalSpeed } from "./components/CriticalSpeed";
-import { AthleteProfile } from "./components/AthleteProfile";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
-  Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge,
+  Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge, LayoutDashboard,
 } from "lucide-react";
 
 /** Options de découpage des splits disponibles dans le sélecteur. */
@@ -92,6 +87,7 @@ function App() {
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [showAthletePage, setShowAthletePage] = useState(false);
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -486,6 +482,20 @@ function App() {
         </div>
 
         <div className="header-actions">
+          <button type="button" className="btn btn-outline"
+            onClick={() => setShowAthletePage(v => !v)}
+            title="Bilan athlète — profil, records, vitesse critique, charge d'entraînement"
+            style={{
+              padding: "0.5rem 1rem", fontSize: "0.9rem",
+              ...(showAthletePage ? {
+                borderColor: "var(--accent-primary)", color: "var(--accent-primary)",
+                backgroundColor: "color-mix(in srgb, var(--accent-primary) 8%, transparent)",
+              } : {}),
+            }}
+          >
+            <LayoutDashboard size={15} />
+            <span className="btn-text">Bilan athlète</span>
+          </button>
           <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} />
           {enrichedActivity && (
             <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
@@ -527,7 +537,17 @@ function App() {
       {/* ── Contenu principal ── */}
       <ErrorBoundary key={enrichedActivity?.name ?? 'accueil'}>
       <main className="main-content">
-        {!activity ? (
+        {showAthletePage ? (
+          <AthletePage
+            drive={drive}
+            history={history}
+            tsb={tsbResult}
+            raceGoal={raceGoal}
+            setRaceGoal={setRaceGoal}
+            onClearHistory={clearHistory}
+            onClose={() => setShowAthletePage(false)}
+          />
+        ) : !activity ? (
           /* ── Écran d'accueil ── */
           <div className="welcome-section animate-slide-up">
             <h1 className="welcome-title">
@@ -811,24 +831,11 @@ function App() {
             {/* Dérive cardiaque / Efficiency Factor */}
             {drift && <CardiacDrift drift={drift} />}
 
-            {/* ── Charge d'entraînement ── */}
+            {/* ── Charge d'entraînement (séance en cours) ── */}
             {trimp && <TrainingLoad trimp={trimp} />}
 
-            {/* TSB / CTL / ATL sur l'historique multi-séances */}
-            <TrainingBalance tsb={tsbResult} history={history} onClear={clearHistory} />
-            <ProgressChart history={history} />
-
-            {/* Objectif course — projection TSB calibrée sur les anciennes courses (marquées 🏁 dans Drive) */}
-            <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} drive={drive} />
-
-            {/* Meilleurs efforts — records par distance (course) / courbe de puissance (vélo), agrégés depuis Drive */}
-            <BestEffortsCurve drive={drive} />
-
-            {/* Vitesse critique — modèle CS/D' ajusté sur les records personnels (complémentaire au VDOT) */}
-            <CriticalSpeed drive={drive} />
-
-            {/* Profil athlète — synthèse descriptive à partir des métriques déjà calculées */}
-            <AthleteProfile drive={drive} />
+            {/* Les analyses multi-séances (TSB/CTL/ATL, objectif course, meilleurs efforts, vitesse critique,
+                profil athlète, progression) vivent désormais dans la page "Bilan athlète" — voir AthletePage.tsx */}
 
             {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (
@@ -917,7 +924,7 @@ function App() {
       </main>
       </ErrorBoundary>
 
-      <FloatingNav visible={!!activity} />
+      <FloatingNav visible={!!activity && !showAthletePage} />
 
       {/* ── Modale résumé IA ── */}
       {showAISummary && enrichedActivity && (

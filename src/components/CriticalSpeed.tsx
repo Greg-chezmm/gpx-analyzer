@@ -89,11 +89,15 @@ export const CriticalSpeed: React.FC<Props> = ({ drive }) => {
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
         {result.points.map(p => (
-          <span key={p.key} style={{
-            fontSize: '0.75rem', color: 'var(--text-tertiary)', padding: '0.25rem 0.6rem',
-            background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-full)',
-          }}>
+          <span key={p.key}
+            title={`${p.entryName} · ${new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(p.entryDate))}`}
+            style={{
+              fontSize: '0.75rem', color: 'var(--text-tertiary)', padding: '0.25rem 0.6rem', cursor: 'help',
+              background: 'var(--bg-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-full)',
+            }}>
             {p.label} en {Math.floor(p.timeSeconds / 60)}:{Math.round(p.timeSeconds % 60).toString().padStart(2, '0')}
+            {' — '}{p.entryName.length > 22 ? p.entryName.slice(0, 20) + '…' : p.entryName}
+            {' · '}{new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short' }).format(new Date(p.entryDate))}
           </span>
         ))}
       </div>
