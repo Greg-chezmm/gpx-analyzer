@@ -65,7 +65,7 @@ function fmtPace(sPerKm: number): string {
 }
 
 interface TooltipState {
-  entries: TrainingEntry[];
+  index: number;
   svgX: number;
 }
 
@@ -298,31 +298,29 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             const isCycling = !hasMulti && d.entries[0]?.activityType === 'cycling';
             // Violet = course, vert = vélo
             const dotColor = isCycling ? '#34d399' : '#818cf8';
-            const isActive = tooltip?.svgX === cx;
+            const isActive = tooltip?.index === d.i;
             const r = isActive ? 5 : 4;
             return (
-              <g key={d.date}
-                style={{ cursor: 'pointer' }}
-                onMouseEnter={() => setTooltip({ entries: d.entries, svgX: cx })}
-              >
+              <g key={d.date}>
                 {/* Ligne verticale de guidage — s'intensifie au survol */}
                 <line
                   x1={cx} y1={MT}
                   x2={cx} y2={dotsY - 9}
                   stroke={dotColor} strokeWidth="0.75"
                   strokeDasharray="2,3" strokeOpacity={isActive ? 0.8 : 0.3}
+                  style={{ pointerEvents: "none" }}
                 />
                 {/* Deux cercles décalés si plusieurs séances le même jour */}
                 {hasMulti ? (
                   <>
                     <circle cx={cx - 2} cy={dotsY} r={r}
-                      fill="#818cf8" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+                      fill="#818cf8" stroke="var(--bg-secondary)" strokeWidth="1.5" style={{ pointerEvents: "none" }} />
                     <circle cx={cx + 2} cy={dotsY} r={r}
-                      fill="#34d399" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+                      fill="#34d399" stroke="var(--bg-secondary)" strokeWidth="1.5" style={{ pointerEvents: "none" }} />
                   </>
                 ) : (
                   <circle cx={cx} cy={dotsY} r={r}
-                    fill={dotColor} stroke="var(--bg-secondary)" strokeWidth="1.5" />
+                    fill={dotColor} stroke="var(--bg-secondary)" strokeWidth="1.5" style={{ pointerEvents: "none" }} />
                 )}
               </g>
             );
@@ -332,14 +330,46 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           {xLabels.map(({ i, label }) => (
             <text key={label + i} x={toX(i)} y={VH - 4} textAnchor="middle" fontSize="9" fill="var(--text-tertiary)">{label}</text>
           ))}
+
+          {/* Curseur de survol — ligne + points sur les 3 courbes, actif sur toute la largeur du graphique */}
+          {tooltip && (() => {
+            const hd = data[tooltip.index];
+            if (!hd) return null;
+            return (
+              <g style={{ pointerEvents: "none" }}>
+                <line x1={tooltip.svgX} y1={MT} x2={tooltip.svgX} y2={MT + chartHeight}
+                  stroke="var(--text-tertiary)" strokeWidth="0.75" strokeDasharray="2,2" opacity={0.5} />
+                <circle cx={tooltip.svgX} cy={toY(hd.ctl)} r={3} fill="#60a5fa" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+                <circle cx={tooltip.svgX} cy={toY(hd.atl)} r={3} fill="#f97316" stroke="var(--bg-secondary)" strokeWidth="1.5" />
+                <circle cx={tooltip.svgX} cy={toY(hd.tsb)} r={3} fill={tsbColor} stroke="var(--bg-secondary)" strokeWidth="1.5" />
+              </g>
+            );
+          })()}
+
+          {/* Zone interactive transparente : capte le survol sur toute la largeur du graphique */}
+          <rect
+            x={ML} y={MT} width={chartWidth} height={VH - MT - MB}
+            fill="transparent"
+            onMouseMove={(e) => {
+              const svg = e.currentTarget.ownerSVGElement;
+              if (!svg) return;
+              const rect = svg.getBoundingClientRect();
+              const scale = VW / rect.width;
+              const localX = (e.clientX - rect.left) * scale;
+              const ratio = n > 1 ? (localX - ML) / chartWidth : 0;
+              const index = Math.min(n - 1, Math.max(0, Math.round(ratio * (n - 1))));
+              setTooltip({ index, svgX: toX(index) });
+            }}
+          />
         </svg>
       )}
 
-      {/* Détail inline des séances — s'affiche sous le graphique au survol d'un point */}
-      {tooltip && tooltip.entries.length > 0 && (() => {
-        const entries = tooltip.entries;
+      {/* Détail inline — s'affiche sous le graphique au survol : valeurs CTL/ATL/TSB + séances du jour le cas échéant */}
+      {tooltip && data[tooltip.index] && (() => {
+        const hd = data[tooltip.index];
+        const entries = history.filter(e => e.date === hd.date);
         const isMulti = entries.length > 1;
-        const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entries[0].date));
+        const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(hd.date));
         return (
           <div style={{
             marginTop: '0.5rem',
@@ -350,8 +380,16 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
             fontSize: '0.72rem',
             lineHeight: 1.5,
           }}>
-            <div style={{ fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-              {dateStr}{isMulti ? ` · ${entries.length} séances` : ''}
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: '0.75rem', marginBottom: entries.length > 0 ? '4px' : 0 }}>
+              <span style={{ fontWeight: 700, color: 'var(--text-secondary)' }}>
+                {dateStr}{isMulti ? ` · ${entries.length} séances` : ''}
+              </span>
+              {/* Position fixe (ancrée à droite) : n'est jamais décalée par la longueur de la date/du nombre de séances */}
+              <div style={{ display: 'flex', gap: '0.6rem', flexShrink: 0 }}>
+                <span style={{ color: '#60a5fa', fontWeight: 600, minWidth: '3.6em', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>CTL {hd.ctl.toFixed(1)}</span>
+                <span style={{ color: '#f97316', fontWeight: 600, minWidth: '3.6em', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>ATL {hd.atl.toFixed(1)}</span>
+                <span style={{ color: tsbLabel(hd.tsb).color, fontWeight: 600, minWidth: '3.9em', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>TSB {hd.tsb > 0 ? `+${hd.tsb.toFixed(1)}` : hd.tsb.toFixed(1)}</span>
+              </div>
             </div>
             {entries.map((e, idx) => {
               const typeLabel = e.activityType === 'cycling' ? '🚴 Vélo' : e.activityType === 'running' ? '🏃 Course' : '';

@@ -81,15 +81,16 @@ export interface TSBResult {
 
 /**
  * Calcule CTL (forme), ATL (fatigue) et TSB (fraîcheur) par EMA (moyenne mobile exponentielle) sur l'historique TRIMP.
- * Constantes Banister : ATL τ = 7 jours (LA = 2/8), CTL τ = 42 jours (LF = 2/43).
- * TSB = CTL − ATL (positif = frais, négatif = fatigué).
+ * Constantes Banister/Coggan (formule PMC standard TrainingPeaks) : λ = 1/τ, avec τ=7j (ATL) et τ=42j (CTL).
+ * TSB(jour) = CTL − ATL calculés à partir de la VEILLE (fraîcheur avant la séance du jour), pas du jour même —
+ * sinon le TSB du jour chuterait artificiellement dès qu'on charge la séance qui vient d'être faite.
  */
 export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
   if (history.length === 0) return { atl: 0, ctl: 0, tsb: 0, chartData: [] };
 
-  // Constantes de lissage EMA : λ = 2/(τ+1) avec τ=7j (ATL) et τ=42j (CTL)
-  const LA = 2 / (7  + 1);  // ATL — 7-day decay (fatigue à court terme)
-  const LF = 2 / (42 + 1);  // CTL — 42-day decay (forme chronique)
+  // Constantes de lissage EMA : λ = 1/τ avec τ=7j (ATL) et τ=42j (CTL)
+  const LA = 1 / 7;   // ATL — 7-day decay (fatigue à court terme)
+  const LF = 1 / 42;  // CTL — 42-day decay (forme chronique)
 
   const sorted = [...history].sort((a, b) => a.date.localeCompare(b.date));
   const trimpMap = new Map<string, number>();
@@ -104,9 +105,11 @@ export function calcTSB(history: { date: string; trimp: number }[]): TSBResult {
   while (d <= end) {
     const ds = d.toISOString().slice(0, 10);
     const t = trimpMap.get(ds) ?? 0;
+    // TSB du jour = forme/fatigue accumulées jusqu'à la veille, avant d'intégrer la séance du jour
+    const tsb = ctl - atl;
     atl = t * LA + (1 - LA) * atl;
     ctl = t * LF + (1 - LF) * ctl;
-    all.push({ date: ds, trimp: t, atl: Math.round(atl * 10) / 10, ctl: Math.round(ctl * 10) / 10, tsb: Math.round((ctl - atl) * 10) / 10 });
+    all.push({ date: ds, trimp: t, atl: Math.round(atl * 10) / 10, ctl: Math.round(ctl * 10) / 10, tsb: Math.round(tsb * 10) / 10 });
     d.setDate(d.getDate() + 1);
   }
 
