@@ -1,8 +1,10 @@
 import { useState, type MouseEvent } from 'react';
-import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search } from 'lucide-react';
+import { Cloud, CloudOff, CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap } from 'lucide-react';
 import type { DriveHandle } from '../hooks/useGoogleDrive';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
+import { parseGPX } from '../utils/gpxCore';
+import { computeBestEfforts } from '../utils/bestEfforts';
 
 /* ── Bouton header : connexion / accès à l'historique ──────────────────── */
 
@@ -170,6 +172,52 @@ function RaceFlagButton({ entry, drive }: { entry: ActivityIndexEntry; drive: Dr
   );
 }
 
+/**
+ * Bouton de recalcul des meilleurs efforts pour une activité déjà sauvegardée (ajoutée avant l'introduction
+ * de cette fonctionnalité, ou à rafraîchir après une amélioration de l'algorithme). Télécharge et reparse le
+ * fichier — plus coûteux qu'à la sauvegarde initiale (déjà en mémoire), donc laissé à l'initiative de Greg
+ * activité par activité plutôt qu'en masse.
+ */
+function RecomputeBestEffortsButton({ entry, drive }: { entry: ActivityIndexEntry; drive: DriveHandle }) {
+  const [pending, setPending] = useState(false);
+  const done = !!entry.bestEfforts;
+
+  const recompute = async (e: MouseEvent) => {
+    e.stopPropagation();
+    if (!entry.fileId || pending) return;
+    setPending(true);
+    try {
+      const data = await drive.loadFile(entry.fileId, entry.fileName);
+      const isFit = entry.fileName.toLowerCase().endsWith('.fit');
+      const parsed = isFit
+        ? await import('../utils/fitParser').then(m => m.parseFIT(data as ArrayBuffer, entry.name))
+        : parseGPX(data as string, entry.name);
+      const bestEfforts = computeBestEfforts(parsed.points, entry.activityType) ?? undefined;
+      await drive.updateActivityMeta({ date: entry.date, name: entry.name }, { bestEfforts });
+    } catch {
+      alert("Impossible de calculer les meilleurs efforts pour cette activité.");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <button type="button" onClick={recompute} disabled={pending || !entry.fileId}
+      title={done ? 'Recalculer les meilleurs efforts' : 'Calculer les meilleurs efforts (télécharge et reparse le fichier)'}
+      style={{
+        padding: '0.35rem', background: 'transparent', border: 'none',
+        cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
+        display: 'flex', alignItems: 'center', opacity: pending ? 0.5 : 1,
+        color: done ? '#fbbf24' : 'var(--text-tertiary)',
+      }}
+      onMouseEnter={e => { if (!done) (e.currentTarget as HTMLElement).style.color = '#fbbf24'; }}
+      onMouseLeave={e => { if (!done) (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+    >
+      {pending ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Zap size={14} fill={done ? '#fbbf24' : 'none'} />}
+    </button>
+  );
+}
+
 /* ── Liste d'activités sur l'écran d'accueil ────────────────────────────── */
 
 interface DriveActivityListProps {
@@ -289,6 +337,7 @@ export function DriveActivityList({ drive, onLoad }: DriveActivityListProps) {
               {/* Zone de suppression avec confirmation en deux clics */}
               <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                 <RaceFlagButton entry={entry} drive={drive} />
+                <RecomputeBestEffortsButton entry={entry} drive={drive} />
                 {isConfirming ? (
                   <>
                     <button type="button"
@@ -551,6 +600,7 @@ function DriveHistoryPanel({ drive, loadingId, onLoad, onClose }: DriveHistoryPa
                     {/* Zone de suppression avec confirmation en deux clics */}
                     <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.25rem', paddingRight: '0.5rem' }}>
                       <RaceFlagButton entry={entry} drive={drive} />
+                      <RecomputeBestEffortsButton entry={entry} drive={drive} />
                       {isConfirming ? (
                         <>
                           <button type="button"
