@@ -52,6 +52,8 @@ import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
 import { BestEffortsCurve } from "./components/BestEffortsCurve";
+import { CriticalSpeed } from "./components/CriticalSpeed";
+import { AthleteProfile } from "./components/AthleteProfile";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -821,6 +823,12 @@ function App() {
 
             {/* Meilleurs efforts — records par distance (course) / courbe de puissance (vélo), agrégés depuis Drive */}
             <BestEffortsCurve drive={drive} />
+
+            {/* Vitesse critique — modèle CS/D' ajusté sur les records personnels (complémentaire au VDOT) */}
+            <CriticalSpeed drive={drive} />
+
+            {/* Profil athlète — synthèse descriptive à partir des métriques déjà calculées */}
+            <AthleteProfile drive={drive} />
 
             {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (

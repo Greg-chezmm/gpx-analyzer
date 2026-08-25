@@ -26,7 +26,47 @@ export interface BestEffortsData {
   values: Record<string, number>; // running: secondes ; vélo: watts ou km/h
 }
 
-/** Meilleur temps (s) pour couvrir `targetMeters` en continu — two-pointer O(n) sur distFromStart (monotone). */
+/** Meilleur temps course à pied pour une distance standard, agrégé sur plusieurs activités. */
+export interface AggregatedRunBest {
+  key: string;
+  label: string;
+  meters: number;
+  timeSeconds: number;
+  entryName: string;
+  entryDate: string;
+}
+
+/**
+ * Agrège, pour chaque distance standard, le meilleur temps (record personnel) parmi les activités
+ * course à pied de l'historique — n'utilise que `bestEfforts.values`, déjà calculé à la sauvegarde
+ * (voir computeBestEfforts), donc pas de retéléchargement/reparsing.
+ */
+export function aggregateBestRunEfforts(
+  history: { activityType: string; bestEfforts?: BestEffortsData; name: string; date: string }[],
+): AggregatedRunBest[] {
+  return RUN_DISTANCES.map(({ key, label, meters }) => {
+    let best: AggregatedRunBest | null = null;
+    for (const e of history) {
+      if (e.activityType === 'cycling') continue;
+      const t = e.bestEfforts?.values[key];
+      if (t === undefined) continue;
+      if (!best || t < best.timeSeconds) best = { key, label, meters, timeSeconds: t, entryName: e.name, entryDate: e.date };
+    }
+    return best;
+  }).filter((r): r is AggregatedRunBest => r !== null);
+}
+
+// Dénivelé net maximum toléré sur la distance cible pour qu'une fenêtre soit considérée "à plat" —
+// au-delà, le temps ne reflète plus la vitesse critique réelle (descente = trop rapide, montée = trop lent).
+// Rejeter plutôt que corriger (GAP) : le modèle GAP est documenté peu fiable en descente dans ce projet
+// (voir estimation VO2max), on évite de réintroduire le même biais ici.
+const MAX_GRADE_PCT = 3;
+
+/**
+ * Meilleur temps (s) pour couvrir `targetMeters` en continu sur un segment à peu près plat —
+ * two-pointer O(n) sur distFromStart (monotone), fenêtres avec dénivelé net > MAX_GRADE_PCT rejetées
+ * (retourne null plutôt qu'une estimation faussée par le relief, ex. descente de trail).
+ */
 function bestTimeForDistance(points: GPXTrackPoint[], targetMeters: number): number | null {
   const pts = points.filter(p => p.time !== null);
   if (pts.length < 2) return null;
@@ -39,17 +79,25 @@ function bestTimeForDistance(points: GPXTrackPoint[], targetMeters: number): num
     while (j < pts.length - 1 && pts[j].distFromStart - pts[i].distFromStart < targetMeters) j++;
     if (pts[j].distFromStart - pts[i].distFromStart < targetMeters) break; // distance restante insuffisante à partir d'ici
     let crossTimeMs: number;
+    let crossEle: number | null;
     if (j === i) {
       crossTimeMs = pts[j].time!.getTime();
+      crossEle = pts[j].ele;
     } else {
       const prev = pts[j - 1], cur = pts[j];
       const distPrev = prev.distFromStart - pts[i].distFromStart;
       const distCur = cur.distFromStart - pts[i].distFromStart;
       const frac = distCur > distPrev ? (targetMeters - distPrev) / (distCur - distPrev) : 0;
       crossTimeMs = prev.time!.getTime() + frac * (cur.time!.getTime() - prev.time!.getTime());
+      crossEle = (prev.ele !== null && cur.ele !== null) ? prev.ele + frac * (cur.ele - prev.ele) : null;
     }
     const elapsed = (crossTimeMs - pts[i].time!.getTime()) / 1000;
-    if (elapsed > 0 && elapsed < best) best = elapsed;
+    if (elapsed <= 0) continue;
+    // Altitude inconnue ou dénivelé net trop marqué sur cette fenêtre → non représentative du plat, on l'ignore
+    if (pts[i].ele === null || crossEle === null) continue;
+    const gradePct = ((crossEle - pts[i].ele!) / targetMeters) * 100;
+    if (Math.abs(gradePct) > MAX_GRADE_PCT) continue;
+    if (elapsed < best) best = elapsed;
   }
   return best === Infinity ? null : best;
 }
