@@ -43,7 +43,22 @@ export function useStoredSegmentScan(
     setSkippedCount(0);
     setProgress(null);
 
-    const scored = history.map(entry => ({
+    const currentDate = activity?.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
+
+    // Exclut l'activité courante de l'historique comparé — sinon, si elle y est déjà sauvegardée,
+    // elle est comptée deux fois (une fois en mémoire ci-dessous, une fois via les candidats).
+    // Le nom seul n'est pas fiable (renommage, doublon de migration...), on compare plutôt
+    // distance et durée totales (±3%).
+    const closeEnough = (a: number, b: number) => a > 0 && Math.abs(a - b) / a < 0.03;
+    const pool = activity
+      ? history.filter(e => !(
+          e.date === currentDate &&
+          closeEnough(activity.totalDistance, e.distance) &&
+          closeEnough(activity.movingTime, e.duration)
+        ))
+      : history;
+
+    const scored = pool.map(entry => ({
       entry,
       score: entry.fingerprint ? fingerprintOverlap(segment.fingerprint, entry.fingerprint) : -1,
     }));
@@ -55,7 +70,6 @@ export function useStoredSegmentScan(
     const found: SegmentAttempt[] = [];
 
     if (activity) {
-      const currentDate = activity.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
       const m = matchStoredSegment(segment.points, segment.distance, { points: activity.points, date: currentDate }, true);
       if (m) found.push(m);
     }
