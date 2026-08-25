@@ -19,6 +19,10 @@ interface ActivityMapProps {
   hoveredPointIndex: number | null;
   onHoverPointChange?: (index: number | null) => void;
   hasHeartRate?: boolean;
+  /** Reçoit l'index du point le plus proche d'un clic sur le tracé — utilisé par la sélection manuelle de segment (voir useSegmentPicker). */
+  onPointClick?: (index: number) => void;
+  /** Bandeau d'instruction affiché en haut de la carte pendant une sélection en cours. */
+  pickerHint?: string;
 }
 
 /** Interpolation linéaire scalaire entre a et b. */
@@ -68,6 +72,8 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
   hoveredPointIndex,
   onHoverPointChange,
   hasHeartRate = false,
+  onPointClick,
+  pickerHint,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef          = useRef<L.Map | null>(null);
@@ -75,11 +81,13 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
   const colorSegmentsRef = useRef<L.Polyline[]>([]);
   const hoverMarkerRef  = useRef<L.Marker | null>(null);
   const kmMarkersRef    = useRef<L.Marker[]>([]);
-  // Ref pour éviter de recapturer onHoverPointChange dans les listeners Leaflet
+  // Ref pour éviter de recapturer onHoverPointChange/onPointClick dans les listeners Leaflet
   const onHoverRef = useRef(onHoverPointChange);
+  const onClickRef = useRef(onPointClick);
   const [colorMode, setColorMode] = useState<ColorMode>('none');
 
   useEffect(() => { onHoverRef.current = onHoverPointChange; }, [onHoverPointChange]);
+  useEffect(() => { onClickRef.current = onPointClick; }, [onPointClick]);
 
   // Initialisation de la carte — s'exécute à chaque chargement d'activité
   useEffect(() => {
@@ -173,6 +181,21 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       onHoverRef.current(Math.hypot(mousePx.x - closestPx.x, mousePx.y - closestPx.y) < 30 ? closestIdx : null);
     });
     map.on('mouseout', () => { if (onHoverRef.current) onHoverRef.current(null); });
+
+    // Sélection manuelle de segment (voir useSegmentPicker) — même logique de point le plus proche que le survol.
+    map.on('click', (e: L.LeafletMouseEvent) => {
+      if (!onClickRef.current) return;
+      const ml = e.latlng;
+      let minDist = Infinity;
+      let closestIdx = 0;
+      for (let i = 0; i < points.length; i += searchStep) {
+        const d = ml.distanceTo(L.latLng(points[i].lat, points[i].lon));
+        if (d < minDist) { minDist = d; closestIdx = i; }
+      }
+      const mousePx   = map.latLngToContainerPoint(ml);
+      const closestPx = map.latLngToContainerPoint(L.latLng(points[closestIdx].lat, points[closestIdx].lon));
+      if (Math.hypot(mousePx.x - closestPx.x, mousePx.y - closestPx.y) < 30) onClickRef.current(closestIdx);
+    });
 
     return () => {
       map.remove();
@@ -349,6 +372,17 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
               <span style={{ fontWeight: 600 }}>{colorMode === 'speed' ? 'Rapide' : 'FC élevée'}</span>
             </>
           )}
+        </div>
+      )}
+
+      {pickerHint && (
+        <div style={{
+          padding: "0.5rem 0.85rem", marginBottom: "0.5rem",
+          background: "rgba(37,99,235,0.1)", border: "1px solid rgba(37,99,235,0.3)",
+          borderRadius: "var(--radius-sm)", fontSize: "0.82rem", fontWeight: 600,
+          color: "var(--accent-primary)",
+        }}>
+          {pickerHint}
         </div>
       )}
 

@@ -95,3 +95,42 @@ export async function deleteCloudActivityDoc(uid: string, cloudId: string): Prom
   const [db, { doc, deleteDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
   await deleteDoc(doc(db, 'users', uid, 'activities', cloudId));
 }
+
+// ── Segments définis manuellement ───────────────────────────────────────────────────
+// Géométrie de référence choisie une fois par l'utilisateur (deux clics sur la carte), comparée
+// ensuite à l'historique à la demande — voir utils/segments.ts (matchStoredSegment) et
+// hooks/useStoredSegments.ts / useStoredSegmentScan.ts. Différenciés par type d'activité :
+// un segment défini sur une sortie vélo n'est jamais comparé aux activités de course, et inversement.
+
+/** Segment de tracé défini manuellement par l'utilisateur, persisté sur Firestore (`users/{uid}/segments`). */
+export interface StoredSegment {
+  id: string;
+  name: string;
+  activityType: 'running' | 'cycling';
+  points: { lat: number; lon: number; distFromStart: number }[];
+  fingerprint: string[];
+  distance: number; // m
+  elevGain: number;  // m
+  createdDate: string; // "YYYY-MM-DD" — date de l'activité sur laquelle il a été défini
+}
+
+/** Récupère tous les segments manuels d'un utilisateur. */
+export async function fetchStoredSegments(uid: string): Promise<StoredSegment[]> {
+  const [db, { collection, getDocs }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
+  const snap = await getDocs(collection(db, 'users', uid, 'segments'));
+  return snap.docs.map(d => ({ ...(d.data() as Omit<StoredSegment, 'id'>), id: d.id }));
+}
+
+/** Crée un nouveau segment manuel ; retourne son id. */
+export async function createStoredSegment(uid: string, segment: Omit<StoredSegment, 'id'>): Promise<string> {
+  const [db, { collection, doc, setDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
+  const ref = doc(collection(db, 'users', uid, 'segments'));
+  await setDoc(ref, segment);
+  return ref.id;
+}
+
+/** Supprime un segment manuel. */
+export async function deleteStoredSegment(uid: string, id: string): Promise<void> {
+  const [db, { doc, deleteDoc }] = await Promise.all([getFirestoreDb(), import('firebase/firestore')]);
+  await deleteDoc(doc(db, 'users', uid, 'segments', id));
+}

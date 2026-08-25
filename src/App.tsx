@@ -27,6 +27,7 @@ const IntervalAnalysis = lazy(() => import("./components/IntervalAnalysis").then
 const ClimbAnalysis   = lazy(() => import("./components/ClimbAnalysis").then(m => ({ default: m.ClimbAnalysis })));
 const HillRepeats     = lazy(() => import("./components/HillRepeats").then(m => ({ default: m.HillRepeats })));
 const RecurringSegments = lazy(() => import("./components/RecurringSegments").then(m => ({ default: m.RecurringSegments })));
+const StoredSegments = lazy(() => import("./components/StoredSegments").then(m => ({ default: m.StoredSegments })));
 import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
@@ -55,6 +56,7 @@ import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
 import { computeFingerprint } from "./utils/segments";
+import { useSegmentPicker } from "./hooks/useSegmentPicker";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
@@ -80,6 +82,7 @@ function App() {
   const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
   const firebaseAuth = useFirebaseAuth();
   const cloud = useFirebaseCloud(firebaseAuth, drive.token);
+  const segmentPicker = useSegmentPicker();
 
   /* ── État local — activité courante et UI ── */
   const [activity, setActivity] = useState<GPXActivity | null>(null);
@@ -326,6 +329,7 @@ function App() {
         setSavedToDrive(false);
         setSavedToCloud(false);
         setOverrideActivityType(null);
+        segmentPicker.reset();
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
       }
@@ -348,6 +352,7 @@ function App() {
     setMergeNotice(null);
     setOverrideActivityType(null);
     setCustomActivityName('');
+    segmentPicker.reset();
   };
 
   /** Fusionne un second fichier GPX/FIT avec l'activité courante. */
@@ -770,6 +775,12 @@ function App() {
                       hoveredPointIndex={hoveredPointIndex}
                       onHoverPointChange={setHoveredPointIndex}
                       hasHeartRate={hasHeartRate}
+                      onPointClick={segmentPicker.stage === 'pick-start' || segmentPicker.stage === 'pick-end' ? segmentPicker.handleClick : undefined}
+                      pickerHint={
+                        segmentPicker.stage === 'pick-start' ? "Clique le point de départ du segment"
+                        : segmentPicker.stage === 'pick-end' ? "Clique maintenant le point d'arrivée"
+                        : undefined
+                      }
                     />
                   </div>
                 </Suspense>
@@ -895,11 +906,29 @@ function App() {
               </Suspense>
             )}
 
-            {/* Segments récurrents — nécessite le cloud (Firebase) connecté avec au moins une autre activité sauvegardée */}
-            {cloud.status === 'connected' && cloud.history.length > 0 && (
-              <Suspense fallback={null}>
-                <RecurringSegments activity={enrichedActivity!} history={cloud.history} loadFile={cloud.loadFile} />
-              </Suspense>
+            {/* Segments récurrents (auto + manuels) — nécessite le cloud (Firebase) connecté, comparaison limitée
+                aux activités du même type (course vs vélo) pour éviter les faux rapprochements. */}
+            {cloud.status === 'connected' && (
+              <>
+                {cloud.history.filter(e => e.activityType === enrichedActivity!.activityType).length > 0 && (
+                  <Suspense fallback={null}>
+                    <RecurringSegments
+                      activity={enrichedActivity!}
+                      history={cloud.history.filter(e => e.activityType === enrichedActivity!.activityType)}
+                      loadFile={cloud.loadFile}
+                    />
+                  </Suspense>
+                )}
+                <Suspense fallback={null}>
+                  <StoredSegments
+                    activity={enrichedActivity!}
+                    history={cloud.history.filter(e => e.activityType === enrichedActivity!.activityType)}
+                    loadFile={cloud.loadFile}
+                    uid={firebaseAuth.user?.uid ?? null}
+                    picker={segmentPicker}
+                  />
+                </Suspense>
+              </>
             )}
 
             {/* ── Splits ── */}

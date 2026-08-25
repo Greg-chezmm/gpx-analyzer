@@ -6,7 +6,7 @@ import {
   type RecurringSegment, type SegmentSource,
 } from '../utils/segments';
 
-const MAX_CANDIDATES = 8;
+const MAX_CANDIDATES = 20;
 const MIN_FINGERPRINT_OVERLAP = 0.15;
 
 export type SegmentScanStatus = 'idle' | 'scanning' | 'done';
@@ -49,8 +49,16 @@ export function useRecurringSegments(
     const currentDate = activity.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
     const currentFingerprint = computeFingerprint(activity.points);
 
-    // Exclut l'activité courante elle-même si déjà présente dans l'historique (même date+nom).
-    const pool = history.filter(e => !(e.date === currentDate && e.name === activity.name));
+    // Exclut l'activité courante elle-même si déjà présente dans l'historique. Le nom seul n'est
+    // pas fiable (renommage, entrée dupliquée lors d'une migration Drive→Firestore...) — on
+    // compare plutôt distance et durée totales (±3%), bien plus robuste pour repérer "c'est la
+    // même sortie physique" qu'un texte libre.
+    const closeEnough = (a: number, b: number) => a > 0 && Math.abs(a - b) / a < 0.03;
+    const pool = history.filter(e => !(
+      e.date === currentDate &&
+      closeEnough(activity.totalDistance, e.distance) &&
+      closeEnough(activity.movingTime, e.duration)
+    ));
 
     const scored = pool.map(entry => ({
       entry,

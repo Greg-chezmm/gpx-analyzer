@@ -1,5 +1,8 @@
 import { calculateDistance, parseGPX, type GPXTrackPoint } from './gpxCore';
 
+/** Forme géométrique minimale requise pour le matching — un GPXTrackPoint la satisfait déjà (structural typing). */
+export interface GeoPoint { lat: number; lon: number; distFromStart: number; }
+
 // ─── Empreinte géographique — pré-filtrage bon marché entre activités ──────────
 //
 // Un geohash (précision 7 ≈ cellule de 150m x 150m) est calculé pour des points
@@ -37,7 +40,7 @@ export function geohashEncode(lat: number, lon: number, precision = FINGERPRINT_
 }
 
 /** Calcule l'empreinte géographique d'un tracé : ensemble dédupliqué de cellules geohash traversées. */
-export function computeFingerprint(points: GPXTrackPoint[]): string[] {
+export function computeFingerprint(points: GeoPoint[]): string[] {
   const cells = new Set<string>();
   let lastDist = -Infinity;
   for (const p of points) {
@@ -69,7 +72,7 @@ const GRID_CELL_DEG = 0.005; // ~550m — bucket de pré-filtrage spatial pour l
 interface ResampledPoint { lat: number; lon: number; dist: number; origIndex: number; }
 
 /** Rééchantillonne un tracé à distance cumulée fixe, en conservant l'index d'origine pour retrouver les bornes exactes ensuite. */
-function resampleByDistance(points: GPXTrackPoint[], stepMeters: number): ResampledPoint[] {
+function resampleByDistance(points: GeoPoint[], stepMeters: number): ResampledPoint[] {
   const out: ResampledPoint[] = [];
   let nextDist = 0;
   for (let i = 0; i < points.length; i++) {
@@ -139,7 +142,7 @@ interface MatchResult { aStart: number; aEnd: number; bStart: number; bEnd: numb
  * sur le même chemin), puis extraction de la plus longue plage globalement croissante côté B
  * (tolère de petits trous GPS jusqu'à MAX_GAP_POINTS points consécutifs non appariés).
  */
-function findLongestMatch(pointsA: GPXTrackPoint[], pointsB: GPXTrackPoint[]): MatchResult | null {
+function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM = MIN_SEGMENT_DISTANCE_M): MatchResult | null {
   const rsA = resampleByDistance(pointsA, RESAMPLE_STEP_M);
   const rsB = resampleByDistance(pointsB, RESAMPLE_STEP_M);
   if (rsA.length < 5 || rsB.length < 5) return null;
@@ -188,7 +191,7 @@ function findLongestMatch(pointsA: GPXTrackPoint[], pointsB: GPXTrackPoint[]): M
   }
   flush();
 
-  const valid = runs.filter(r => r.dist >= MIN_SEGMENT_DISTANCE_M);
+  const valid = runs.filter(r => r.dist >= minDistanceM);
   if (valid.length === 0) return null;
   const best = valid.reduce((a, b) => (b.dist > a.dist ? b : a));
 
@@ -276,10 +279,15 @@ export function detectRecurringSegments(current: SegmentSource, others: SegmentS
   if (matches.length === 0) return [];
 
   // Regroupe les correspondances dont la plage côté activité courante se chevauche fortement
-  // (même tronçon détecté via plusieurs candidates) en un seul RecurringSegment.
+  // (même tronçon détecté via plusieurs candidates) en un seul RecurringSegment. La plage de
+  // référence d'un groupe est FIXÉE au premier match qui l'a créé (le plus long, cf. tri
+  // ci-dessous) et n'est plus jamais élargie ensuite — sinon un chaînage progressif (A~B, B~C,
+  // C~D...) peut regrouper des tronçons de longueurs très différentes qui ne se recouvrent pas
+  // vraiment entre eux (bug observé : un passage de 700m agrégé avec des passages de 18km).
+  const sortedMatches = [...matches].sort((a, b) => (b.match.aEnd - b.match.aStart) - (a.match.aEnd - a.match.aStart));
   interface Group { aStart: number; aEnd: number; items: typeof matches; }
   const groups: Group[] = [];
-  for (const item of matches) {
+  for (const item of sortedMatches) {
     const { aStart, aEnd } = item.match;
     const g = groups.find(g => {
       const overlap = Math.min(aEnd, g.aEnd) - Math.max(aStart, g.aStart);
@@ -288,8 +296,6 @@ export function detectRecurringSegments(current: SegmentSource, others: SegmentS
     });
     if (g) {
       g.items.push(item);
-      g.aStart = Math.min(g.aStart, aStart);
-      g.aEnd = Math.max(g.aEnd, aEnd);
     } else {
       groups.push({ aStart, aEnd, items: [item] });
     }
@@ -303,6 +309,50 @@ export function detectRecurringSegments(current: SegmentSource, others: SegmentS
     const attempts = [currentAttempt, ...otherAttempts].sort((a, b) => a.duration - b.duration);
     return { id: `seg-${idx}`, distance: currentAttempt.distance, elevGain: currentAttempt.elevGain, attempts };
   });
+}
+
+// ─── Segments définis manuellement ──────────────────────────────────────────────
+//
+// À la différence de la détection automatique (qui découvre des tronçons récurrents en
+// comparant l'activité courante à l'historique), un segment manuel a une géométrie de
+// référence FIXE, choisie une fois par l'utilisateur (deux clics sur la carte) et persistée.
+// Comparer une activité à ce segment est donc un matching à sens unique (référence → candidate),
+// pas une découverte par regroupement — beaucoup plus simple, voir matchStoredSegment ci-dessous.
+
+/** Géométrie + métadonnées calculées à la création d'un segment manuel, prêtes à persister. */
+export interface SegmentGeometry {
+  points: GeoPoint[];
+  distance: number; // m
+  elevGain: number; // m
+  fingerprint: string[];
+}
+
+/** Construit la géométrie de référence d'un segment manuel à partir d'une plage [startIndex, endIndex] de l'activité où il a été défini. */
+export function buildSegmentGeometry(points: GPXTrackPoint[], startIndex: number, endIndex: number): SegmentGeometry {
+  const slice = points.slice(startIndex, endIndex + 1);
+  const geoPoints: GeoPoint[] = slice.map(p => ({ lat: p.lat, lon: p.lon, distFromStart: p.distFromStart }));
+  const distance = slice.length > 1 ? slice[slice.length - 1].distFromStart - slice[0].distFromStart : 0;
+  let elevGain = 0;
+  for (let i = 1; i < slice.length; i++) {
+    const prev = slice[i - 1].ele, cur = slice[i].ele;
+    if (prev !== null && cur !== null && cur > prev) elevGain += cur - prev;
+  }
+  return { points: geoPoints, distance, elevGain, fingerprint: computeFingerprint(geoPoints) };
+}
+
+/**
+ * Compare une activité (courante ou historique) à la géométrie de référence d'un segment manuel.
+ * Le seuil de distance minimale s'adapte à la longueur du segment (60% de sa distance, au moins
+ * 100m) — les segments courts définis à la main ne doivent pas être rejetés par le seuil global
+ * de 300m utilisé pour la détection automatique.
+ */
+export function matchStoredSegment(
+  refPoints: GeoPoint[], refDistance: number, candidate: SegmentSource, isCurrent = false,
+): SegmentAttempt | null {
+  const minDistanceM = Math.max(100, refDistance * 0.6);
+  const match = findLongestMatch(refPoints, candidate.points, minDistanceM);
+  if (!match) return null;
+  return buildAttempt(candidate.points, match.bStart, match.bEnd, candidate.date, isCurrent);
 }
 
 /** Parse un fichier brut (GPX texte ou FIT binaire) en points enrichis — utilisé pour reconstruire une activité historique le temps du matching. */
