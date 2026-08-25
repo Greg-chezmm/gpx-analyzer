@@ -4,7 +4,9 @@ import type {
 } from "./gpxParser";
 import type { FitSummary } from "./gpxCore";
 import type { HillRepeatSeries } from "./hillRepeats";
-import type { TrainingEntry } from "../hooks/useTrainingHistory";
+import type { ActivityIndexEntry } from "./driveStorage";
+
+type TrainingEntry = ActivityIndexEntry & { trimp: number };
 import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
 import { computeVDOT } from "./vdot";

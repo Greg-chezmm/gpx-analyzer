@@ -20,6 +20,9 @@ export interface ActivityIndexEntry {
   fileName: string;
   // FC
   avgHeartRate?: number;
+  // Vitesse/allure moyenne — utilisées par le graphique de progression
+  avgPace?: number;  // s/km (running)
+  avgSpeed?: number; // km/h (cycling)
   // Charge
   trimp?: number;
   trimpBanister?: number;
@@ -235,17 +238,6 @@ export async function fetchActivityFile(token: string, fileId: string, fileName:
   return r.text();
 }
 
-// ── Training history (TSB/CTL/ATL) ───────────────────────────────────
-
-/** Entrée de l'historique d'entraînement utilisée pour le calcul CTL/ATL/TSB. */
-export interface DriveTrainingEntry {
-  date: string;
-  trimp: number;
-  name: string;
-}
-
-const HISTORY_NAME = 'training-history.json';
-
 /** Sauvegarde ou met à jour un fichier JSON générique dans le dossier Drive. */
 async function saveJsonFile<T>(
   token: string,
@@ -285,19 +277,6 @@ async function loadJsonFile<T>(
   return r2.json() as Promise<T>;
 }
 
-/** Sauvegarde l'historique d'entraînement (TRIMP par jour) sur Drive. */
-export async function saveTrainingHistory(token: string, history: DriveTrainingEntry[]): Promise<void> {
-  const folderId = await getOrCreateFolder(token);
-  await saveJsonFile(token, folderId, HISTORY_NAME, history);
-}
-
-/** Charge l'historique d'entraînement depuis Drive ; retourne un tableau vide si absent. */
-export async function fetchTrainingHistory(token: string): Promise<DriveTrainingEntry[]> {
-  const folderId = await getOrCreateFolder(token);
-  const data = await loadJsonFile<DriveTrainingEntry[]>(token, folderId, HISTORY_NAME);
-  return data ?? [];
-}
-
 // ── User settings ─────────────────────────────────────────────────────
 
 /** Paramètres physiologiques de l'utilisateur synchronisés sur Drive. */
@@ -327,7 +306,7 @@ export async function fetchUserSettings(token: string): Promise<DriveUserSetting
 
 // ── Delete activity ────────────────────────────────────────────────────
 
-/** Supprime une activité de Drive : efface le fichier GPX/FIT, la retire de l'index et de l'historique TRIMP. */
+/** Supprime une activité de l'index Drive legacy : efface le fichier GPX/FIT et la retire de l'index. */
 export async function deleteActivity(
   token: string,
   fileId: string | null,
@@ -350,15 +329,4 @@ export async function deleteActivity(
     a => !(a.date === entry.date && a.name === entry.name)
   );
   await saveIndex(token, folderId, indexId, index);
-
-  // 3. Retirer de training-history.json
-  const history = await loadJsonFile<DriveTrainingEntry[]>(token, folderId, HISTORY_NAME);
-  if (history) {
-    const filtered = history.filter(
-      h => !(h.date === entry.date && h.name === entry.name)
-    );
-    if (filtered.length !== history.length) {
-      await saveJsonFile(token, folderId, HISTORY_NAME, filtered);
-    }
-  }
 }

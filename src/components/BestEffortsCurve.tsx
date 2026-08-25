@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { Zap } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import { RUN_DISTANCES, BIKE_DURATIONS } from "../utils/bestEfforts";
 
 interface Props {
-  drive: DriveHandle;
+  cloud: CloudHandle;
 }
 
 type TabType = 'running' | 'cycling';
@@ -40,14 +40,14 @@ interface BestRow {
  * (`ActivityIndexEntry.bestEfforts`, calculé à la sauvegarde de chaque activité — voir bestEfforts.ts).
  * N'inclut que les activités sauvegardées après l'introduction de cette fonctionnalité.
  */
-export const BestEffortsCurve: React.FC<Props> = ({ drive }) => {
+export const BestEffortsCurve: React.FC<Props> = ({ cloud }) => {
   const [tab, setTab] = useState<TabType>('running');
 
-  if (drive.status !== 'connected') return null;
+  if (cloud.status !== 'connected') return null;
 
   const runRows: BestRow[] = RUN_DISTANCES.map(({ key, label }) => {
     let best: BestRow | null = null;
-    for (const e of drive.history) {
+    for (const e of cloud.history) {
       if (e.activityType === 'cycling' || !e.bestEfforts?.values[key]) continue;
       const v = e.bestEfforts.values[key];
       if (!best || v < best.value) best = { key, label, value: v, unit: 'time', entry: e };
@@ -58,13 +58,13 @@ export const BestEffortsCurve: React.FC<Props> = ({ drive }) => {
   const bikeRows: BestRow[] = BIKE_DURATIONS.map(({ key, label }) => {
     // Priorité aux mesures de puissance ; repli sur la vitesse si aucune donnée de puissance pour cette durée.
     let best: BestRow | null = null;
-    for (const e of drive.history) {
+    for (const e of cloud.history) {
       if (e.activityType !== 'cycling' || e.bestEfforts?.unit !== 'power' || !e.bestEfforts.values[key]) continue;
       const v = e.bestEfforts.values[key];
       if (!best || v > best.value) best = { key, label, value: v, unit: 'power', entry: e };
     }
     if (!best) {
-      for (const e of drive.history) {
+      for (const e of cloud.history) {
         if (e.activityType !== 'cycling' || e.bestEfforts?.unit !== 'speed' || !e.bestEfforts.values[key]) continue;
         const v = e.bestEfforts.values[key];
         if (!best || v > best.value) best = { key, label, value: v, unit: 'speed', entry: e };
@@ -146,7 +146,7 @@ export const BestEffortsCurve: React.FC<Props> = ({ drive }) => {
       </div>
 
       <div style={{ fontSize: '0.71rem', color: 'var(--text-tertiary)', marginTop: '0.6rem' }}>
-        Calculé uniquement sur les activités sauvegardées sur Drive depuis l'ajout de cette fonctionnalité.
+        Calculé uniquement sur les activités sauvegardées dans le cloud depuis l'ajout de cette fonctionnalité.
       </div>
     </div>
   );

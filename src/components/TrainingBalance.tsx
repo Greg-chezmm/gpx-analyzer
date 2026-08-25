@@ -1,12 +1,11 @@
 import React, { useState } from "react";
-import { Activity, Trash2, AlertTriangle, CheckCircle } from "lucide-react";
+import { Activity, AlertTriangle, CheckCircle } from "lucide-react";
 import type { TSBResult } from "../utils/trainingMetrics";
-import type { TrainingEntry } from "../hooks/useTrainingHistory";
+import type { ActivityIndexEntry } from "../utils/driveStorage";
 
 interface Props {
   tsb:     TSBResult;
-  history: TrainingEntry[];
-  onClear: () => void;
+  history: (ActivityIndexEntry & { trimp: number })[];
 }
 
 /**
@@ -127,7 +126,7 @@ function computeAlerts(tsb: { atl: number; ctl: number; tsb: number; chartData: 
  * Panneau de charge d'entraînement — affiche les courbes CTL/ATL/TSB,
  * les alertes de surcharge et le détail inline des séances au survol.
  */
-export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
+export const TrainingBalance: React.FC<Props> = ({ tsb, history }) => {
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
   const [viewDays, setViewDays] = useState<30 | 90>(30);
 
@@ -213,11 +212,6 @@ export const TrainingBalance: React.FC<Props> = ({ tsb, history, onClear }) => {
           <span style={{ fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
             {history.length} séance{history.length > 1 ? 's' : ''}
           </span>
-          <button type="button" onClick={onClear} title="Effacer l'historique"
-            style={{ background: "none", border: "none", cursor: "pointer",
-              color: "var(--text-tertiary)", display: "flex", padding: "0.2rem" }}>
-            <Trash2 size={14} />
-          </button>
         </div>
       </div>
 

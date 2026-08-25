@@ -1,7 +1,7 @@
 import React from "react";
 import { X, LayoutDashboard } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
-import type { TrainingEntry } from "../hooks/useTrainingHistory";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
+import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { RaceGoalConfig } from "../hooks/useRaceGoal";
 import type { TSBResult } from "../utils/trainingMetrics";
 import { AthleteProfile } from "./AthleteProfile";
@@ -13,12 +13,11 @@ import { RaceGoal } from "./RaceGoal";
 import { ProgressChart } from "./ProgressChart";
 
 interface Props {
-  drive: DriveHandle;
-  history: TrainingEntry[];
+  cloud: CloudHandle;
+  history: (ActivityIndexEntry & { trimp: number })[];
   tsb: TSBResult;
   raceGoal: RaceGoalConfig | null;
   setRaceGoal: (g: RaceGoalConfig | null) => void;
-  onClearHistory: () => void;
   onClose: () => void;
 }
 
@@ -26,9 +25,10 @@ interface Props {
  * Page "Bilan athlète" — regroupe toutes les analyses qui portent sur toi (multi-séances)
  * plutôt que sur une activité précise : profil, vitesse critique, meilleurs efforts, charge
  * d'entraînement, objectif course, progression. Accessible sans charger de fichier — toutes
- * ces cartes dépendent de l'historique Drive/local, pas de l'activité en cours.
+ * ces cartes dépendent de l'historique cloud (activités explicitement sauvegardées), pas de
+ * l'activité en cours.
  */
-export const AthletePage: React.FC<Props> = ({ drive, history, tsb, raceGoal, setRaceGoal, onClearHistory, onClose }) => {
+export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, onClose }) => {
   return (
     <>
       <div className="card animate-slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -43,19 +43,19 @@ export const AthletePage: React.FC<Props> = ({ drive, history, tsb, raceGoal, se
         </button>
       </div>
 
-      {drive.status !== 'connected' && (
+      {cloud.status !== 'connected' && (
         <div className="card animate-slide-up" style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>
-          Connecte Google Drive pour voir ton profil, tes records et ta vitesse critique — ces analyses
+          Connecte-toi pour voir ton profil, tes records et ta vitesse critique — ces analyses
           se basent sur toutes tes activités sauvegardées, pas seulement celle en cours.
         </div>
       )}
 
-      <AthleteProfile drive={drive} />
-      <PolarizationChart drive={drive} />
-      <CriticalSpeed drive={drive} />
-      <BestEffortsCurve drive={drive} />
-      <TrainingBalance tsb={tsb} history={history} onClear={onClearHistory} />
-      <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} drive={drive} />
+      <AthleteProfile cloud={cloud} />
+      <PolarizationChart cloud={cloud} />
+      <CriticalSpeed cloud={cloud} />
+      <BestEffortsCurve cloud={cloud} />
+      <TrainingBalance tsb={tsb} history={history} />
+      <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} cloud={cloud} />
       <ProgressChart history={history} />
     </>
   );

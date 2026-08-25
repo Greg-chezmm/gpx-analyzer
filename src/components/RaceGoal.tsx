@@ -1,15 +1,15 @@
 import React, { useState } from "react";
 import { Target, X, Pencil, Info } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
-import type { TrainingEntry } from "../hooks/useTrainingHistory";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
+import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { RaceGoalConfig } from "../hooks/useRaceGoal";
 import { classifyRace, findPastRaceTsb, computeTsbTarget, projectTsb } from "../utils/raceGoal";
 
 interface Props {
   goal: RaceGoalConfig | null;
   setGoal: (g: RaceGoalConfig | null) => void;
-  history: TrainingEntry[];
-  drive: DriveHandle;
+  history: (ActivityIndexEntry & { trimp: number })[];
+  cloud: CloudHandle;
 }
 
 /** Formulaire de saisie/édition de l'objectif course (date, discipline, distance, nom). */
@@ -76,9 +76,9 @@ function GoalForm({ initial, onSave, onCancel }: {
 
 /**
  * Panneau "Objectif course" — projette le TSB jusqu'à une date de course cible en simulant un taper
- * standard, et compare au TSB cible calibré sur les courses passées comparables (marquées 🏁 dans Drive).
+ * standard, et compare au TSB cible calibré sur les courses passées comparables (marquées 🏁 dans le cloud).
  */
-export const RaceGoal: React.FC<Props> = ({ goal, setGoal, history, drive }) => {
+export const RaceGoal: React.FC<Props> = ({ goal, setGoal, history, cloud }) => {
   const [editing, setEditing] = useState(false);
 
   if (!goal || editing) {
@@ -97,9 +97,9 @@ export const RaceGoal: React.FC<Props> = ({ goal, setGoal, history, drive }) => 
 
   const catInfo = classifyRace(goal.activityType, goal.distanceKm * 1000);
 
-  // Courses passées comparables (marquées 🏁 dans Drive), utilisées pour calibrer la cible TSB
-  const raceEntries = drive.history.filter(e => e.isRace);
-  const pastRaces = findPastRaceTsb(drive.history, raceEntries, goal.activityType, catInfo.category);
+  // Courses passées comparables (marquées 🏁 dans le cloud), utilisées pour calibrer la cible TSB
+  const raceEntries = cloud.history.filter(e => e.isRace);
+  const pastRaces = findPastRaceTsb(cloud.history, raceEntries, goal.activityType, catInfo.category);
   const target = computeTsbTarget(pastRaces, catInfo.defaultTarget);
 
   const trimpSeries = history.map(h => ({ date: h.date, trimp: h.trimp }));
@@ -173,8 +173,8 @@ export const RaceGoal: React.FC<Props> = ({ goal, setGoal, history, drive }) => 
         <Info size={12} style={{ flexShrink: 0, marginTop: '2px' }} />
         <span>
           {target.source === 'personalized'
-            ? `Cible basée sur ${target.sampleCount} course${target.sampleCount > 1 ? 's' : ''} passée${target.sampleCount > 1 ? 's' : ''} du même type (marquée${target.sampleCount > 1 ? 's' : ''} 🏁 dans Drive).`
-            : `Cible générique (aucune course "${catInfo.label}" 🏁 dans ton historique Drive pour calibrer).`}
+            ? `Cible basée sur ${target.sampleCount} course${target.sampleCount > 1 ? 's' : ''} passée${target.sampleCount > 1 ? 's' : ''} du même type (marquée${target.sampleCount > 1 ? 's' : ''} 🏁).`
+            : `Cible générique (aucune course "${catInfo.label}" 🏁 dans ton historique pour calibrer).`}
           {' '}Projection basée sur un taper standard de {catInfo.taperDays} jours, charge réduite progressivement à ~35% de ta moyenne récente.
         </span>
       </div>

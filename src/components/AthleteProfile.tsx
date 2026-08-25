@@ -1,22 +1,22 @@
 import React from "react";
 import { UserCircle } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import { buildAthleteProfile } from "../utils/athleteProfile";
 
 interface Props {
-  drive: DriveHandle;
+  cloud: CloudHandle;
 }
 
 /**
  * Profil athlète — synthèse descriptive (discipline dominante, niveau VO2max, profil
  * aérobie/anaérobie, répartition d'intensité) à partir des métriques déjà calculées sur
- * l'historique Drive. Volontairement qualitatif : pas un score validé scientifiquement,
+ * l'historique cloud. Volontairement qualitatif : pas un score validé scientifiquement,
  * juste une lecture d'ensemble de ce que l'app sait déjà de toi (voir athleteProfile.ts).
  */
-export const AthleteProfile: React.FC<Props> = ({ drive }) => {
-  if (drive.status !== 'connected' || drive.history.length === 0) return null;
+export const AthleteProfile: React.FC<Props> = ({ cloud }) => {
+  if (cloud.status !== 'connected' || cloud.history.length === 0) return null;
 
-  const tags = buildAthleteProfile(drive.history);
+  const tags = buildAthleteProfile(cloud.history);
 
   return (
     <div className="card animate-slide-up" id="nav-athlete-profile">

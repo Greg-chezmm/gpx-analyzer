@@ -10,7 +10,6 @@ import { generateSampleGPX } from "./utils/sampleGPX";
 import { reverseGeocode } from "./utils/geocoding";
 import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
-import { useTrainingHistory, type TrainingEntry } from "./hooks/useTrainingHistory";
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { useRaceGoal } from "./hooks/useRaceGoal";
 import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
@@ -42,8 +41,9 @@ import { FloatingNav } from "./components/FloatingNav";
 import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
-import { DriveSyncButton, DriveSaveButton, DriveActivityList } from "./components/DriveSync";
+import { DriveSaveButton } from "./components/DriveSync";
 import { CloudSyncButton, CloudSaveButton, CloudActivityList } from "./components/CloudSync";
+import type { ActivityIndexEntry } from "./utils/driveStorage";
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
 import { HeaderMenu } from "./components/HeaderMenu";
 import { generateSummary } from "./utils/generateSummary";
@@ -74,7 +74,6 @@ function App() {
   /* ── Hooks — paramètres athlète, thème, historique, Drive ── */
   const { fcMax, setFcMax, fcRest, setFcRest, vma, setVma, ftp, setFtp, weight, setWeight, birthYear, setBirthYear, sex, setSex } = useUserSettings();
   const { isDark, toggleTheme } = useTheme();
-  const { history, addEntry, updateEntry, replaceHistory, clearHistory } = useTrainingHistory();
   const drive = useGoogleDrive();
   const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
   const firebaseAuth = useFirebaseAuth();
@@ -102,8 +101,7 @@ function App() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   // Météo déjà connue (ex. rechargée depuis Drive) — consommée par l'effet météo pour éviter un appel réseau inutile.
   const pendingStoredWeatherRef = useRef<WeatherInfo | null>(null);
-  // Drapeaux pour éviter les boucles infinie lors de la synchronisation Drive ↔ localStorage.
-  const skipDriveHistorySync = useRef(false);
+  // Drapeaux pour éviter les boucles infinie lors de la synchronisation Drive/Firestore ↔ localStorage.
   const skipSettingsSync = useRef(false);
   const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipFirestoreSettingsSync = useRef(false);
@@ -155,7 +153,13 @@ function App() {
     [enrichedActivity, fcMax, fcRest, sex]
   );
 
-  const tsbResult = useMemo(() => calcTSB(history), [history]);
+  // Séances cloud avec TRIMP calculé — source unique pour TSB/CTL/ATL, objectif course et progression.
+  // Ne compte que les activités explicitement sauvegardées (pas celles simplement ouvertes/visualisées).
+  const sessionsWithTrimp = useMemo(
+    () => cloud.history.filter((e): e is ActivityIndexEntry & { trimp: number } => e.trimp != null),
+    [cloud.history]
+  );
+  const tsbResult = useMemo(() => calcTSB(sessionsWithTrimp), [sessionsWithTrimp]);
 
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
@@ -191,28 +195,7 @@ function App() {
     [climbs, enrichedActivity]
   );
 
-  /* ── Effets — synchronisation Drive, géocodage, historique ── */
-
-  // Sauvegarde automatique dans l'historique à chaque nouvelle activité analysée (TRIMP requis).
-  // customActivityName en dépendance assure la mise à jour lors d'un renommage.
-  useEffect(() => {
-    if (!trimp || !enrichedActivity) return;
-    const date = enrichedActivity.startTime
-      ? enrichedActivity.startTime.toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
-    addEntry({
-      date,
-      trimp: trimp.edwards,
-      name: displayName,
-      activityType: enrichedActivity.activityType,
-      distance: enrichedActivity.totalDistance,
-      duration: enrichedActivity.movingTime,
-      elevationGain: enrichedActivity.elevationGain,
-      avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
-      avgSpeed: enrichedActivity.avgSpeed * 3.6,
-      avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
-    });
-  }, [trimp, enrichedActivity, customActivityName]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* ── Effets — synchronisation Drive/Firestore, géocodage ── */
 
   // Charge les paramètres athlète depuis Drive à la connexion ; skipSettingsSync évite la boucle de retour.
   useEffect(() => {
@@ -318,45 +301,6 @@ function App() {
       .finally(() => setWeatherLoading(false));
   };
 
-  // Synchronisation Drive → localStorage à la connexion (fusion remote + local, remote comble les trous).
-  useEffect(() => {
-    if (drive.status !== 'connected') return;
-    let cancelled = false;
-    skipDriveHistorySync.current = true;
-    drive.loadHistory().then(remote => {
-      if (cancelled) return;
-      if (remote.length === 0) { skipDriveHistorySync.current = false; return; }
-      // Clé de déduplication stable au renommage : date+durée+distance.
-      // Fallback date+name pour les anciennes entrées sans ces champs.
-      const mergeKey = (e: TrainingEntry | { date: string; trimp: number; name: string; duration?: number; distance?: number }) =>
-        (e.duration && e.distance)
-          ? `${e.date}|${Math.round(e.duration)}|${Math.round(e.distance)}`
-          : `${e.date}|${e.name}`;
-      const seen = new Map<string, TrainingEntry>();
-      [...remote, ...history].forEach(e => {
-        const key = mergeKey(e);
-        const existing = seen.get(key);
-        if (!existing) { seen.set(key, e as TrainingEntry); return; }
-        // Préfère l'entrée avec un nom propre (pas le format brut suuntoapp-…).
-        const existingIsSuunto = /^suuntoapp-/i.test(existing.name);
-        const newIsSuunto      = /^suuntoapp-/i.test(e.name);
-        if (existingIsSuunto && !newIsSuunto) seen.set(key, e as TrainingEntry);
-        else if (!existingIsSuunto && newIsSuunto) { /* garde l'entrée existante */ }
-        else if (Object.keys(e).length > Object.keys(existing).length) seen.set(key, e as TrainingEntry);
-      });
-      const merged = Array.from(seen.values()).sort((a, b) => a.date.localeCompare(b.date));
-      replaceHistory(merged);
-      setTimeout(() => { skipDriveHistorySync.current = false; }, 0);
-    }).catch(() => { skipDriveHistorySync.current = false; });
-    return () => { cancelled = true; };
-  }, [drive.status]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Synchronisation localStorage → Drive à chaque changement d'historique (sauf si origine Drive).
-  useEffect(() => {
-    if (drive.status !== 'connected' || skipDriveHistorySync.current || history.length === 0) return;
-    drive.saveHistory(history).catch(() => {});
-  }, [history]); // eslint-disable-line react-hooks/exhaustive-deps
-
   /* ── Handlers — chargement, fusion, renommage, export ── */
 
   const handleActivityLoaded = (data: string | ArrayBuffer, name: string, customName?: string, storedWeather?: WeatherInfo) => {
@@ -439,15 +383,10 @@ function App() {
   /** Nom affiché : priorité au nom personnalisé, puis nom parsé, puis nom de fichier. */
   const displayName = customActivityName || enrichedActivity?.name || fileName;
 
-  /** Met à jour le nom de l'activité localement et dans l'historique d'entraînement. */
+  /** Met à jour le nom de l'activité localement — une re-sauvegarde est nécessaire pour persister le renommage. */
   const handleRename = (newName: string) => {
     if (!enrichedActivity) return;
-    const date = enrichedActivity.startTime
-      ? enrichedActivity.startTime.toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10);
-    const oldName = customActivityName || enrichedActivity.name || fileName;
     setCustomActivityName(newName);
-    updateEntry(date, oldName, { name: newName });
     setSavedToDrive(false); // permet une re-sauvegarde avec le nouveau nom
     setSavedToCloud(false);
   };
@@ -472,6 +411,8 @@ function App() {
       elevationGain: enrichedActivity.elevationGain,
       fileName,
       avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
+      avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
+      avgSpeed: enrichedActivity.avgSpeed * 3.6,
       trimp: trimp?.edwards,
       trimpBanister: trimp?.banister,
       zoneMinutes: trimp?.zoneMinutes,
@@ -556,12 +497,11 @@ function App() {
           </button>
           <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} driveHistory={drive.history} />
           {enrichedActivity && (
-            <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
-          )}
-          {/* Drive gardé en accès de secours pendant la migration — voir plan Firebase étape E */}
-          <DriveSyncButton drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
-          {enrichedActivity && (
-            <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
+            <>
+              <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
+              {/* Drive gardé en export manuel de secours (copie indépendante de Firestore) */}
+              <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
+            </>
           )}
           {enrichedActivity && (
             <button type="button" className="btn btn-outline"
@@ -602,12 +542,11 @@ function App() {
       <main className="main-content">
         {showAthletePage ? (
           <AthletePage
-            drive={drive}
-            history={history}
+            cloud={cloud}
+            history={sessionsWithTrimp}
             tsb={tsbResult}
             raceGoal={raceGoal}
             setRaceGoal={setRaceGoal}
-            onClearHistory={clearHistory}
             onClose={() => setShowAthletePage(false)}
           />
         ) : !activity ? (
@@ -648,8 +587,6 @@ function App() {
 
             <Dropzone onActivityLoaded={handleActivityLoaded} onLoadSample={handleLoadSample} />
             <CloudActivityList cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
-            {/* Drive gardé en accès de secours pendant la migration — voir plan Firebase étape E */}
-            <DriveActivityList drive={drive} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} />
           </div>
         ) : (
           /* ── Dashboard activité ── */
@@ -1012,7 +949,7 @@ function App() {
             normalizedPower,
             intensityFactor,
             tsbResult,
-            history,
+            history: sessionsWithTrimp,
             activityDate: enrichedActivity.startTime
               ? enrichedActivity.startTime.toISOString().slice(0, 10)
               : undefined,

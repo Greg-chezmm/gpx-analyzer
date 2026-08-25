@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { Layers } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import { aggregateZoneDistribution, type PolarizationClass } from "../utils/polarization";
 
 interface Props {
-  drive: DriveHandle;
+  cloud: CloudHandle;
 }
 
 type WindowOpt = 28 | 84 | null; // 4 sem / 12 sem / tout
@@ -35,12 +35,12 @@ function fmtMin(m: number): string {
  * entraînement. Agrégé depuis `zoneMinutes` stocké par activité (voir polarization.ts) — activités
  * sauvegardées avant l'ajout de ce champ non incluses.
  */
-export const PolarizationChart: React.FC<Props> = ({ drive }) => {
+export const PolarizationChart: React.FC<Props> = ({ cloud }) => {
   const [windowDays, setWindowDays] = useState<WindowOpt>(84);
 
-  if (drive.status !== 'connected') return null;
+  if (cloud.status !== 'connected') return null;
 
-  const result = aggregateZoneDistribution(drive.history, windowDays ?? undefined);
+  const result = aggregateZoneDistribution(cloud.history, windowDays ?? undefined);
   if (!result) return null;
 
   const info = CLASS_INFO[result.classification];

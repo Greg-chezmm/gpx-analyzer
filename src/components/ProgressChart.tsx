@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { TrendingUp } from "lucide-react";
-import type { TrainingEntry } from "../hooks/useTrainingHistory";
+import type { ActivityIndexEntry } from "../utils/driveStorage";
 
 interface Props {
-  history: TrainingEntry[];
+  history: (ActivityIndexEntry & { trimp: number })[];
 }
 
 type ViewDays = 90 | 180 | 'all';

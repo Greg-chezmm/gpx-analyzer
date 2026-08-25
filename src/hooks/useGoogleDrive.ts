@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   uploadActivity, fetchActivityList, fetchActivityFile,
-  saveTrainingHistory, fetchTrainingHistory,
   saveUserSettings, fetchUserSettings,
   deleteActivity as deleteActivityStorage,
   updateActivityMeta as updateActivityMetaStorage,
-  type ActivityIndexEntry, type DriveTrainingEntry, type DriveUserSettings,
+  type ActivityIndexEntry, type DriveUserSettings,
 } from '../utils/driveStorage';
 
 declare global {
@@ -42,8 +41,6 @@ export interface DriveHandle {
   deleteActivity(fileId: string | null, entry: Pick<ActivityIndexEntry, 'date' | 'name'>): Promise<void>;
   updateActivityMeta(entry: Pick<ActivityIndexEntry, 'date' | 'name'>, updates: Partial<ActivityIndexEntry>): Promise<void>;
   refresh(): Promise<void>;
-  saveHistory(history: DriveTrainingEntry[]): Promise<void>;
-  loadHistory(): Promise<DriveTrainingEntry[]>;
   saveSettings(settings: DriveUserSettings): Promise<void>;
   loadSettings(): Promise<DriveUserSettings | null>;
 }
@@ -146,16 +143,6 @@ export function useGoogleDrive(): DriveHandle {
     return fetchActivityFile(token, fileId, fileName);
   }, [token]);
 
-  const saveHistory = useCallback(async (hist: DriveTrainingEntry[]) => {
-    if (!token) return;
-    try { await saveTrainingHistory(token, hist); } catch { /* silently fail */ }
-  }, [token]);
-
-  const loadHistory = useCallback(async (): Promise<DriveTrainingEntry[]> => {
-    if (!token) return [];
-    try { return await fetchTrainingHistory(token); } catch { return []; }
-  }, [token]);
-
   const saveSettings = useCallback(async (settings: DriveUserSettings) => {
     if (!token) return;
     try { await saveUserSettings(token, settings); } catch { /* silently fail */ }
@@ -184,5 +171,5 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, wasAuthorized, token, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveHistory, loadHistory, saveSettings, loadSettings };
+  return { status, wasAuthorized, token, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveSettings, loadSettings };
 }

@@ -1,10 +1,10 @@
 import React from "react";
 import { Gauge } from "lucide-react";
-import type { DriveHandle } from "../hooks/useGoogleDrive";
+import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import { estimateCriticalSpeedFromHistory, dPrimeProfile } from "../utils/criticalSpeed";
 
 interface Props {
-  drive: DriveHandle;
+  cloud: CloudHandle;
 }
 
 const CONFIDENCE_LABELS = {
@@ -31,10 +31,10 @@ function fmtPace(sPerKm: number): string {
  * sur les meilleurs efforts personnels (course à pied), agrégés depuis l'index Drive.
  * Complémentaire au VDOT : basée sur tes performances réelles plutôt qu'une formule générique.
  */
-export const CriticalSpeed: React.FC<Props> = ({ drive }) => {
-  if (drive.status !== 'connected') return null;
+export const CriticalSpeed: React.FC<Props> = ({ cloud }) => {
+  if (cloud.status !== 'connected') return null;
 
-  const result = estimateCriticalSpeedFromHistory(drive.history);
+  const result = estimateCriticalSpeedFromHistory(cloud.history);
   if (!result) return null;
 
   const confidence = CONFIDENCE_LABELS[result.confidence];
