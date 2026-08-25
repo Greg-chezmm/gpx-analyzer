@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from 'react';
-import { CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap, Flame } from 'lucide-react';
+import { CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap, Flame, FolderDown } from 'lucide-react';
 import type { CloudHandle } from '../hooks/useFirebaseCloud';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
@@ -16,10 +16,12 @@ interface CloudSyncButtonProps {
   fcRest: number;
   /** Déclenche la connexion Drive — nécessaire en complément de Firebase (fichier brut hébergé sur Drive). */
   onConnectDrive: () => void;
+  /** Ancien index Drive complet — utilisé par le bouton "Importer depuis Drive" (migration, voir plan Firebase étape E). */
+  driveHistory: ActivityIndexEntry[];
 }
 
 /** Bouton principal de synchronisation cloud (Firebase) — connexion Google ou accès à l'historique. */
-export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive }: CloudSyncButtonProps) {
+export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive, driveHistory }: CloudSyncButtonProps) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -85,7 +87,7 @@ export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive }
       </button>
 
       {open && (
-        <CloudHistoryPanel cloud={cloud} loadingId={loadingId} onLoad={handleLoad} onClose={() => setOpen(false)} fcMax={fcMax} fcRest={fcRest} />
+        <CloudHistoryPanel cloud={cloud} loadingId={loadingId} onLoad={handleLoad} onClose={() => setOpen(false)} fcMax={fcMax} fcRest={fcRest} driveHistory={driveHistory} />
       )}
     </>
   );
@@ -361,13 +363,29 @@ interface CloudHistoryPanelProps {
   onClose: () => void;
   fcMax: number;
   fcRest: number;
+  driveHistory: ActivityIndexEntry[];
 }
 
 /** Panneau latéral pleine hauteur listant toutes les activités cloud — chargement, suppression, recherche. */
-function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest }: CloudHistoryPanelProps) {
+function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, driveHistory }: CloudHistoryPanelProps) {
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
+  const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
+
+  const handleImport = async () => {
+    setImportResult(null);
+    setImportProgress({ done: 0, total: driveHistory.length });
+    try {
+      const result = await cloud.importFromDrive(driveHistory, (done, total) => setImportProgress({ done, total }));
+      setImportResult({ imported: result.imported, skipped: result.skipped });
+    } catch {
+      alert("Erreur pendant l'import — réessaie, les activités déjà importées ne seront pas dupliquées.");
+    } finally {
+      setImportProgress(null);
+    }
+  };
 
   /** Filtre une activité sur son nom, sa date (fr) ou sa discipline. */
   const matchesQuery = (entry: ActivityIndexEntry) => {
@@ -436,6 +454,31 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest }:
             </button>
           </div>
         </div>
+
+        {driveHistory.length > 0 && (
+          <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+            <button type="button" onClick={handleImport} disabled={!!importProgress}
+              title="Copie les métadonnées de l'ancien index Drive vers Firestore, sans ré-upload — le fichier reste sur Drive"
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                padding: '0.5rem', fontSize: '0.82rem', fontWeight: 600,
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                cursor: importProgress ? 'default' : 'pointer', opacity: importProgress ? 0.7 : 1,
+              }}>
+              {importProgress
+                ? <><Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> Import… {importProgress.done}/{importProgress.total}</>
+                : <><FolderDown size={14} /> Importer {driveHistory.length} activité{driveHistory.length > 1 ? 's' : ''} depuis Drive</>
+              }
+            </button>
+            {importResult && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.4rem' }}>
+                {importResult.imported} importée{importResult.imported > 1 ? 's' : ''}
+                {importResult.skipped > 0 ? ` · ${importResult.skipped} déjà présente${importResult.skipped > 1 ? 's' : ''}` : ''}
+              </div>
+            )}
+          </div>
+        )}
 
         {cloud.history.length > 0 && (
           <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>

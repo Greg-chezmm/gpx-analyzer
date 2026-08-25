@@ -12,11 +12,19 @@ import type { useFirebaseAuth } from './useFirebaseAuth';
 
 export type CloudStatus = 'unavailable' | 'signed-out' | 'connecting' | 'needs-drive' | 'connected';
 
+/** Résultat d'un import en masse depuis l'ancien index Drive (voir `importFromDrive`). */
+export interface ImportResult {
+  imported: number;
+  skipped: number; // déjà présentes sur Firestore (même date+nom/fileName)
+  total: number;
+}
+
 export interface CloudHandle {
   status: CloudStatus;
   userEmail: string | null;
   history: ActivityIndexEntry[];
   isSaving: boolean;
+  isImporting: boolean;
   signIn(): void;
   signOut(): void;
   save(rawData: string | ArrayBuffer, fileName: string, meta: Omit<ActivityIndexEntry, 'fileId' | 'cloudId'>): Promise<void>;
@@ -24,6 +32,13 @@ export interface CloudHandle {
   deleteActivity(entry: ActivityIndexEntry): Promise<void>;
   updateActivityMeta(entry: ActivityIndexEntry, updates: Partial<ActivityIndexEntry>): Promise<void>;
   refresh(): Promise<void>;
+  /**
+   * Copie les métadonnées de l'ancien index Drive (`activities-index.json`) vers Firestore, sans
+   * ré-upload ni re-parsing : le fichier brut reste sur Drive, référencé par le même `fileId`, et
+   * tous les stats (TRIMP, VO2max, meilleurs efforts...) sont déjà calculés dans l'entrée Drive.
+   * Ignore les activités déjà présentes sur Firestore (même vérification que `save`).
+   */
+  importFromDrive(driveEntries: ActivityIndexEntry[], onProgress?: (done: number, total: number) => void): Promise<ImportResult>;
 }
 
 /**
@@ -35,6 +50,7 @@ export interface CloudHandle {
 export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, driveToken: string | null): CloudHandle {
   const [history, setHistory] = useState<ActivityIndexEntry[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!auth.user) return;
@@ -97,9 +113,38 @@ export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, drive
     await refresh();
   }, [auth.user, refresh]);
 
+  const importFromDrive = useCallback(async (
+    driveEntries: ActivityIndexEntry[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<ImportResult> => {
+    if (!auth.user) return { imported: 0, skipped: 0, total: 0 };
+    const uid = auth.user.uid;
+    setIsImporting(true);
+    let imported = 0, skipped = 0;
+    try {
+      for (let i = 0; i < driveEntries.length; i++) {
+        const entry = driveEntries[i];
+        // Même vérification que save() — jamais l'état local, toujours interrogé frais.
+        const existing = await findExistingCloudActivity(uid, entry.date, entry.name, entry.fileName);
+        if (existing) {
+          skipped++;
+        } else {
+          await createCloudActivityMeta(uid, entry);
+          imported++;
+        }
+        onProgress?.(i + 1, driveEntries.length);
+      }
+      await refresh();
+    } finally {
+      setIsImporting(false);
+    }
+    return { imported, skipped, total: driveEntries.length };
+  }, [auth.user, refresh]);
+
   return {
-    status, userEmail: auth.user?.email ?? null, history, isSaving,
+    status, userEmail: auth.user?.email ?? null, history, isSaving, isImporting,
     signIn: auth.signIn, signOut: auth.signOut,
     save, loadFile, deleteActivity: deleteActivityFn, updateActivityMeta: updateActivityMetaFn, refresh,
+    importFromDrive,
   };
 }

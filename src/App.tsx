@@ -554,7 +554,7 @@ function App() {
             <LayoutDashboard size={15} />
             <span className="btn-text">Bilan athlète</span>
           </button>
-          <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} />
+          <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} driveHistory={drive.history} />
           {enrichedActivity && (
             <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
           )}
