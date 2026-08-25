@@ -33,7 +33,7 @@ export function karvonenBounds(fcMax: number, fcRest: number): number[] {
 }
 
 /** Retourne l'index de zone (0–4) pour une FC donnée selon les bornes Karvonen. */
-function getZoneKarvonen(hr: number, bounds: number[]): number {
+export function getZoneKarvonen(hr: number, bounds: number[]): number {
   // bounds = [z1min, z2min, z3min, z4min, z5min]
   if (hr >= bounds[4]) return 4; // Z5
   if (hr >= bounds[3]) return 3; // Z4

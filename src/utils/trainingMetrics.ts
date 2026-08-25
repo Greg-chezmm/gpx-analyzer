@@ -1,6 +1,6 @@
 import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 import type { Sex } from '../hooks/useUserSettings';
-import { karvonenBounds } from './session';
+import { karvonenBounds, getZoneKarvonen } from './session';
 
 // ─── Cardiac Drift ───────────────────────────────────────────────────────────
 
@@ -151,11 +151,7 @@ export function calcTRIMP(
     const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
     if (dt <= 0 || dt > 60) continue;
     const avgHr = (curr.hr + prev.hr) / 2;
-    const z = avgHr >= bounds[4] ? 4
-            : avgHr >= bounds[3] ? 3
-            : avgHr >= bounds[2] ? 2
-            : avgHr >= bounds[1] ? 1 : 0;
-    zoneTime[z] += dt;
+    zoneTime[getZoneKarvonen(avgHr, bounds)] += dt;
     hrSum += avgHr * dt;
     totalTime += dt;
   }
