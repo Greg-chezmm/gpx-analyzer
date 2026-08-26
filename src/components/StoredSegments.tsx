@@ -178,7 +178,7 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
   );
 }
 
-/** Segments définis manuellement (deux clics sur la carte ou le graphique) et comparés à l'historique — complément de la détection automatique (RecurringSegments). Le classement (top 10) est mis en cache sur Firestore, voir useStoredSegments/useStoredSegmentScan. */
+/** Segments définis manuellement (deux clics sur la carte ou le graphique) et comparés à l'historique. Le classement (top 10) est mis en cache sur Firestore, voir useStoredSegments/useStoredSegmentScan. */
 export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, picker, storedSegments }) => {
   const { segments, create, remove, updateAttempts } = storedSegments;
   const [name, setName] = useState("");

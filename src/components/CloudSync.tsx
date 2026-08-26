@@ -3,9 +3,28 @@ import { CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap, 
 import type { CloudHandle } from '../hooks/useFirebaseCloud';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
-import { parseGPX } from '../utils/gpxCore';
+import { parseGPX, type GPXTrackPoint } from '../utils/gpxCore';
 import { computeBestEfforts } from '../utils/bestEfforts';
 import { calcTRIMP } from '../utils/trainingMetrics';
+import { computeFingerprint } from '../utils/segments';
+
+/** Reparse une activité (GPX ou FIT) depuis son contenu brut. */
+async function parseEntryPoints(entry: ActivityIndexEntry, data: ArrayBuffer | string): Promise<GPXTrackPoint[]> {
+  const isFit = entry.fileName.toLowerCase().endsWith('.fit');
+  const parsed = isFit
+    ? await import('../utils/fitParser').then(m => m.parseFIT(data as ArrayBuffer, entry.name))
+    : parseGPX(data as string, entry.name);
+  return parsed.points;
+}
+
+/** Calcule les champs dérivés d'une activité à partir de ses points — utilisé par le recalcul unitaire (⚡) et le rétro-calcul en masse des empreintes. */
+function computeDerivedFields(entry: ActivityIndexEntry, points: GPXTrackPoint[], fcMax: number, fcRest: number) {
+  return {
+    bestEfforts: computeBestEfforts(points, entry.activityType) ?? undefined,
+    zoneMinutes: calcTRIMP(points, fcMax, fcRest)?.zoneMinutes,
+    fingerprint: computeFingerprint(points),
+  };
+}
 
 /* ── Bouton header : connexion / accès à l'historique cloud ──────────────── */
 
@@ -187,13 +206,8 @@ function RecomputeBestEffortsButton({ entry, cloud, fcMax, fcRest }: { entry: Ac
     setPending(true);
     try {
       const data = await cloud.loadFile(entry);
-      const isFit = entry.fileName.toLowerCase().endsWith('.fit');
-      const parsed = isFit
-        ? await import('../utils/fitParser').then(m => m.parseFIT(data as ArrayBuffer, entry.name))
-        : parseGPX(data as string, entry.name);
-      const bestEfforts = computeBestEfforts(parsed.points, entry.activityType) ?? undefined;
-      const zoneMinutes = calcTRIMP(parsed.points, fcMax, fcRest)?.zoneMinutes;
-      await cloud.updateActivityMeta(entry, { bestEfforts, zoneMinutes });
+      const points = await parseEntryPoints(entry, data);
+      await cloud.updateActivityMeta(entry, computeDerivedFields(entry, points, fcMax, fcRest));
     } catch {
       alert("Impossible de calculer les meilleurs efforts pour cette activité.");
     } finally {
@@ -203,7 +217,7 @@ function RecomputeBestEffortsButton({ entry, cloud, fcMax, fcRest }: { entry: Ac
 
   return (
     <button type="button" onClick={recompute} disabled={pending}
-      title={done ? 'Recalculer les meilleurs efforts et zones FC' : 'Calculer les meilleurs efforts et zones FC (télécharge et reparse le fichier)'}
+      title={done ? 'Recalculer les meilleurs efforts, zones FC et empreinte' : 'Calculer les meilleurs efforts, zones FC et empreinte (télécharge et reparse le fichier)'}
       style={{
         padding: '0.35rem', background: 'transparent', border: 'none',
         cursor: pending ? 'default' : 'pointer', borderRadius: 'var(--radius-sm)',
@@ -373,6 +387,8 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
   const [query, setQuery] = useState('');
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
+  const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
+  const [backfillResult, setBackfillResult] = useState<{ done: number; failed: number } | null>(null);
 
   const handleImport = async () => {
     setImportResult(null);
@@ -385,6 +401,35 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
     } finally {
       setImportProgress(null);
     }
+  };
+
+  // Activités sans empreinte géographique (calculée uniquement depuis l'ajout de la comparaison
+  // de trajets/segments) — ex. tout l'historique importé depuis Drive avant cette fonctionnalité.
+  const missingFingerprint = cloud.history.filter(e => !e.fingerprint);
+
+  /**
+   * Recalcule empreinte + meilleurs efforts + zones FC pour toutes les activités qui n'ont pas encore
+   * d'empreinte — un seul téléchargement par activité sert aux trois calculs. Séquentiel (pas en
+   * parallèle) pour ne pas saturer l'API Drive avec des dizaines de téléchargements simultanés.
+   */
+  const handleBackfill = async () => {
+    setBackfillResult(null);
+    const total = missingFingerprint.length;
+    setBackfillProgress({ done: 0, total });
+    let done = 0, failed = 0;
+    for (const entry of missingFingerprint) {
+      try {
+        const data = await cloud.loadFile(entry);
+        const points = await parseEntryPoints(entry, data);
+        await cloud.updateActivityMeta(entry, computeDerivedFields(entry, points, fcMax, fcRest));
+        done++;
+      } catch {
+        failed++;
+      }
+      setBackfillProgress({ done: done + failed, total });
+    }
+    setBackfillResult({ done, failed });
+    setBackfillProgress(null);
   };
 
   /** Filtre une activité sur son nom, sa date (fr) ou sa discipline. */
@@ -475,6 +520,31 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.4rem' }}>
                 {importResult.imported} importée{importResult.imported > 1 ? 's' : ''}
                 {importResult.skipped > 0 ? ` · ${importResult.skipped} déjà présente${importResult.skipped > 1 ? 's' : ''}` : ''}
+              </div>
+            )}
+          </div>
+        )}
+
+        {missingFingerprint.length > 0 && (
+          <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
+            <button type="button" onClick={handleBackfill} disabled={!!backfillProgress}
+              title="Télécharge et reparse chaque activité pour calculer son empreinte géographique (nécessaire à la comparaison de trajets et aux segments), ainsi que les meilleurs efforts et zones FC si absents"
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
+                padding: '0.5rem', fontSize: '0.82rem', fontWeight: 600,
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+                background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                cursor: backfillProgress ? 'default' : 'pointer', opacity: backfillProgress ? 0.7 : 1,
+              }}>
+              {backfillProgress
+                ? <><Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> Analyse… {backfillProgress.done}/{backfillProgress.total}</>
+                : <><Zap size={14} /> Calculer les empreintes ({missingFingerprint.length} activité{missingFingerprint.length > 1 ? 's' : ''})</>
+              }
+            </button>
+            {backfillResult && (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textAlign: 'center', marginTop: '0.4rem' }}>
+                {backfillResult.done} traitée{backfillResult.done > 1 ? 's' : ''}
+                {backfillResult.failed > 0 ? ` · ${backfillResult.failed} échouée${backfillResult.failed > 1 ? 's' : ''} (fichier illisible/supprimé)` : ''}
               </div>
             )}
           </div>

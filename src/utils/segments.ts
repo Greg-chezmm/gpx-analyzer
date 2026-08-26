@@ -9,7 +9,7 @@ export interface GeoPoint { lat: number; lon: number; distFromStart: number; }
 // échantillonnés tous les ~25m le long du tracé. Comparer deux empreintes (simple
 // intersection d'ensembles) coûte quasi rien et évite de télécharger/parser le
 // fichier complet de chaque activité de l'historique avant de savoir si elle vaut
-// le coup d'être comparée finement (voir useRecurringSegments.ts).
+// le coup d'être comparée finement (voir useStoredSegmentScan.ts).
 
 const GEOHASH_BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
 const FINGERPRINT_PRECISION = 7;
@@ -135,14 +135,17 @@ function neighborIndices(idx: Map<string, number[]>, lat: number, lon: number): 
 }
 
 interface MatchResult { aStart: number; aEnd: number; bStart: number; bEnd: number; }
+interface Run { aStart: number; aEnd: number; bMin: number; bMax: number; dist: number; }
 
 /**
- * Trouve le plus long corridor commun entre deux tracés : rééchantillonnage à pas fixe,
- * appariement point-à-point (tolérance ~30m + cap cohérent à ±55° pour ignorer un aller-retour
- * sur le même chemin), puis extraction de la plus longue plage globalement croissante côté B
- * (tolère de petits trous GPS jusqu'à MAX_GAP_POINTS points consécutifs non appariés).
+ * Rééchantillonnage + appariement point-à-point (tolérance ~30m + cap cohérent à ±55° pour ignorer
+ * un aller-retour sur le même chemin) entre deux tracés, puis découpage en "runs" (plages
+ * globalement croissantes côté B, tolérant de petits trous GPS jusqu'à MAX_GAP_POINTS points
+ * consécutifs non appariés). Un trou plus grand qu'un aller-retour normal (ex. une boucle ajoutée
+ * au milieu du trajet, un dropout GPS) termine un run et en démarre un nouveau — c'est pour ça
+ * qu'un même trajet réel peut produire PLUSIEURS runs distincts, voir computeTotalCoverage.
  */
-function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM = MIN_SEGMENT_DISTANCE_M): MatchResult | null {
+function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; runs: Run[] } | null {
   const rsA = resampleByDistance(pointsA, RESAMPLE_STEP_M);
   const rsB = resampleByDistance(pointsB, RESAMPLE_STEP_M);
   if (rsA.length < 5 || rsB.length < 5) return null;
@@ -163,7 +166,6 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
     return best;
   });
 
-  interface Run { aStart: number; aEnd: number; bMin: number; bMax: number; dist: number; }
   const runs: Run[] = [];
   let cur: { aStart: number; aEnd: number; bLast: number; bMin: number; bMax: number; gaps: number } | null = null;
 
@@ -191,6 +193,19 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
   }
   flush();
 
+  return { rsA, rsB, runs };
+}
+
+/**
+ * Trouve le plus long corridor commun UNIQUE entre deux tracés (un seul run contigu) — utilisé pour
+ * un segment manuel, où le passage doit être continu par définition (une montée n'est pas coupable
+ * en deux morceaux séparés par un détour).
+ */
+function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM = MIN_SEGMENT_DISTANCE_M): MatchResult | null {
+  const computed = computeRuns(pointsA, pointsB);
+  if (!computed) return null;
+  const { rsA, rsB, runs } = computed;
+
   const valid = runs.filter(r => r.dist >= minDistanceM);
   if (valid.length === 0) return null;
   const best = valid.reduce((a, b) => (b.dist > a.dist ? b : a));
@@ -201,6 +216,30 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
     bStart: rsB[best.bMin].origIndex,
     bEnd: rsB[best.bMax].origIndex,
   };
+}
+
+// Distance minimale d'UN run pour être compté dans une comparaison de trajet complet — bien plus
+// bas que pour un segment, car ici on additionne PLUSIEURS runs : un détour au milieu du trajet
+// (boucle ajoutée, coupure GPS) peut légitimement fragmenter le même trajet réel en plusieurs bouts.
+const MIN_ROUTE_RUN_DISTANCE_M = 2 * RESAMPLE_STEP_M;
+
+/**
+ * Additionne la distance de TOUS les runs trouvés entre deux tracés (pas seulement le plus long) —
+ * contrairement à findLongestMatch, on accepte qu'un même trajet réel soit fragmenté en plusieurs
+ * morceaux par un détour ponctuel (boucle ajoutée, coupure GPS) sans perdre la couverture des
+ * portions avant/après ce détour. Utilisé par matchFullRoute (comparaison de trajets complets).
+ */
+function computeTotalCoverage(pointsA: GeoPoint[], pointsB: GeoPoint[]): { distA: number; distB: number } | null {
+  const computed = computeRuns(pointsA, pointsB);
+  if (!computed) return null;
+  const { rsB, runs } = computed;
+
+  const valid = runs.filter(r => r.dist >= MIN_ROUTE_RUN_DISTANCE_M);
+  if (valid.length === 0) return null;
+
+  const distA = valid.reduce((s, r) => s + r.dist, 0);
+  const distB = valid.reduce((s, r) => s + (rsB[r.bMax].dist - rsB[r.bMin].dist), 0);
+  return { distA, distB };
 }
 
 // ─── Agrégation multi-activités ─────────────────────────────────────────────────
@@ -219,14 +258,6 @@ export interface SegmentAttempt {
   elevGain: number;  // m
   date: string;      // "YYYY-MM-DD"
   isCurrent: boolean;
-}
-
-/** Un segment détecté comme récurrent, avec tous les passages connus triés du plus rapide au plus lent. */
-export interface RecurringSegment {
-  id: string;
-  distance: number; // m — référence (passage courant)
-  elevGain: number; // m — référence (passage courant)
-  attempts: SegmentAttempt[];
 }
 
 /** Source minimale nécessaire pour comparer/agréger une activité — découplé du modèle de stockage cloud. */
@@ -264,7 +295,8 @@ export function toCachedAttempt(a: SegmentAttempt): CachedSegmentAttempt {
   };
 }
 
-function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: number, date: string, isCurrent: boolean): SegmentAttempt {
+/** Construit un passage à partir d'une plage [startIndex, endIndex] de points — partagé par le matching segment et trajet complet. */
+export function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: number, date: string, isCurrent: boolean): SegmentAttempt {
   const slice = points.slice(startIndex, endIndex + 1);
   const distance = slice.length > 1 ? slice[slice.length - 1].distFromStart - slice[0].distFromStart : 0;
 
@@ -295,58 +327,11 @@ function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: num
   };
 }
 
-/**
- * Compare l'activité courante à une liste de candidates et regroupe les correspondances
- * en segments récurrents. Un seul (le plus long) corridor commun est retenu par paire —
- * une activité qui repasse deux fois par le même tronçon (boucle) ne produira qu'un match.
- */
-export function detectRecurringSegments(current: SegmentSource, others: SegmentSource[]): RecurringSegment[] {
-  const matches = others
-    .map(other => ({ other, match: findLongestMatch(current.points, other.points) }))
-    .filter((x): x is { other: SegmentSource; match: MatchResult } => x.match !== null);
-
-  if (matches.length === 0) return [];
-
-  // Regroupe les correspondances dont la plage côté activité courante se chevauche fortement
-  // (même tronçon détecté via plusieurs candidates) en un seul RecurringSegment. La plage de
-  // référence d'un groupe est FIXÉE au premier match qui l'a créé (le plus long, cf. tri
-  // ci-dessous) et n'est plus jamais élargie ensuite — sinon un chaînage progressif (A~B, B~C,
-  // C~D...) peut regrouper des tronçons de longueurs très différentes qui ne se recouvrent pas
-  // vraiment entre eux (bug observé : un passage de 700m agrégé avec des passages de 18km).
-  const sortedMatches = [...matches].sort((a, b) => (b.match.aEnd - b.match.aStart) - (a.match.aEnd - a.match.aStart));
-  interface Group { aStart: number; aEnd: number; items: typeof matches; }
-  const groups: Group[] = [];
-  for (const item of sortedMatches) {
-    const { aStart, aEnd } = item.match;
-    const g = groups.find(g => {
-      const overlap = Math.min(aEnd, g.aEnd) - Math.max(aStart, g.aStart);
-      const shorter = Math.min(aEnd - aStart, g.aEnd - g.aStart);
-      return overlap > 0 && shorter > 0 && overlap / shorter > 0.5;
-    });
-    if (g) {
-      g.items.push(item);
-    } else {
-      groups.push({ aStart, aEnd, items: [item] });
-    }
-  }
-
-  return groups.map((g, idx) => {
-    const currentAttempt = buildAttempt(current.points, g.aStart, g.aEnd, current.date, true);
-    const otherAttempts = g.items.map(item =>
-      buildAttempt(item.other.points, item.match.bStart, item.match.bEnd, item.other.date, false)
-    );
-    const attempts = [currentAttempt, ...otherAttempts].sort((a, b) => a.duration - b.duration);
-    return { id: `seg-${idx}`, distance: currentAttempt.distance, elevGain: currentAttempt.elevGain, attempts };
-  });
-}
-
 // ─── Segments définis manuellement ──────────────────────────────────────────────
 //
-// À la différence de la détection automatique (qui découvre des tronçons récurrents en
-// comparant l'activité courante à l'historique), un segment manuel a une géométrie de
-// référence FIXE, choisie une fois par l'utilisateur (deux clics sur la carte) et persistée.
-// Comparer une activité à ce segment est donc un matching à sens unique (référence → candidate),
-// pas une découverte par regroupement — beaucoup plus simple, voir matchStoredSegment ci-dessous.
+// Un segment a une géométrie de référence FIXE, choisie une fois par l'utilisateur (deux clics
+// sur la carte ou le graphique) et persistée sur Firestore. Comparer une activité à ce segment
+// est un matching à sens unique (référence → candidate), voir matchStoredSegment ci-dessous.
 
 /** Géométrie + métadonnées calculées à la création d'un segment manuel, prêtes à persister. */
 export interface SegmentGeometry {
@@ -382,6 +367,70 @@ export function matchStoredSegment(
   const match = findLongestMatch(refPoints, candidate.points, minDistanceM);
   if (!match) return null;
   return buildAttempt(candidate.points, match.bStart, match.bEnd, candidate.date, isCurrent);
+}
+
+// ─── Comparaison de trajets complets ─────────────────────────────────────────────
+//
+// À la différence d'un segment (un tronçon choisi, comparaison à sens unique), on cherche ici si
+// une activité passée suit sensiblement le MÊME trajet complet que l'activité courante, dans le
+// MÊME sens de parcours (le cap ±55° de findLongestMatch exclut déjà les allers-retours/sens
+// inverse — comportement voulu). Seuil calibré empiriquement (2026-08-26, données réelles Greg) :
+// - Un même trajet interrompu par un court détour (ex. boucle de 500m ajoutée sur un total de
+//   18,7km) donne ~97% de recouvrement une fois les runs additionnés (voir computeTotalCoverage) —
+//   doit matcher.
+// - Une variante "rallongée" du même trajet de base (~4km de plus sur ~22km, nommée différemment
+//   par l'utilisateur) donne ~80-82% de recouvrement côté long trajet — NE doit PAS matcher, c'est
+//   une variante distincte, pas juste une petite variation du même trajet.
+// 90% sépare correctement ces deux cas. Bien au-dessus du seuil pathologique (25% pour une boucle
+// 2 fois plus longue contenant une boucle courte) qu'on veut aussi exclure.
+const FULL_ROUTE_COVERAGE = 0.9;
+
+/**
+ * Compare deux trajets complets parcourus dans le même sens ; retourne le passage correspondant
+ * (l'activité `candidate` en entier — une fois confirmé qu'il s'agit du même trajet, ses propres
+ * stats sont plus parlantes qu'une sous-plage) si la couverture cumulée (somme de tous les runs
+ * trouvés, voir computeTotalCoverage) atteint au moins `FULL_ROUTE_COVERAGE` de la distance totale
+ * des DEUX activités, sinon `null`. Le seuil est appliqué symétriquement pour éviter les faux
+ * positifs "sous-trajet". Additionner plusieurs runs (plutôt que le seul plus long) est nécessaire
+ * pour ne pas rater un trajet par ailleurs identique, mais interrompu par un détour ponctuel
+ * (boucle ajoutée, coupure GPS) — sinon un même trajet réel peut apparaître fragmenté en deux
+ * moitiés dont aucune ne dépasse le seuil individuellement.
+ */
+export function matchFullRoute(current: SegmentSource, candidate: SegmentSource, isCurrent = false): SegmentAttempt | null {
+  const totalCurrent = current.points[current.points.length - 1]?.distFromStart ?? 0;
+  const totalCandidate = candidate.points[candidate.points.length - 1]?.distFromStart ?? 0;
+  if (totalCurrent <= 0 || totalCandidate <= 0) return null;
+
+  const coverage = computeTotalCoverage(current.points, candidate.points);
+  if (!coverage) return null;
+  if (coverage.distA / totalCurrent < FULL_ROUTE_COVERAGE) return null;
+  if (coverage.distB / totalCandidate < FULL_ROUTE_COVERAGE) return null;
+
+  return buildAttempt(candidate.points, 0, candidate.points.length - 1, candidate.date, isCurrent);
+}
+
+/** Diagnostic d'une comparaison de trajet — pourquoi une candidate a (ou n'a pas) été retenue. */
+export interface RouteCoverageDebug {
+  /** Au moins un run a été trouvé, même si la couverture cumulée ne passe pas le seuil ensuite. */
+  found: boolean;
+  coverageCurrent: number;   // 0-1
+  coverageCandidate: number; // 0-1
+}
+
+/**
+ * Rejoue la comparaison et retourne les taux de couverture cumulée bruts — utilisé pour comprendre
+ * pourquoi une candidate qui semblait plausible (même distance, empreinte proche) n'a finalement
+ * pas matché : aucun corridor commun du tout (found=false) ou recouvrement réel mais sous le seuil
+ * (found=true, ex. un vrai détour partiel plutôt qu'une simple fragmentation GPS).
+ */
+export function debugRouteCoverage(current: SegmentSource, candidate: SegmentSource): RouteCoverageDebug {
+  const totalCurrent = current.points[current.points.length - 1]?.distFromStart ?? 0;
+  const totalCandidate = candidate.points[candidate.points.length - 1]?.distFromStart ?? 0;
+  if (totalCurrent <= 0 || totalCandidate <= 0) return { found: false, coverageCurrent: 0, coverageCandidate: 0 };
+
+  const coverage = computeTotalCoverage(current.points, candidate.points);
+  if (!coverage) return { found: false, coverageCurrent: 0, coverageCandidate: 0 };
+  return { found: true, coverageCurrent: coverage.distA / totalCurrent, coverageCandidate: coverage.distB / totalCandidate };
 }
 
 /** Parse un fichier brut (GPX texte ou FIT binaire) en points enrichis — utilisé pour reconstruire une activité historique le temps du matching. */

@@ -6,12 +6,13 @@ import {
   fingerprintOverlap, matchStoredSegment, parseActivityRawToPoints, toCachedAttempt,
   type CachedSegmentAttempt,
 } from '../utils/segments';
-import type { SegmentScanStatus } from './useRecurringSegments';
 
 const MAX_CANDIDATES = 20;
 const MIN_FINGERPRINT_OVERLAP = 0.15;
 /** Taille du classement mis en cache — voir StoredSegment.attempts. */
 const TOP_N = 10;
+
+export type SegmentScanStatus = 'idle' | 'scanning' | 'done';
 
 export interface StoredSegmentScanHandle {
   status: SegmentScanStatus;
@@ -23,12 +24,11 @@ export interface StoredSegmentScanHandle {
 }
 
 /**
- * Compare un segment défini manuellement (géométrie de référence fixe) à l'historique — même
- * pré-filtrage par empreinte + plafond de candidats que la détection automatique (voir
- * useRecurringSegments.ts), mais matching à sens unique (pas de découverte/regroupement).
- * L'activité actuellement ouverte est comparée sans téléchargement (déjà en mémoire).
- * Le résultat (top 10) est remonté via onScanComplete pour être persisté par l'appelant
- * (voir useStoredSegments.updateAttempts) — ce hook ne connaît pas Firestore directement.
+ * Compare un segment défini manuellement (géométrie de référence fixe) à l'historique — matching
+ * à sens unique (référence → candidates), pas de découverte/regroupement. L'activité actuellement
+ * ouverte est comparée sans téléchargement (déjà en mémoire). Le résultat (top 10) est remonté via
+ * onScanComplete pour être persisté par l'appelant (voir useStoredSegments.updateAttempts) — ce
+ * hook ne connaît pas Firestore directement.
  */
 export function useStoredSegmentScan(
   segment: StoredSegment,

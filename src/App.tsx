@@ -26,8 +26,8 @@ const ActivityMap     = lazy(() => import("./components/ActivityMap").then(m => 
 const IntervalAnalysis = lazy(() => import("./components/IntervalAnalysis").then(m => ({ default: m.IntervalAnalysis })));
 const ClimbAnalysis   = lazy(() => import("./components/ClimbAnalysis").then(m => ({ default: m.ClimbAnalysis })));
 const HillRepeats     = lazy(() => import("./components/HillRepeats").then(m => ({ default: m.HillRepeats })));
-const RecurringSegments = lazy(() => import("./components/RecurringSegments").then(m => ({ default: m.RecurringSegments })));
 const StoredSegments = lazy(() => import("./components/StoredSegments").then(m => ({ default: m.StoredSegments })));
+const RouteHistory = lazy(() => import("./components/RouteHistory").then(m => ({ default: m.RouteHistory })));
 import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
@@ -53,7 +53,7 @@ import { mergeActivities, type MergeInfo } from "./utils/fitMerger";
 import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
-import { getActivityWeather, weatherToEntryFields, type WeatherInfo } from "./utils/weather";
+import { getActivityWeather, weatherToEntryFields, entryToWeather, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts } from "./utils/bestEfforts";
 import { computeFingerprint, matchStoredSegment, toCachedAttempt } from "./utils/segments";
 import { useSegmentPicker } from "./hooks/useSegmentPicker";
@@ -167,6 +167,13 @@ function App() {
     [cloud.history]
   );
   const tsbResult = useMemo(() => calcTSB(sessionsWithTrimp), [sessionsWithTrimp]);
+
+  // Historique cloud restreint au même type d'activité (course/vélo) — partagé par les segments
+  // manuels et la détection de trajet habituel, pour éviter les faux rapprochements entre disciplines.
+  const sameTypeCloudHistory = useMemo(
+    () => enrichedActivity ? cloud.history.filter(e => e.activityType === enrichedActivity.activityType) : [],
+    [cloud.history, enrichedActivity]
+  );
 
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
@@ -341,6 +348,12 @@ function App() {
 
   /** Charge l'activité exemple générée dynamiquement (parcours Paris). */
   const handleLoadSample = () => handleActivityLoaded(generateSampleGPX(), "Exemple_Course_Paris.gpx");
+
+  /** Ouvre une activité cloud passée (ex. depuis "Ton parcours habituel") comme activité courante. */
+  const handleOpenCloudActivity = async (entry: ActivityIndexEntry) => {
+    const data = await cloud.loadFile(entry);
+    handleActivityLoaded(data, entry.fileName, entry.name, entryToWeather(entry));
+  };
 
   /** Réinitialise complètement l'état pour revenir à l'écran d'accueil. */
   const handleReset = () => {
@@ -935,23 +948,23 @@ function App() {
               </Suspense>
             )}
 
-            {/* Segments récurrents (auto + manuels) — nécessite le cloud (Firebase) connecté, comparaison limitée
-                aux activités du même type (course vs vélo) pour éviter les faux rapprochements. */}
+            {/* Trajet habituel — détection automatique et silencieuse, n'affiche rien si aucune
+                correspondance. Segments manuels — nécessite le cloud (Firebase) connecté. */}
             {cloud.status === 'connected' && (
               <>
-                {cloud.history.filter(e => e.activityType === enrichedActivity!.activityType).length > 0 && (
-                  <Suspense fallback={null}>
-                    <RecurringSegments
-                      activity={enrichedActivity!}
-                      history={cloud.history.filter(e => e.activityType === enrichedActivity!.activityType)}
-                      loadFile={cloud.loadFile}
-                    />
-                  </Suspense>
-                )}
+                <Suspense fallback={null}>
+                  <RouteHistory
+                    activity={enrichedActivity!}
+                    displayName={displayName}
+                    history={sameTypeCloudHistory}
+                    loadFile={cloud.loadFile}
+                    onOpenActivity={handleOpenCloudActivity}
+                  />
+                </Suspense>
                 <Suspense fallback={null}>
                   <StoredSegments
                     activity={enrichedActivity!}
-                    history={cloud.history.filter(e => e.activityType === enrichedActivity!.activityType)}
+                    history={sameTypeCloudHistory}
                     loadFile={cloud.loadFile}
                     picker={segmentPicker}
                     storedSegments={storedSegments}
