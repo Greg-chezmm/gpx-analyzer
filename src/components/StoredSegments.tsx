@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2 } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { StoredSegment } from "../utils/firestoreStorage";
 import type { CachedSegmentAttempt } from "../utils/segments";
-import { buildSegmentGeometry } from "../utils/segments";
+import { buildSegmentGeometry, matchStoredSegment } from "../utils/segments";
 import type { StoredSegmentsHandle } from "../hooks/useStoredSegments";
 import { useStoredSegmentScan } from "../hooks/useStoredSegmentScan";
 import type { SegmentPickerHandle } from "../hooks/useSegmentPicker";
@@ -69,7 +69,7 @@ interface StoredSegmentCardProps {
 }
 
 function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt }: StoredSegmentCardProps) {
-  const { status, progress, attempts, skippedCount, scan } = useStoredSegmentScan(
+  const { status, progress, attempts, scan } = useStoredSegmentScan(
     segment, activity, history, loadFile,
     top => { onUpdateAttempts(segment.id, top, new Date().toISOString()); },
   );
@@ -148,12 +148,6 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
         </p>
       )}
 
-      {status === "done" && skippedCount > 0 && (
-        <p style={{ fontSize: "0.75rem", color: "var(--text-tertiary)", padding: "0.3rem 1rem 0", margin: 0 }}>
-          {skippedCount} activité{skippedCount > 1 ? "s" : ""} non comparée{skippedCount > 1 ? "s" : ""} (plafond par analyse).
-        </p>
-      )}
-
       {attempts.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
@@ -185,10 +179,18 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<CachedSegmentAttempt | null>(null);
 
-  if (activity.activityType === "unknown") return null;
   const activityType = activity.activityType;
+  const ofType = segments.filter(s => s.activityType === activityType);
 
-  const relevant = segments.filter(s => s.activityType === activityType);
+  // N'affiche un segment que si l'activité actuellement ouverte suit bien son tracé — un segment
+  // défini sur un autre parcours (même type d'activité) n'a rien à faire ici.
+  const relevant = useMemo(
+    () => ofType.filter(s => matchStoredSegment(s.points, s.distance, { points: activity.points, date: "" }, true) !== null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ofType, activity.points]
+  );
+
+  if (activityType === "unknown") return null;
 
   const handleSave = async () => {
     if (picker.start === null || picker.end === null || !name.trim()) return;
@@ -269,7 +271,9 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
 
       {relevant.length === 0 && picker.stage === "idle" && (
         <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", marginTop: "0.75rem" }}>
-          Aucun segment défini pour ce type d'activité. Clique « Définir un segment », puis choisis le point de départ et le point d'arrivée directement sur la carte ou sur le graphique (altitude, allure...).
+          {ofType.length === 0
+            ? "Aucun segment défini pour ce type d'activité. Clique « Définir un segment », puis choisis le point de départ et le point d'arrivée directement sur la carte ou sur le graphique (altitude, allure...)."
+            : "Aucun de tes segments enregistrés ne correspond au tracé de cette activité."}
         </p>
       )}
 

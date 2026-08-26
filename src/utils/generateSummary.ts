@@ -1,15 +1,11 @@
 import type {
   GPXActivity, GPXSplit, GPXInterval, ClimbSegment,
-  TRIMPResult, VO2maxEstimate, CardiacDrift,
+  TRIMPResult, CardiacDrift,
 } from "./gpxParser";
 import type { FitSummary } from "./gpxCore";
 import type { HillRepeatSeries } from "./hillRepeats";
-import type { ActivityIndexEntry } from "./driveStorage";
-
-type TrainingEntry = ActivityIndexEntry & { trimp: number };
 import { CLIMB_CATEGORIES } from "./gpxParser";
 import { formatDuration, formatPace } from "../components/SplitsTable";
-import { computeVDOT } from "./vdot";
 import { describeWeatherCode, windDirectionLabel, describeTimeOfDay, type WeatherInfo } from "./weather";
 
 /** Options d'entrée pour la génération du résumé IA. */
@@ -21,21 +17,12 @@ interface SummaryOptions {
   hillRepeats?: HillRepeatSeries[];
   fcMax: number;
   fcRest: number;
-  vma: number;
-  ftp: number;
-  weight: number;
-  birthYear: number;
-  sessionType: string | null;
   trimp: TRIMPResult | null;
-  vo2max: VO2maxEstimate | null;
   drift: CardiacDrift | null;
   fitSummary?: FitSummary | null;
-  normalizedPower?: number | null;
-  intensityFactor?: number | null;
   tsbResult?: { atl: number; ctl: number; tsb: number } | null;
-  history?: TrainingEntry[];
-  activityDate?: string; // YYYY-MM-DD — pour exclure la séance courante de l'historique
   activityName?: string; // nom personnalisé (override du nom original)
+  location?: string | null; // lieu géocodé (voir App.tsx locationName)
   weather?: WeatherInfo | null;
 }
 
@@ -82,153 +69,71 @@ function zoneStats(points: GPXActivity["points"], fcMax: number, fcRest: number)
   }));
 }
 
-// ── Zones d'allure % VMA ────────────────────────────────────────────────────
-
-/** Définition des zones d'allure en % VMA (course à pied). */
-const PACE_ZONES = [
-  { label: "Z1 — Récupération",          pctMin: 0,    pctMax: 0.50 },
-  { label: "Z2 — Endurance fondamentale",pctMin: 0.50, pctMax: 0.65 },
-  { label: "Z3 — Aérobie",               pctMin: 0.65, pctMax: 0.80 },
-  { label: "Z4 — Seuil",                 pctMin: 0.80, pctMax: 0.90 },
-  { label: "Z5 — VO2max / Fractionné",   pctMin: 0.90, pctMax: Infinity },
-];
-
-/** Calcule la répartition du temps par zone d'allure % VMA (interpolation temporelle point-à-point). */
-function paceZoneStats(points: GPXActivity["points"], vmaKmh: number) {
-  const vmaMs = vmaKmh / 3.6;
-  const secs = new Array<number>(PACE_ZONES.length).fill(0);
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    if (!curr.speed || curr.speed < 0.3) continue;
-    if (!curr.time || !prev.time) continue;
-    const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
-    if (dt <= 0 || dt > 60) continue;
-    const pct = ((curr.speed + (prev.speed ?? curr.speed)) / 2) / vmaMs;
-    let z = 0;
-    for (let j = PACE_ZONES.length - 1; j >= 0; j--) {
-      if (pct >= PACE_ZONES[j].pctMin) { z = j; break; }
-    }
-    secs[z] += dt;
-  }
-  const total = secs.reduce((a, b) => a + b, 0);
-  if (total === 0) return null;
-  return PACE_ZONES.map((z, i) => ({
-    label: z.label,
-    pct: Math.round((secs[i] / total) * 100),
-    seconds: secs[i],
-    speedMin: z.pctMin * vmaMs,
-    speedMax: z.pctMax === Infinity ? null : z.pctMax * vmaMs,
-  }));
+/** Vitesse ascensionnelle moyenne (m/h) d'un intervalle — utilisée dans le détail par répétition VMA. */
+function intervalVAM(iv: GPXInterval): number | null {
+  if (!iv.totalAscent || iv.duration <= 0) return null;
+  return Math.round(iv.totalAscent / (iv.duration / 3600));
 }
 
-// ── Zones de puissance Coggan ────────────────────────────────────────────────
+// Une vraie répétition structurée (VMA/côtes/seuil) dure rarement plus de 30 min — au-delà, un
+// "effort" issu des laps .fit est presque toujours un lap accidentel/pause sur une sortie longue
+// (ex. SL 21 km : 2 laps dont un de 2h01, classé "effort" faute de mieux par la comparaison de FC
+// médiane entre seulement 2 laps) plutôt qu'un vrai intervalle.
+const MAX_STRUCTURED_INTERVAL_DURATION_S = 30 * 60;
 
-/**
- * Définition des 7 zones de puissance Coggan (vélo) en % FTP.
- * Z1 < 55%, Z2 55–75%, Z3 75–90%, Z4 90–105% (seuil), Z5 105–120% (VO2max),
- * Z6 120–150% (anaérobie), Z7 > 150% (neuromusculaire).
- */
-const POWER_ZONES = [
-  { label: "Z1 — Récupération active",  pctMin: 0,    pctMax: 0.55 },
-  { label: "Z2 — Endurance",            pctMin: 0.55, pctMax: 0.75 },
-  { label: "Z3 — Tempo",                pctMin: 0.75, pctMax: 0.90 },
-  { label: "Z4 — Seuil lactique",       pctMin: 0.90, pctMax: 1.05 },
-  { label: "Z5 — VO2max",               pctMin: 1.05, pctMax: 1.20 },
-  { label: "Z6 — Capacité anaérobie",   pctMin: 1.20, pctMax: 1.50 },
-  { label: "Z7 — Neuromusculaire",      pctMin: 1.50, pctMax: Infinity },
-];
-
-/** Calcule la répartition du temps par zone de puissance Coggan (% FTP) pour les points de l'activité. */
-function powerZoneStats(points: GPXActivity["points"], ftp: number) {
-  if (ftp <= 0) return null;
-  const secs = new Array<number>(POWER_ZONES.length).fill(0);
-  for (let i = 1; i < points.length; i++) {
-    const curr = points[i], prev = points[i - 1];
-    if (curr.power === null || prev.power === null) continue;
-    if (!curr.time || !prev.time) continue;
-    const dt = (curr.time.getTime() - prev.time.getTime()) / 1000;
-    if (dt <= 0 || dt > 60) continue;
-    const avgW = (curr.power + prev.power) / 2;
-    const pct = avgW / ftp;
-    let z = 0;
-    for (let j = POWER_ZONES.length - 1; j >= 0; j--) {
-      if (pct >= POWER_ZONES[j].pctMin) { z = j; break; }
-    }
-    secs[z] += dt;
-  }
-  const total = secs.reduce((a, b) => a + b, 0);
-  if (total === 0) return null;
-  return POWER_ZONES.map((z, i) => ({
-    label: z.label,
-    pct: Math.round((secs[i] / total) * 100),
-    seconds: secs[i],
-  }));
+/** Vrai uniquement si les laps .fit représentent de vrais intervalles structurés (pas un lap pause/étape sur une sortie longue). */
+function hasStructuredIntervals(activity: GPXActivity, intervals: { efforts: GPXInterval[] } | null): boolean {
+  if (!activity.fitLaps?.length || !intervals || intervals.efforts.length < 2) return false;
+  return intervals.efforts.every(iv => iv.duration <= MAX_STRUCTURED_INTERVAL_DURATION_S);
 }
 
 /**
- * Génère un prompt texte complet pour analyse IA d'une séance : profil, données générales,
- * zones cardiaques/allure/puissance, métriques physiologiques (TRIMP, VO2max, dérive),
- * données montre FIT, montées, répétitions de côte, fractionnés et splits.
+ * Génère un prompt texte pour analyse IA d'une séance, adapté au type d'activité :
+ * - Vélo : vitesse/cadence/puissance de base, pas de fractionnés ni splits (données déjà denses)
+ * - Course (footing/trail) : allure, splits par km
+ * - Course avec fractionnés détectés (VMA/intervalles) : détail par répétition à la place des splits
+ * Dans les trois cas : charge (CTL/ATL/TSB, TRIMP Banister), dérive cardiaque, météo, ressenti —
+ * pas de profil athlète (redondant avec le contexte de conversation), pas de métriques dérivées
+ * peu fiables (TRIMP Edwards, TSS/EPOC/Training Effect montre), pas de liste de questions finale.
  */
 export function generateSummary(opts: SummaryOptions): string {
   const { activity, splits, climbs, intervals, hillRepeats,
-          fcMax, fcRest, vma, ftp, weight, birthYear,
-          sessionType, trimp, vo2max, drift, fitSummary,
-          normalizedPower, intensityFactor,
-          tsbResult, history, activityDate, activityName, weather } = opts;
+          fcMax, fcRest, trimp, drift, fitSummary,
+          tsbResult, activityName, location, weather } = opts;
 
   const isCycling = activity.activityType === "cycling";
+  // Séance VMA/côtes/seuil au sens du template Greg = laps structurés issus du .fit (pas la
+  // détection heuristique par vitesse, qui peut aussi se déclencher sur un trail vallonné), ET
+  // chaque répétition doit avoir une durée plausible pour un vrai intervalle — sinon un lap
+  // pause/étape sur un footing ou une sortie longue serait affiché comme une "répétition".
+  const isVmaSession = !isCycling && hasStructuredIntervals(activity, intervals);
   const lines: string[] = [];
   const push = (s: string) => lines.push(s);
   const sep = () => lines.push("");
 
   const displayName = activityName || activity.name;
-  push(`Voici les données de ma séance de ${isCycling ? "vélo" : "course à pied"}${displayName ? ` "${displayName}"` : ""}. Peux-tu analyser ma performance et me donner des recommandations personnalisées ?`);
-  sep();
-
-  // ── Profil ──────────────────────────────────────────────────────────────────
-  const age = new Date().getFullYear() - birthYear;
-  push("👤 MON PROFIL");
-  push(`• Âge : ${age} ans (né en ${birthYear})`);
-  push(`• FCmax : ${fcMax} bpm  |  FC repos : ${fcRest} bpm`);
-  if (!isCycling) push(`• VMA : ${vma} km/h`);
-  if (isCycling && ftp > 0) push(`• FTP : ${ftp} W${weight > 0 ? `  (${(ftp / weight).toFixed(2)} W/kg)` : ""}`);
-  if (weight > 0) push(`• Poids : ${weight} kg`);
+  push(`Voici les données de ma séance de ${isCycling ? "vélo" : "course à pied"}${displayName ? ` "${displayName}"` : ""}${location ? ` à ${location}` : ""}. Peux-tu analyser ma performance et me donner des recommandations personnalisées ?`);
   sep();
 
   // ── Données générales ────────────────────────────────────────────────────────
   push("📊 DONNÉES GÉNÉRALES");
   if (activity.startTime) {
+    const dateLong = activity.startTime.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
     const tod = describeTimeOfDay(activity.startTime);
     const hh = String(activity.startTime.getHours()).padStart(2, '0');
     const mm = String(activity.startTime.getMinutes()).padStart(2, '0');
-    push(`• Moment de la journée : ${tod.label} (${hh}:${mm})`);
+    push(`• Date : ${dateLong} — ${tod.label} (${hh}:${mm})`);
   }
   push(`• Distance : ${(activity.totalDistance / 1000).toFixed(2)} km`);
   push(`• Durée totale : ${formatDuration(activity.totalDuration)}  |  Temps en mouvement : ${formatDuration(activity.movingTime)}`);
-  if (!isCycling && activity.avgPace > 0) {
+  if (isCycling) {
+    push(`• Vitesse moyenne : ${(activity.avgSpeed * 3.6).toFixed(1)} km/h  |  Max : ${(activity.maxSpeed * 3.6).toFixed(1)} km/h`);
+  } else if (activity.avgPace > 0) {
     push(`• Allure moyenne : ${formatPace(activity.avgPace)} /km`);
   }
-  push(`• Vitesse moyenne : ${(activity.avgSpeed * 3.6).toFixed(1)} km/h  |  Max : ${(activity.maxSpeed * 3.6).toFixed(1)} km/h`);
   push(`• Dénivelé : +${activity.elevationGain} m / -${activity.elevationLoss} m`);
   if (activity.avgHeartRate) push(`• FC moyenne : ${activity.avgHeartRate} bpm  |  FC max séance : ${activity.maxHeartRate ?? "–"} bpm`);
-  if (activity.avgCadence !== null) {
-    const cadDisplay = isCycling ? activity.avgCadence : (activity.avgCadence * 2);
-    const cadUnit = isCycling ? "rpm" : "ppm";
-    push(`• Cadence moyenne : ${cadDisplay} ${cadUnit}`);
-  }
-  if (isCycling && normalizedPower) {
-    push(`• Puissance normalisée (NP) : ${normalizedPower} W`);
-    if (intensityFactor) {
-      push(`• Intensity Factor (IF) : ${intensityFactor.toFixed(2)}`);
-      if (ftp > 0 && activity.movingTime > 0) {
-        // TSS = (durée_s × NP × IF) / (FTP × 3600) × 100  (formule Coggan)
-        const tss = Math.round((activity.movingTime * normalizedPower * intensityFactor) / (ftp * 3600) * 100);
-        push(`• TSS : ${tss}`);
-      }
-    }
-  }
-  if (sessionType) push(`• Type de séance détecté : ${sessionType}`);
+  if (isCycling && activity.avgCadence !== null) push(`• Cadence moyenne : ${activity.avgCadence} rpm`);
   sep();
 
   // ── Météo ───────────────────────────────────────────────────────────────────
@@ -237,8 +142,6 @@ export function generateSummary(opts: SummaryOptions): string {
     push("🌤️ MÉTÉO AU DÉPART");
     push(`• ${label}, ${Math.round(weather.temperature)}°C`);
     if (weather.windSpeed != null) push(`• Vent : ${Math.round(weather.windSpeed)} km/h ${windDirectionLabel(weather.windDirection)}`);
-    if (weather.cloudCover != null) push(`• Nébulosité : ${Math.round(weather.cloudCover)}%`);
-    if (weather.precipitation != null && weather.precipitation > 0) push(`• Précipitations : ${weather.precipitation.toFixed(1)} mm`);
     sep();
   }
 
@@ -253,116 +156,25 @@ export function generateSummary(opts: SummaryOptions): string {
     sep();
   }
 
-  // ── Zones d'allure % VMA (running) ──────────────────────────────────────────
-  if (!isCycling) {
-    const pzStats = paceZoneStats(activity.points, vma);
-    if (pzStats) {
-      push(`🏃 ZONES D'ALLURE (% VMA — VMA ${vma} km/h)`);
-      for (const z of pzStats) {
-        if (z.pct === 0) continue;
-        const range = z.speedMax === null
-          ? `> ${formatPace(1000 / z.speedMin)} /km`
-          : `${formatPace(1000 / z.speedMax)} – ${formatPace(1000 / z.speedMin)} /km`;
-        push(`• ${z.label} (${range}) : ${z.pct}% — ${formatDuration(z.seconds)}`);
-      }
-      sep();
-    }
-  }
-
-  // ── Zones de puissance Coggan (vélo) ────────────────────────────────────────
-  if (isCycling && ftp > 0) {
-    const pwStats = powerZoneStats(activity.points, ftp);
-    if (pwStats) {
-      push(`⚡ ZONES DE PUISSANCE (Coggan — FTP ${ftp} W)`);
-      for (const z of pwStats) {
-        if (z.pct === 0) continue;
-        push(`• ${z.label} : ${z.pct}% — ${formatDuration(z.seconds)}`);
-      }
-      sep();
-    }
-  }
-
   // ── Charge d'entraînement ───────────────────────────────────────────────────
-  if (trimp || vo2max || drift || tsbResult) {
+  if (trimp || drift || tsbResult || fitSummary?.feeling != null) {
     push("📈 CHARGE & MÉTRIQUES PHYSIOLOGIQUES");
     if (tsbResult) {
       const { ctl, atl, tsb } = tsbResult;
       const tsbState = tsb >= 10 ? "Frais (pic de forme)" : tsb >= 0 ? "En forme" : tsb >= -10 ? "Légèrement fatigué" : "Fatigué / surcharge";
       push(`• CTL (forme chronique) : ${ctl}  |  ATL (fatigue aiguë) : ${atl}  |  TSB (fraîcheur) : ${tsb > 0 ? "+" : ""}${tsb} → ${tsbState}`);
     }
-    if (trimp) {
-      push(`• TRIMP Edwards : ${trimp.edwards}  |  Banister : ${trimp.banister}`);
-      // Règle empirique : ~6h de récupération par 10 points TRIMP Edwards
-      const recovH = Math.round(trimp.edwards / 10) * 6;
-      push(`• Récupération estimée : ~${recovH}h (règle empirique TRIMP/10 × 6h)`);
-    }
-    if (vo2max && vo2max.confidence !== 'low') {
-      const confLabel = vo2max.confidence === 'high' ? 'élevée' : 'moyenne';
-      push(`• VO2max estimé : ${vo2max.value} mL/kg/min (fiabilité ${confLabel})`);
-      const { vdot, races, paces } = computeVDOT(vo2max.value);
-      push(`• VDOT : ${Math.round(vdot)}`);
-      const key5k = races.find(r => r.label === "5 km");
-      const keyHM = races.find(r => r.label === "Semi");
-      const keyMA = races.find(r => r.label === "Marathon");
-      const fmtTime = (s: number) => { const h = Math.floor(s/3600); const m = Math.floor((s%3600)/60); const sc = Math.round(s%60); return h > 0 ? `${h}h${String(m).padStart(2,'0')}'${String(sc).padStart(2,'0')}` : `${m}'${String(sc).padStart(2,'0')}`; };
-      if (key5k) push(`• Prédiction 5K : ${fmtTime(key5k.timeS)}`);
-      if (keyHM)  push(`• Prédiction semi : ${fmtTime(keyHM.timeS)}`);
-      if (keyMA)  push(`• Prédiction marathon : ${fmtTime(keyMA.timeS)}`);
-      const easyPace = paces.find(p => p.label === "Allure E (endurance)");
-      if (easyPace) push(`• Allure endurance cible : ${formatPace(easyPace.minPaceSecPerKm)}–${formatPace(easyPace.maxPaceSecPerKm)} /km`);
-    }
+    if (trimp) push(`• TRIMP Banister : ${trimp.banister}`);
     if (drift) {
       // Dérive < 5% = bonne endurance aérobie ; 5–9% = modérée ; > 9% = élevée
       const severity = drift.decoupling < 5 ? "faible" : drift.decoupling < 9 ? "modérée" : "élevée";
       push(`• Dérive cardiaque : ${drift.decoupling.toFixed(1)}% (${severity}) — EF1 ${drift.ef1.toFixed(2)} → EF2 ${drift.ef2.toFixed(2)}`);
     }
-    sep();
-  }
-
-  // ── Bilan FIT montre ─────────────────────────────────────────────────────────
-  if (fitSummary) {
-    const teLabels = ["Aucun effet", "Maintien", "Amélioration", "Optimisation", "Surcompensation"];
-    const feelLabels: Record<number, string> = { 1: "Très difficile", 2: "Difficile", 3: "Normal", 4: "Bon", 5: "Excellent" };
-    push("⌚ DONNÉES MONTRE (FIT)");
-    if (fitSummary.trainingEffect != null) {
-      const teIdx = Math.min(4, Math.floor(fitSummary.trainingEffect));
-      push(`• Training Effect : ${fitSummary.trainingEffect.toFixed(1)} — ${teLabels[teIdx]}`);
+    if (fitSummary?.feeling != null) {
+      const feelLabels: Record<number, string> = { 1: "Très difficile", 2: "Difficile", 3: "Normal", 4: "Bon", 5: "Excellent" };
+      push(`• Ressenti athlète : ${fitSummary.feeling}/5 — ${feelLabels[Math.round(fitSummary.feeling)] ?? ""}`);
     }
-    if (fitSummary.estimatedVO2max != null) push(`• VO2max estimé montre : ${fitSummary.estimatedVO2max.toFixed(1)} mL/kg/min`);
-    if (fitSummary.recoveryTimeH != null) push(`• Récupération recommandée : ${fitSummary.recoveryTimeH}h`);
-    if (fitSummary.peakEpoc != null) push(`• EPOC : ${fitSummary.peakEpoc.toFixed(1)} mL/kg`);
-    if (fitSummary.feeling != null) push(`• Ressenti athlète : ${fitSummary.feeling}/5 — ${feelLabels[Math.round(fitSummary.feeling)] ?? ""}`);
-    if (fitSummary.tss != null) push(`• TSS montre : ${fitSummary.tss.toFixed(1)}`);
     sep();
-  }
-
-  // ── Historique récent (7 jours) ─────────────────────────────────────────────
-  if (history && history.length > 0) {
-    const refDate = activityDate ?? new Date().toISOString().slice(0, 10);
-    const cutoff = new Date(refDate);
-    cutoff.setDate(cutoff.getDate() - 7);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
-    // Exclure la séance courante (même date + distance + durée)
-    const recent = history.filter(e => {
-      if (e.date < cutoffStr || e.date > refDate) return false;
-      if (e.date === activityDate &&
-          activity.totalDistance && e.distance && Math.abs(e.distance - activity.totalDistance) < 50 &&
-          activity.movingTime && e.duration && Math.abs(e.duration - activity.movingTime) < 10) return false;
-      return true;
-    });
-    if (recent.length > 0) {
-      const totalKm = recent.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0);
-      const totalTrimp = recent.reduce((s, e) => s + e.trimp, 0);
-      push("📅 CHARGE RÉCENTE (7 derniers jours, hors séance actuelle)");
-      push(`• ${recent.length} séance${recent.length > 1 ? "s" : ""}, ${totalKm.toFixed(1)} km, TRIMP cumulé ${Math.round(totalTrimp)}`);
-      const runs = recent.filter(e => !e.activityType || e.activityType === "running");
-      const bikes = recent.filter(e => e.activityType === "cycling");
-      if (runs.length > 0 && bikes.length > 0) {
-        push(`  • Course : ${runs.length} séance${runs.length > 1 ? "s" : ""}, ${runs.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0).toFixed(1)} km`);
-        push(`  • Vélo : ${bikes.length} séance${bikes.length > 1 ? "s" : ""}, ${bikes.reduce((s, e) => s + (e.distance ?? 0) / 1000, 0).toFixed(1)} km`);
-      }
-      sep();
-    }
   }
 
   // ── Montées ─────────────────────────────────────────────────────────────────
@@ -392,87 +204,39 @@ export function generateSummary(opts: SummaryOptions): string {
     sep();
   }
 
-  // ── Fractionnés ──────────────────────────────────────────────────────────────
-  if (intervals && intervals.efforts.length > 0) {
-    const eff = intervals.efforts;
-    push(`⚡ FRACTIONNÉS DÉTECTÉS (${eff.length} répétitions)`);
-    // Détail de chaque effort
+  if (isVmaSession) {
+    // ── Détail par répétition (VMA / intervalles, laps .fit prioritaires) ────────
+    const eff = intervals!.efforts;
+    push(`⚡ DÉTAIL PAR RÉPÉTITION (${eff.length}, issu du .fit)`);
     for (let i = 0; i < eff.length; i++) {
       const iv = eff[i];
       const distLabel = iv.distance >= 1000 ? `${(iv.distance / 1000).toFixed(2)} km` : `${Math.round(iv.distance)} m`;
-      let line = `  Rep. ${i + 1} : ${formatDuration(Math.round(iv.duration))}, ${distLabel}`;
-      if (isCycling) {
-        line += `, ${(iv.avgSpeed * 3.6).toFixed(1)} km/h`;
-        if (iv.avgPower) line += `, ${Math.round(iv.avgPower)} W`;
-      } else {
-        line += `, ${formatPace(iv.avgPace)} /km`;
-      }
-      if (iv.avgHeartRate) line += `, FC ${iv.avgHeartRate} bpm`;
-      if (iv.totalAscent) line += `, D+ ${Math.round(iv.totalAscent)} m`;
-      if (iv.totalDescent) line += `, D- ${Math.round(iv.totalDescent)} m`;
-      push(line);
-    }
-    // Résumé / fatigue
-    if (isCycling) {
-      const avgSpeed = eff.reduce((s, iv) => s + iv.avgSpeed, 0) / eff.length;
-      push(`• Vitesse effort moy. : ${(avgSpeed * 3.6).toFixed(1)} km/h`);
-      if (eff[0].avgPower) {
-        const avgPow = eff.reduce((s, iv) => s + (iv.avgPower ?? 0), 0) / eff.length;
-        push(`• Puissance effort moy. : ${Math.round(avgPow)} W`);
-      }
-    } else {
-      const avgEffPace = eff.reduce((s, iv) => s + iv.avgPace, 0) / eff.length;
-      push(`• Allure effort moy. : ${formatPace(avgEffPace)} /km`);
-      if (intervals.recoveries.length > 0) {
-        const avgRecPace = intervals.recoveries.reduce((s, iv) => s + iv.avgPace, 0) / intervals.recoveries.length;
-        push(`• Allure récupération moy. : ${formatPace(avgRecPace)} /km`);
-      }
-      if (eff.length >= 6) {
-        const avgF = eff.slice(0, 3).reduce((s, iv) => s + iv.avgPace, 0) / 3;
-        const avgL = eff.slice(-3).reduce((s, iv) => s + iv.avgPace, 0) / 3;
-        const fatigue = ((avgL - avgF) / avgF) * 100;
-        push(`• Fatigue : ${fatigue > 0 ? "+" : ""}${fatigue.toFixed(1)}% entre 1ères et dernières répétitions`);
-      }
-    }
-    sep();
-  }
-
-  // ── Splits ───────────────────────────────────────────────────────────────────
-  if (splits.length >= 2) {
-    const distLabel = splits[0].distance >= 900
-      ? `${(splits[0].distance / 1000).toFixed(1)} KM`
-      : `${splits[0].distance} M`;
-    push(`📏 SPLITS PAR ${distLabel}`);
-    for (const s of splits) {
-      const at = s.cumulativeDistance >= 900
-        ? `@${(s.cumulativeDistance / 1000).toFixed(1)} km`
-        : `@${s.cumulativeDistance} m`;
-      let line: string;
-      if (isCycling) {
-        const speedKmh = s.avgPace > 0 ? (3600 / s.avgPace).toFixed(1) : "–";
-        line = `• ${at} — ${speedKmh} km/h`;
-      } else {
-        line = `• ${at} — allure ${formatPace(s.avgPace)} /km`;
-        if (s.avgGAP !== null && Math.abs(s.avgGAP - s.avgPace) > 3) line += `, GAP ${formatPace(s.avgGAP)} /km`;
-      }
-      if (s.avgHeartRate) line += `, FC ${s.avgHeartRate} bpm`;
-      if (s.elevationGain > 0) line += `, D+ ${Math.round(s.elevationGain)} m`;
-      if (s.elevationLoss > 0) line += `, D- ${Math.round(s.elevationLoss)} m`;
+      const vam = intervalVAM(iv);
+      let line = `• Rép. ${i + 1} : ${formatDuration(Math.round(iv.duration))}, ${distLabel}`;
+      if (vam !== null) line += `, VAM ${vam} m/h`;
+      if (iv.avgHeartRate) line += `, FC ${iv.avgHeartRate}${iv.maxHeartRate ? `/${iv.maxHeartRate}` : ""} bpm (moy/max)`;
+      line += `, allure ${formatPace(iv.avgPace)} /km`;
       push(line);
     }
     sep();
+  } else if (!isCycling) {
+    // ── Splits par km (course, hors séances VMA/intervalles) ────────────────────
+    if (splits.length >= 2) {
+      const distLabel = splits[0].distance >= 900
+        ? `${(splits[0].distance / 1000).toFixed(1)} KM`
+        : `${splits[0].distance} M`;
+      push(`📏 SPLITS PAR ${distLabel}`);
+      for (const s of splits) {
+        const at = s.cumulativeDistance >= 900
+          ? `@${(s.cumulativeDistance / 1000).toFixed(1)} km`
+          : `@${s.cumulativeDistance} m`;
+        let line = `• ${at} — allure ${formatPace(s.avgPace)} /km`;
+        if (s.avgHeartRate) line += `, FC ${s.avgHeartRate} bpm`;
+        push(line);
+      }
+      sep();
+    }
   }
-
-  // ── Demande d'analyse ────────────────────────────────────────────────────────
-  push("---");
-  push("Merci de m'analyser cette séance en détail :");
-  push("1. Évaluation globale de la qualité de l'effort");
-  push("2. Points forts et points d'attention");
-  push("3. Analyse de la distribution cardiaque et de la gestion de l'effort");
-  if (isCycling && normalizedPower) push("4. Analyse de la puissance (NP, IF, zones Coggan)");
-  else if (!isCycling) push("4. Analyse des zones d'allure par rapport à la VMA");
-  push("5. Recommandations pour la récupération");
-  push("6. Suggestions concrètes pour la prochaine séance");
 
   return lines.join("\n");
 }

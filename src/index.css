@@ -661,43 +661,54 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   19. FLOATING NAV
+   19. ACTIVITY TABS
 ═══════════════════════════════════════════════════════════════ */
-.floating-nav {
-  position: fixed;
-  right: 1rem;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 500;
+.activity-tabs {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 400;
   display: flex;
-  flex-direction: column;
   gap: 2px;
   background-color: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
   padding: 5px;
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--shadow-md);
+  overflow-x: auto;
 }
 
-.floating-nav-btn {
+.activity-tab-btn {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 7px 14px;
   border: none;
   background: transparent;
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 0.75rem;
+  font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
   transition: all 0.15s;
 }
 
-.floating-nav-btn:hover {
+.activity-tab-btn:hover {
   background-color: var(--bg-primary);
   color: var(--accent-primary);
+}
+
+.activity-tab-btn.active {
+  background-color: var(--accent-primary);
+  color: #ffffff;
+}
+
+.section-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  color: var(--text-tertiary);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -828,19 +839,9 @@ h1, h2, h3, h4, h5, h6 {
 
   .chart-container { height: 260px; }
 
-  /* FloatingNav moves to a bottom bar on mobile */
-  .floating-nav {
-    right: auto;
-    top: auto;
-    left: 50%;
-    bottom: 1rem;
-    transform: translateX(-50%);
-    flex-direction: row;
-    padding: 4px;
-  }
-
-  .floating-nav-btn span { display: none; }
-  .floating-nav-btn { padding: 9px; }
+  /* ActivityTabs: icon-only, tighter padding on mobile */
+  .activity-tab-btn span { display: none; }
+  .activity-tab-btn { padding: 9px; }
 
   /* Activity header stacks vertically on mobile — badge below title */
   .activity-header {

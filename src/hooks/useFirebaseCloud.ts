@@ -31,6 +31,12 @@ export interface CloudHandle {
   loadFile(entry: ActivityIndexEntry): Promise<ArrayBuffer | string>;
   deleteActivity(entry: ActivityIndexEntry): Promise<void>;
   updateActivityMeta(entry: ActivityIndexEntry, updates: Partial<ActivityIndexEntry>): Promise<void>;
+  /**
+   * Met à jour plusieurs activités en une fois sans refetch intermédiaire (contrairement à
+   * `updateActivityMeta`, qui recharge tout l'historique à chaque appel) — utilisé pour persister
+   * réciproquement un groupe de trajets correspondants, voir useFullRouteMatches.ts.
+   */
+  updateActivityMetaBatch(items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[]): Promise<void>;
   refresh(): Promise<void>;
   /**
    * Copie les métadonnées de l'ancien index Drive (`activities-index.json`) vers Firestore, sans
@@ -113,6 +119,20 @@ export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, drive
     await refresh();
   }, [auth.user, refresh]);
 
+  const updateActivityMetaBatchFn = useCallback(async (
+    items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[],
+  ) => {
+    if (!auth.user) return;
+    const uid = auth.user.uid;
+    await Promise.all(items
+      .filter(({ entry }) => entry.cloudId)
+      .map(({ entry, updates }) => updateCloudActivityMeta(uid, entry.cloudId!, updates)));
+    setHistory(prev => prev.map(e => {
+      const item = items.find(i => i.entry.cloudId === e.cloudId);
+      return item ? { ...e, ...item.updates } : e;
+    }));
+  }, [auth.user]);
+
   const importFromDrive = useCallback(async (
     driveEntries: ActivityIndexEntry[],
     onProgress?: (done: number, total: number) => void,
@@ -144,7 +164,8 @@ export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, drive
   return {
     status, userEmail: auth.user?.email ?? null, history, isSaving, isImporting,
     signIn: auth.signIn, signOut: auth.signOut,
-    save, loadFile, deleteActivity: deleteActivityFn, updateActivityMeta: updateActivityMetaFn, refresh,
+    save, loadFile, deleteActivity: deleteActivityFn, updateActivityMeta: updateActivityMetaFn,
+    updateActivityMetaBatch: updateActivityMetaBatchFn, refresh,
     importFromDrive,
   };
 }

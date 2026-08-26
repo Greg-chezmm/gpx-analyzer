@@ -54,6 +54,12 @@ export interface ActivityIndexEntry {
   // segments récurrents, voir utils/segments.ts. Absente sur les activités sauvegardées avant
   // l'ajout de cette fonctionnalité.
   fingerprint?: string[];
+  // Cache "Ton parcours habituel" (voir hooks/useFullRouteMatches.ts) — cloudId des autres
+  // activités identifiées comme suivant le même trajet complet, évite de rescanner tout
+  // l'historique à chaque ouverture. Mis à jour réciproquement sur chaque activité du groupe
+  // à chaque scan complet.
+  routeMatchIds?: string[];
+  routeMatchScannedAt?: string; // ISO — dernière fois qu'un scan complet a été fait pour cette activité
 }
 
 /** Structure du fichier d'index JSON sauvegardé sur Drive (activities-index.json). */

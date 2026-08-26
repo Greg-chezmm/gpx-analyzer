@@ -7,8 +7,6 @@ import {
   type CachedSegmentAttempt,
 } from '../utils/segments';
 
-const MAX_CANDIDATES = 20;
-const MIN_FINGERPRINT_OVERLAP = 0.15;
 /** Taille du classement mis en cache — voir StoredSegment.attempts. */
 const TOP_N = 10;
 
@@ -18,7 +16,6 @@ export interface StoredSegmentScanHandle {
   status: SegmentScanStatus;
   progress: { done: number; total: number } | null;
   attempts: CachedSegmentAttempt[];
-  skippedCount: number;
   /** Scan complet de l'historique (coûteux — téléchargement + parsing des candidats). */
   scan: () => Promise<void>;
 }
@@ -40,13 +37,11 @@ export function useStoredSegmentScan(
   const [status, setStatus] = useState<SegmentScanStatus>('idle');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [attempts, setAttempts] = useState<CachedSegmentAttempt[]>(segment.attempts ?? []);
-  const [skippedCount, setSkippedCount] = useState(0);
   const runId = useRef(0);
 
   const scan = useCallback(async () => {
     const myRunId = ++runId.current;
     setStatus('scanning');
-    setSkippedCount(0);
     setProgress(null);
 
     const currentDate = activity?.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
@@ -64,14 +59,12 @@ export function useStoredSegmentScan(
         ))
       : history;
 
-    const scored = pool.map(entry => ({
-      entry,
-      score: entry.fingerprint ? fingerprintOverlap(segment.fingerprint, entry.fingerprint) : -1,
-    }));
-    const known = scored.filter(s => s.score >= MIN_FINGERPRINT_OVERLAP).sort((a, b) => b.score - a.score);
-    const unknown = scored.filter(s => s.score === -1);
-    const candidates = [...known, ...unknown].slice(0, MAX_CANDIDATES);
-    setSkippedCount(Math.max(0, known.length + unknown.length - candidates.length));
+    // Compare TOUT l'historique (pas de plafond) — action manuelle explicite, pas un scan
+    // automatique silencieux. L'empreinte géographique sert seulement à trier les candidats les
+    // plus probables en premier (retour visuel utile pendant le scan), pas à en exclure.
+    const candidates = pool
+      .map(entry => ({ entry, score: entry.fingerprint ? fingerprintOverlap(segment.fingerprint, entry.fingerprint) : -1 }))
+      .sort((a, b) => b.score - a.score);
 
     const found: CachedSegmentAttempt[] = [];
 
@@ -102,5 +95,5 @@ export function useStoredSegmentScan(
     onScanComplete?.(top);
   }, [segment, activity, history, loadFile, onScanComplete]);
 
-  return { status, progress, attempts, skippedCount, scan };
+  return { status, progress, attempts, scan };
 }

@@ -39,7 +39,7 @@ import { PaceZones } from "./components/PaceZones";
 import { VO2maxEstimate } from "./components/VO2maxEstimate";
 import { VDOTPredictor } from "./components/VDOTPredictor";
 import { SplitsBars } from "./components/SplitsBars";
-import { FloatingNav } from "./components/FloatingNav";
+import { ActivityTabs, type ActivityTabId } from "./components/ActivityTabs";
 import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
@@ -101,6 +101,7 @@ function App() {
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAthletePage, setShowAthletePage] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActivityTabId>("overview");
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -266,6 +267,9 @@ function App() {
     }, 800);
     return () => { if (firestoreSettingsSaveTimer.current) clearTimeout(firestoreSettingsSaveTimer.current); };
   }, [firebaseAuth.status, firebaseAuth.user, fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Revient sur l'onglet "Carte & analyse" à chaque nouvelle activité chargée.
+  useEffect(() => { setActiveTab("overview"); }, [fileName]);
 
   // Géocodage inversé du premier point GPS pour proposer le lieu dans le renommage.
   useEffect(() => {
@@ -495,6 +499,24 @@ function App() {
   };
 
   const hasHeartRate = enrichedActivity?.avgHeartRate != null;
+
+  // Visibilité des onglets du dashboard — masque un onglet qui n'aurait strictement rien à afficher.
+  const tabVisibility = {
+    overview: true,
+    cardio: hasHeartRate || (enrichedActivity?.activityType === 'cycling' ? hasPower : true),
+    performance: !!enrichedActivity?.fitSummary || !!vo2maxEst
+      || (normalizedPower !== null && enrichedActivity?.activityType === 'cycling')
+      || (!!intervals && intervals.length > 0) || climbs.length > 0 || hillRepeats.length > 0,
+    routes: cloud.status === 'connected',
+    splits: true,
+  };
+
+  /* Fallback visible partagé par les sections chargées à la demande (React.lazy). */
+  const sectionLoader = (
+    <div className="section-loader">
+      <Loader2 size={22} style={{ animation: "spin 0.8s linear infinite" }} />
+    </div>
+  );
 
   /* ── JSX — rendu ── */
 
@@ -744,6 +766,11 @@ function App() {
               )}
             </div>
 
+            {/* ── Barre d'onglets — un seul thème de données visible à la fois ── */}
+            <ActivityTabs active={activeTab} onChange={setActiveTab} visible={tabVisibility} />
+
+            {activeTab === 'overview' && (
+            <>
             {/* ── KPI secondaires (visibles uniquement si FC disponible) ── */}
             {hasHeartRate && (
               <div className="secondary-kpis animate-slide-up">
@@ -802,9 +829,13 @@ function App() {
             <DataQuality quality={enrichedActivity!.dataQuality} hasHr={hasHeartRate} />
 
             {/* ── Carte + Graphiques ── */}
-            <div id="nav-map" className="content-layout">
+            <div className="content-layout">
               <ErrorBoundary section="Carte">
-                <Suspense fallback={<div style={{ height: "100%", minHeight: 320, background: "var(--bg-secondary)", borderRadius: "var(--radius-md)" }} />}>
+                <Suspense fallback={
+                  <div style={{ height: "100%", minHeight: 320, background: "var(--bg-secondary)", borderRadius: "var(--radius-md)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Loader2 size={22} style={{ color: "var(--text-tertiary)", animation: "spin 0.8s linear infinite" }} />
+                  </div>
+                }>
                   <div style={{ height: "100%" }}>
                     <ActivityMap
                       points={enrichedActivity!.points}
@@ -822,7 +853,7 @@ function App() {
                 </Suspense>
               </ErrorBoundary>
               <ErrorBoundary section="Graphiques">
-                <div id="nav-charts" style={{ height: "100%" }}>
+                <div style={{ height: "100%" }}>
                   <ChartViewer
                     points={enrichedActivity!.points}
                     hoveredPointIndex={hoveredPointIndex}
@@ -843,10 +874,14 @@ function App() {
                 </div>
               </ErrorBoundary>
             </div>
+            </>
+            )}
 
+            {activeTab === 'cardio' && (
+            <>
             {/* ── Zones FC Karvonen ── */}
             {hasHeartRate && (
-              <div id="nav-zones">
+              <div>
                 <HeartRateZones
                   points={enrichedActivity!.points}
                   fcMax={fcMax}
@@ -894,7 +929,11 @@ function App() {
 
             {/* Les analyses multi-séances (TSB/CTL/ATL, objectif course, meilleurs efforts, vitesse critique,
                 profil athlète, progression) vivent désormais dans la page "Bilan athlète" — voir AthletePage.tsx */}
+            </>
+            )}
 
+            {activeTab === 'performance' && (
+            <>
             {/* Bilan FIT — Training Effect, VO2max montre, récupération, EPOC, feeling */}
             {enrichedActivity!.fitSummary && (
               <FitSummary
@@ -924,7 +963,7 @@ function App() {
 
             {/* Analyse des fractionnés — auto-détectés ou laps montre */}
             {intervals && intervals.length > 0 && (
-              <Suspense fallback={null}>
+              <Suspense fallback={sectionLoader}>
                 <IntervalAnalysis
                   intervals={intervals}
                   activityType={enrichedActivity!.activityType}
@@ -936,32 +975,34 @@ function App() {
 
             {/* Analyse des montées */}
             {climbs.length > 0 && (
-              <Suspense fallback={null}>
+              <Suspense fallback={sectionLoader}>
                 <ClimbAnalysis climbs={climbs} points={enrichedActivity!.points} />
               </Suspense>
             )}
 
             {/* Répétitions de côtes — running uniquement, ≥ 2 séries détectées */}
             {hillRepeats.length > 0 && (
-              <Suspense fallback={null}>
+              <Suspense fallback={sectionLoader}>
                 <HillRepeats series={hillRepeats} points={enrichedActivity!.points} />
               </Suspense>
             )}
+            </>
+            )}
 
-            {/* Trajet habituel — détection automatique et silencieuse, n'affiche rien si aucune
-                correspondance. Segments manuels — nécessite le cloud (Firebase) connecté. */}
-            {cloud.status === 'connected' && (
+            {activeTab === 'routes' && cloud.status === 'connected' && (
               <>
-                <Suspense fallback={null}>
+                {/* Trajet habituel — détection automatique et silencieuse, n'affiche rien si aucune correspondance */}
+                <Suspense fallback={sectionLoader}>
                   <RouteHistory
                     activity={enrichedActivity!}
                     displayName={displayName}
                     history={sameTypeCloudHistory}
                     loadFile={cloud.loadFile}
                     onOpenActivity={handleOpenCloudActivity}
+                    updateActivityMetaBatch={cloud.updateActivityMetaBatch}
                   />
                 </Suspense>
-                <Suspense fallback={null}>
+                <Suspense fallback={sectionLoader}>
                   <StoredSegments
                     activity={enrichedActivity!}
                     history={sameTypeCloudHistory}
@@ -973,6 +1014,8 @@ function App() {
               </>
             )}
 
+            {activeTab === 'splits' && (
+            <>
             {/* ── Splits ── */}
             <div className="split-selector animate-slide-up">
               <span className="split-selector-label">Découpage :</span>
@@ -998,16 +1041,16 @@ function App() {
               </div>
             </div>
 
-            <div id="nav-splits">
+            <div>
               <SplitsBars splits={splits} activityType={enrichedActivity!.activityType} />
               <SplitsTable splits={splits} activityType={enrichedActivity!.activityType} />
             </div>
+            </>
+            )}
           </>
         )}
       </main>
       </ErrorBoundary>
-
-      <FloatingNav visible={!!activity && !showAthletePage} />
 
       {/* ── Modale résumé IA ── */}
       {showAISummary && enrichedActivity && (
@@ -1021,20 +1064,13 @@ function App() {
               recoveries: intervals.filter(iv => iv.type === "recovery"),
             } : null,
             hillRepeats,
-            fcMax, fcRest, vma, ftp, weight, birthYear,
-            sessionType: session?.type ?? null,
+            fcMax, fcRest,
             trimp,
             fitSummary: enrichedActivity.fitSummary ?? null,
-            vo2max: vo2maxEst,
             drift,
-            normalizedPower,
-            intensityFactor,
             tsbResult,
-            history: sessionsWithTrimp,
-            activityDate: enrichedActivity.startTime
-              ? enrichedActivity.startTime.toISOString().slice(0, 10)
-              : undefined,
             activityName: customActivityName || undefined,
+            location: locationName,
             weather,
           })}
           onClose={() => setShowAISummary(false)}

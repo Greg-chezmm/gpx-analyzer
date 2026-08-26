@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Repeat2, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Repeat2, Loader2, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import { useFullRouteMatches, type RouteMatch } from "../hooks/useFullRouteMatches";
@@ -11,6 +11,7 @@ interface RouteHistoryProps {
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   onOpenActivity: (entry: ActivityIndexEntry) => Promise<void>;
+  updateActivityMetaBatch: (items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[]) => Promise<void>;
 }
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -78,8 +79,8 @@ function Row({ match, rank, displayName, activityType, onOpen, opening }: RowPro
  * diagnostic (repliable) liste les candidates plausibles écartées, utile tant que le réglage des
  * seuils de matching est encore en rodage.
  */
-export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity }) => {
-  const { matches, rejected } = useFullRouteMatches(activity, history, loadFile);
+export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity, updateActivityMetaBatch }) => {
+  const { status, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch);
   const [openingKey, setOpeningKey] = useState<string | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
 
@@ -94,7 +95,7 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
     }
   };
 
-  if (matches.length === 0 && rejected.length === 0) return null;
+  if (matches.length === 0 && rejected.length === 0 && status !== 'scanning') return null;
 
   return (
     <div className="card animate-slide-up" style={{ marginTop: "1rem" }}>
@@ -108,12 +109,37 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
             </span>
           )}
         </h3>
+        {matches.length > 0 && (
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={rescan}
+            disabled={status === "scanning"}
+            title="Relancer une comparaison complète de tout l'historique"
+            style={{ padding: "0.3rem 0.6rem", fontSize: "0.78rem" }}
+          >
+            {status === "scanning"
+              ? <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
+              : <RefreshCw size={13} />}
+            <span>Actualiser</span>
+          </button>
+        )}
       </div>
+
+      {status === "scanning" && matches.length === 0 && (
+        <p style={{ fontSize: "0.82rem", color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+          <Loader2 size={14} style={{ animation: "spin 0.8s linear infinite" }} />
+          Recherche de trajets similaires dans l'historique…
+        </p>
+      )}
 
       {matches.length > 0 && (
         <>
           <p style={{ fontSize: "0.78rem", color: "var(--text-tertiary)", marginBottom: "0.6rem" }}>
             Ces activités suivent sensiblement le même trajet complet que celle-ci. Clique sur une ligne pour l'ouvrir.
+            {fromCache && scannedAt && (
+              <> {" "}Classement en cache — dernière comparaison complète le {new Date(scannedAt).toLocaleDateString("fr-FR")}.</>
+            )}
           </p>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
