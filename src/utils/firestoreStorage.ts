@@ -1,6 +1,7 @@
 import { getFirestoreDb } from './firebase';
 import type { Sex } from '../hooks/useUserSettings';
 import type { RaceGoalConfig } from '../hooks/useRaceGoal';
+import type { ManualBests } from '../hooks/useManualBests';
 import type { ActivityIndexEntry } from './driveStorage';
 import type { CachedSegmentAttempt } from './segments';
 
@@ -14,6 +15,7 @@ export interface FirestoreUserSettings {
   birthYear: number;
   sex: Sex;
   raceGoal: RaceGoalConfig | null;
+  manualBests: ManualBests;
 }
 
 /** Charge le document de réglages athlète depuis Firestore ; retourne null si inexistant. */

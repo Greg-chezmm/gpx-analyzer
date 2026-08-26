@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { TrendingUp } from "lucide-react";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
+import { formatPace as fmtPace } from "./SplitsTable";
 
 interface Props {
   history: (ActivityIndexEntry & { trimp: number })[];
@@ -8,13 +9,6 @@ interface Props {
 
 type ViewDays = 90 | 180 | 'all';
 type TabType  = 'running' | 'cycling';
-
-/** Formate une allure en secondes/km en "m:ss". */
-function fmtPace(s: number): string {
-  const m = Math.floor(s / 60);
-  const sec = Math.round(s % 60);
-  return `${m}:${sec.toString().padStart(2, '0')}`;
-}
 
 /**
  * Calcule la moyenne mobile centrée sur les `w` dernières valeurs.

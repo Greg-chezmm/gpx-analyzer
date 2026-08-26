@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Activity, AlertTriangle, CheckCircle } from "lucide-react";
 import type { TSBResult } from "../utils/trainingMetrics";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
+import { formatPace as fmtPace } from "./SplitsTable";
 
 interface Props {
   tsb:     TSBResult;
@@ -56,12 +57,6 @@ function fmtDur(s: number): string {
   return `${m}:${ss.toString().padStart(2, '0')}`;
 }
 
-/** Formate une allure en s/km en "m:ss". */
-function fmtPace(sPerKm: number): string {
-  const m = Math.floor(sPerKm / 60);
-  const s = Math.round(sPerKm % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 interface TooltipState {
   index: number;

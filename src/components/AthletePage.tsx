@@ -3,6 +3,7 @@ import { X, LayoutDashboard } from "lucide-react";
 import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { RaceGoalConfig } from "../hooks/useRaceGoal";
+import type { ManualBest, ManualBests } from "../hooks/useManualBests";
 import type { TSBResult } from "../utils/trainingMetrics";
 import { AthleteProfile } from "./AthleteProfile";
 import { PolarizationChart } from "./PolarizationChart";
@@ -18,6 +19,8 @@ interface Props {
   tsb: TSBResult;
   raceGoal: RaceGoalConfig | null;
   setRaceGoal: (g: RaceGoalConfig | null) => void;
+  manualBests: ManualBests;
+  setManualBest: (key: string, best: ManualBest | null) => void;
   onClose: () => void;
 }
 
@@ -28,7 +31,7 @@ interface Props {
  * ces cartes dépendent de l'historique cloud (activités explicitement sauvegardées), pas de
  * l'activité en cours.
  */
-export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, onClose }) => {
+export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, manualBests, setManualBest, onClose }) => {
   return (
     <>
       <div className="card animate-slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -52,8 +55,8 @@ export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, se
 
       <AthleteProfile cloud={cloud} />
       <PolarizationChart cloud={cloud} />
-      <CriticalSpeed cloud={cloud} />
-      <BestEffortsCurve cloud={cloud} />
+      <CriticalSpeed cloud={cloud} manualBests={manualBests} />
+      <BestEffortsCurve cloud={cloud} manualBests={manualBests} setManualBest={setManualBest} />
       <TrainingBalance tsb={tsb} history={history} />
       <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} cloud={cloud} />
       <ProgressChart history={history} />

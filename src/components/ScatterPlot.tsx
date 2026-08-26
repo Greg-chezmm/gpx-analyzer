@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import { TrendingUp, Info, ChevronDown, ChevronUp } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { karvonenBounds } from "../utils/gpxParser";
+import { formatPace as fmtPace } from "./SplitsTable";
 
 interface ScatterPlotProps {
   points: GPXTrackPoint[];
@@ -11,13 +12,6 @@ interface ScatterPlotProps {
 }
 
 const ZONE_COLORS = ["#60a5fa", "#34d399", "#fbbf24", "#f97316", "#ef4444"];
-
-/** Formate des secondes/km en "mm:ss" pour l'axe Y du graphique en course à pied. */
-function fmtPace(secPerKm: number): string {
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
 
 /**
  * Nuage de points allure (ou puissance/vitesse) vs fréquence cardiaque avec

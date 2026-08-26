@@ -1,7 +1,7 @@
 import React from "react";
 import { Gauge } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { formatDuration } from "./SplitsTable";
+import { formatDuration, formatPace } from "./SplitsTable";
 
 interface PaceZonesProps {
   points: GPXTrackPoint[];
@@ -29,10 +29,7 @@ const ZONES: ZoneDef[] = [
 /** Convertit une vitesse en m/s en allure formatée "mm:ss" /km. */
 function fmtPace(speedMs: number): string {
   if (speedMs <= 0) return "–";
-  const secPerKm = 1000 / speedMs;
-  const m = Math.floor(secPerKm / 60);
-  const s = Math.round(secPerKm % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return formatPace(1000 / speedMs);
 }
 
 /** Stepper +/− pour régler la VMA en km/h par paliers de 0,5. */

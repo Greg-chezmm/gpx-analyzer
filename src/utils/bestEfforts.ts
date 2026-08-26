@@ -1,4 +1,5 @@
 import type { GPXTrackPoint } from './gpxCore';
+import type { ManualBests } from '../hooks/useManualBests';
 
 // ─── Meilleurs efforts — best efforts (course) / courbe de puissance (vélo) ────
 
@@ -36,20 +37,39 @@ export interface AggregatedRunBest {
   entryDate: string;
 }
 
+// Filet de sécurité contre une activité mal étiquetée (ex. un vélotaf enregistré avec
+// activityType="running" — le tag <type> du GPX ne matchait pas les mots-clés vélo à l'import,
+// voir feedback correspondant) : un temps de course plus rapide que 105% du record du monde est
+// impossible pour un humain, donc forcément une contamination (vitesse vélo lue comme allure course)
+// plutôt qu'une vraie performance. Rejeté plutôt que d'exclure l'activité entière : ses autres
+// distances peuvent rester valides (ex. la partie marchée/courue d'un trajet mixte).
+const WORLD_RECORD_S: Record<string, number> = {
+  '400m': 43.03, '1km': 131.96, '5km': 755.36, '10km': 1571, '21km': 3451, '42km': 7235,
+};
+const PLAUSIBILITY_MARGIN = 1.05; // 5% sous le record du monde — au-delà, quasi certainement une erreur de données
+
 /**
  * Agrège, pour chaque distance standard, le meilleur temps (record personnel) parmi les activités
  * course à pied de l'historique — n'utilise que `bestEfforts.values`, déjà calculé à la sauvegarde
  * (voir computeBestEfforts), donc pas de retéléchargement/reparsing.
+ * `manualBests` (voir useManualBests.ts) prend toujours le dessus sur le temps auto-calculé pour
+ * une distance donnée — corrige une contamination (mauvais type d'activité) ou une séance non
+ * trackée GPS (temps chronométré à la main) sans attendre un correctif de calcul.
  */
 export function aggregateBestRunEfforts(
   history: { activityType: string; bestEfforts?: BestEffortsData; name: string; date: string }[],
+  manualBests?: ManualBests,
 ): AggregatedRunBest[] {
   return RUN_DISTANCES.map(({ key, label, meters }) => {
+    const manual = manualBests?.[key];
+    if (manual) return { key, label, meters, timeSeconds: manual.timeSeconds, entryName: "Saisie manuelle", entryDate: manual.date };
+
+    const floor = (WORLD_RECORD_S[key] ?? 0) * PLAUSIBILITY_MARGIN;
     let best: AggregatedRunBest | null = null;
     for (const e of history) {
       if (e.activityType === 'cycling') continue;
       const t = e.bestEfforts?.values[key];
-      if (t === undefined) continue;
+      if (t === undefined || t < floor) continue;
       if (!best || t < best.timeSeconds) best = { key, label, meters, timeSeconds: t, entryName: e.name, entryDate: e.date };
     }
     return best;

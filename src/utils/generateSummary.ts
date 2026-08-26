@@ -116,7 +116,7 @@ export function generateSummary(opts: SummaryOptions): string {
   sep();
 
   // ── Données générales ────────────────────────────────────────────────────────
-  push("📊 DONNÉES GÉNÉRALES");
+  push("DONNÉES GÉNÉRALES");
   if (activity.startTime) {
     const dateLong = activity.startTime.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
     const tod = describeTimeOfDay(activity.startTime);
@@ -139,7 +139,7 @@ export function generateSummary(opts: SummaryOptions): string {
   // ── Météo ───────────────────────────────────────────────────────────────────
   if (weather && weather.temperature != null) {
     const { label } = describeWeatherCode(weather.weatherCode);
-    push("🌤️ MÉTÉO AU DÉPART");
+    push("MÉTÉO AU DÉPART");
     push(`• ${label}, ${Math.round(weather.temperature)}°C`);
     if (weather.windSpeed != null) push(`• Vent : ${Math.round(weather.windSpeed)} km/h ${windDirectionLabel(weather.windDirection)}`);
     sep();
@@ -148,7 +148,7 @@ export function generateSummary(opts: SummaryOptions): string {
   // ── Zones cardiaques ────────────────────────────────────────────────────────
   const zones = zoneStats(activity.points, fcMax, fcRest);
   if (zones) {
-    push("❤️ ZONES CARDIAQUES (Karvonen)");
+    push("ZONES CARDIAQUES (Karvonen)");
     for (const z of zones) {
       if (z.pct === 0) continue;
       push(`• ${z.label} (${z.lo}–${z.hi} bpm) : ${z.pct}% — ${formatDuration(z.seconds)}`);
@@ -158,7 +158,7 @@ export function generateSummary(opts: SummaryOptions): string {
 
   // ── Charge d'entraînement ───────────────────────────────────────────────────
   if (trimp || drift || tsbResult || fitSummary?.feeling != null) {
-    push("📈 CHARGE & MÉTRIQUES PHYSIOLOGIQUES");
+    push("CHARGE & MÉTRIQUES PHYSIOLOGIQUES");
     if (tsbResult) {
       const { ctl, atl, tsb } = tsbResult;
       const tsbState = tsb >= 10 ? "Frais (pic de forme)" : tsb >= 0 ? "En forme" : tsb >= -10 ? "Légèrement fatigué" : "Fatigué / surcharge";
@@ -179,7 +179,7 @@ export function generateSummary(opts: SummaryOptions): string {
 
   // ── Montées ─────────────────────────────────────────────────────────────────
   if (climbs.length > 0) {
-    push(`⛰️ MONTÉES DÉTECTÉES (${climbs.length})`);
+    push(`MONTÉES DÉTECTÉES (${climbs.length})`);
     for (let i = 0; i < climbs.length; i++) {
       const c = climbs[i];
       const def = CLIMB_CATEGORIES[c.category];
@@ -195,7 +195,7 @@ export function generateSummary(opts: SummaryOptions): string {
 
   // ── Répétitions de côtes ─────────────────────────────────────────────────────
   if (hillRepeats && hillRepeats.length > 0) {
-    push(`🔁 RÉPÉTITIONS DE CÔTES (${hillRepeats.length} série${hillRepeats.length > 1 ? "s" : ""})`);
+    push(`RÉPÉTITIONS DE CÔTES (${hillRepeats.length} série${hillRepeats.length > 1 ? "s" : ""})`);
     for (const s of hillRepeats) {
       let line = `• ${s.repCount} rép. — dist. moy. ${s.avgDistance >= 1000 ? (s.avgDistance/1000).toFixed(2)+"km" : Math.round(s.avgDistance)+"m"}, D+ moy. ${Math.round(s.avgElevGain)} m, allure moy. ${formatPace(s.avgPace)} /km, VAM ${s.avgVAM} m/h`;
       if (s.fatiguePct !== null) line += ` — fatigue : ${s.fatiguePct > 0 ? "+" : ""}${s.fatiguePct.toFixed(1)}%`;
@@ -207,7 +207,7 @@ export function generateSummary(opts: SummaryOptions): string {
   if (isVmaSession) {
     // ── Détail par répétition (VMA / intervalles, laps .fit prioritaires) ────────
     const eff = intervals!.efforts;
-    push(`⚡ DÉTAIL PAR RÉPÉTITION (${eff.length}, issu du .fit)`);
+    push(`DÉTAIL PAR RÉPÉTITION (${eff.length}, issu du .fit)`);
     for (let i = 0; i < eff.length; i++) {
       const iv = eff[i];
       const distLabel = iv.distance >= 1000 ? `${(iv.distance / 1000).toFixed(2)} km` : `${Math.round(iv.distance)} m`;
@@ -225,7 +225,7 @@ export function generateSummary(opts: SummaryOptions): string {
       const distLabel = splits[0].distance >= 900
         ? `${(splits[0].distance / 1000).toFixed(1)} KM`
         : `${splits[0].distance} M`;
-      push(`📏 SPLITS PAR ${distLabel}`);
+      push(`SPLITS PAR ${distLabel}`);
       for (const s of splits) {
         const at = s.cumulativeDistance >= 900
           ? `@${(s.cumulativeDistance / 1000).toFixed(1)} km`

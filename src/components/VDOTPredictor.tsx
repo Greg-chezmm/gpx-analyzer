@@ -1,7 +1,8 @@
 import React from "react";
 import { Target } from "lucide-react";
 import type { VO2maxEstimate } from "../utils/gpxParser";
-import { computeVDOT } from "../utils/vdot";
+import type { AggregatedRunBest } from "../utils/bestEfforts";
+import { computeVDOTFromBests } from "../utils/vdot";
 import { formatPace, formatDuration } from "./SplitsTable";
 
 /** Couleurs par type d'allure Jack Daniels (E/M/T/I/R). */
@@ -15,17 +16,24 @@ const PACE_COLORS: Record<string, string> = {
 
 interface Props {
   estimate: VO2maxEstimate;
+  /** Meilleurs temps réels agrégés sur l'historique (voir aggregateBestRunEfforts) — utilisés en
+   * priorité sur l'estimation sous-maximale, chacun pour la distance/allure la plus proche. */
+  bests: AggregatedRunBest[];
 }
 
 /**
- * Affiche les prédictions de temps de course et allures d'entraînement calculées
- * via le modèle VDOT de Jack Daniels à partir du VO2max estimé.
- * Non rendu si la fiabilité du VO2max est faible.
+ * Affiche les prédictions de temps de course et allures d'entraînement (modèle VDOT de Jack
+ * Daniels), basées en priorité sur les vrais résultats de course de l'athlète (chaque prédiction
+ * utilise le résultat réel le plus proche en distance, pas un VDOT unique extrapolé partout — un
+ * 10K rapide ne doit pas gonfler la prédiction marathon). Retombe sur l'estimation sous-maximale
+ * FC/allure de la séance en cours là où aucun résultat réel n'est disponible.
+ * Non rendu si ni résultat réel ni estimation fiable de la séance.
  */
-export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
-  if (estimate.confidence === "low") return null;
+export const VDOTPredictor: React.FC<Props> = ({ estimate, bests }) => {
+  if (bests.length === 0 && estimate.confidence === "low") return null;
 
-  const { vdot, races, paces } = computeVDOT(estimate.value);
+  const usesFallback = bests.length === 0;
+  const { vdot, races, paces } = computeVDOTFromBests(bests, estimate.confidence !== "low" ? estimate.value : null);
 
   return (
     <div className="card animate-slide-up">
@@ -37,13 +45,18 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
             · méthode Jack Daniels
           </span>
         </h3>
-        <div style={{
-          padding: "0.3rem 0.85rem", borderRadius: "var(--radius-full)",
-          backgroundColor: "#a78bfa18", border: "1px solid #a78bfa44",
-          fontSize: "0.85rem", fontWeight: 800, color: "#a78bfa",
-          fontFamily: "var(--font-heading)",
-        }}>
-          VDOT {Math.round(vdot)}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.2rem" }}>
+          <div style={{
+            padding: "0.3rem 0.85rem", borderRadius: "var(--radius-full)",
+            backgroundColor: "#a78bfa18", border: "1px solid #a78bfa44",
+            fontSize: "0.85rem", fontWeight: 800, color: "#a78bfa",
+            fontFamily: "var(--font-heading)",
+          }}>
+            VDOT {Math.round(vdot)}
+          </div>
+          <span style={{ fontSize: "0.68rem", color: "var(--text-tertiary)" }}>
+            {usesFallback ? "estimation FC/allure" : "résultats réels"}
+          </span>
         </div>
       </div>
 
@@ -64,9 +77,17 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
                 padding: "0.5rem 0",
                 borderBottom: i < races.length - 1 ? "1px solid var(--border-color)" : "none",
               }}>
-                <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, minWidth: "70px" }}>
-                  {race.label}
-                </span>
+                <div style={{ minWidth: "70px" }}>
+                  <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)", fontWeight: 600, display: "block" }}>
+                    {race.label}
+                  </span>
+                  {race.isActual && (
+                    <span style={{ fontSize: "0.68rem", color: "#34d399", fontWeight: 600 }}>temps réel</span>
+                  )}
+                  {race.sourceLabel && (
+                    <span style={{ fontSize: "0.68rem", color: "var(--text-tertiary)" }}>depuis {race.sourceLabel}</span>
+                  )}
+                </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem" }}>
                   <span style={{ fontFamily: "var(--font-heading)", fontWeight: 800, color: "var(--text-primary)", fontSize: "0.95rem" }}>
                     {formatDuration(race.timeS)}
@@ -114,9 +135,14 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
                     }}>
                       {pace.label}
                     </span>
-                    <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {pace.description}
-                    </span>
+                    <div style={{ minWidth: 0, overflow: "hidden" }}>
+                      <span style={{ fontSize: "0.82rem", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>
+                        {pace.description}
+                      </span>
+                      {pace.sourceLabel && (
+                        <span style={{ fontSize: "0.68rem", color: "var(--text-tertiary)" }}>depuis {pace.sourceLabel}</span>
+                      )}
+                    </div>
                   </div>
                   <span style={{
                     fontFamily: "var(--font-heading)", fontWeight: 800,
@@ -135,8 +161,10 @@ export const VDOTPredictor: React.FC<Props> = ({ estimate }) => {
         fontSize: "0.71rem", color: "var(--text-tertiary)",
         borderTop: "1px solid var(--border-color)", paddingTop: "0.6rem", marginTop: "0.75rem",
       }}>
-        Basé sur VO2max estimé ({estimate.value} mL/kg/min) — à affiner avec un résultat de course réel.
-        Formules Daniels &amp; Gilbert, <em>Oxygen Power</em>.
+        {usesFallback
+          ? `Basé sur VO2max estimé (${estimate.value} mL/kg/min, séance en cours) — à affiner avec un résultat de course réel.`
+          : "Chaque prédiction utilise ton résultat réel le plus proche en distance (pas un VDOT unique extrapolé partout — une distance courte rapide ne doit pas gonfler une prédiction longue distance, et inversement)."}
+        {" "}Formules Daniels &amp; Gilbert, <em>Oxygen Power</em>.
       </p>
     </div>
   );

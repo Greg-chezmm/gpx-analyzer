@@ -1,10 +1,13 @@
 import React from "react";
 import { Gauge } from "lucide-react";
 import type { CloudHandle } from "../hooks/useFirebaseCloud";
+import type { ManualBests } from "../hooks/useManualBests";
 import { estimateCriticalSpeedFromHistory, dPrimeProfile } from "../utils/criticalSpeed";
+import { formatPace as fmtPace } from "./SplitsTable";
 
 interface Props {
   cloud: CloudHandle;
+  manualBests: ManualBests;
 }
 
 const CONFIDENCE_LABELS = {
@@ -19,22 +22,15 @@ const D_PRIME_DESCRIPTIONS: Record<ReturnType<typeof dPrimeProfile>, string> = {
   explosif:  "réserve confortable — bonne capacité à accélérer/sprinter au-delà de ton allure critique",
 };
 
-/** Formate une allure en s/km en "m:ss". */
-function fmtPace(sPerKm: number): string {
-  const m = Math.floor(sPerKm / 60);
-  const s = Math.round(sPerKm % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
 /**
  * Vitesse critique (Critical Speed, modèle de Monod & Scherrer) — ajustée par régression linéaire
  * sur les meilleurs efforts personnels (course à pied), agrégés depuis l'index Drive.
  * Complémentaire au VDOT : basée sur tes performances réelles plutôt qu'une formule générique.
  */
-export const CriticalSpeed: React.FC<Props> = ({ cloud }) => {
+export const CriticalSpeed: React.FC<Props> = ({ cloud, manualBests }) => {
   if (cloud.status !== 'connected') return null;
 
-  const result = estimateCriticalSpeedFromHistory(cloud.history);
+  const result = estimateCriticalSpeedFromHistory(cloud.history, manualBests);
   if (!result) return null;
 
   const confidence = CONFIDENCE_LABELS[result.confidence];
@@ -57,11 +53,16 @@ export const CriticalSpeed: React.FC<Props> = ({ cloud }) => {
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: "1.5rem", marginBottom: "0.5rem", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontFamily: "var(--font-heading)", fontWeight: 900, fontSize: "3rem", color: "#22d3ee", lineHeight: 1 }}>
-            {fmtPace(result.csPaceSecPerKm)}
+          <div style={{ display: "flex", alignItems: "baseline", gap: "0.6rem" }}>
+            <div style={{ fontFamily: "var(--font-heading)", fontWeight: 900, fontSize: "3rem", color: "#22d3ee", lineHeight: 1 }}>
+              {fmtPace(result.csPaceSecPerKm)} <span style={{ fontSize: "1.3rem", fontWeight: 700 }}>/km</span>
+            </div>
+            <div style={{ fontSize: "1.1rem", fontWeight: 700, color: "var(--text-tertiary)" }}>
+              ({(result.cs * 3.6).toFixed(1)} km/h)
+            </div>
           </div>
           <div style={{ fontSize: "0.85rem", color: "var(--text-tertiary)", marginTop: "0.25rem" }}>
-            /km — <strong>CS</strong>, l'allure la plus rapide soutenable "indéfiniment" sans dette d'oxygène (ta limite aérobie)
+            <strong>CS</strong>, l'allure la plus rapide soutenable "indéfiniment" sans dette d'oxygène (ta limite aérobie)
           </div>
         </div>
         <div style={{ paddingBottom: "0.5rem" }}>

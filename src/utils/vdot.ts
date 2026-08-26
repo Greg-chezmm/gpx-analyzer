@@ -2,6 +2,8 @@
 // Ref: Daniels & Gilbert, "Oxygen Power: Performance Tables for Distance Runners"
 // Formulas from the published regression equations.
 
+import type { AggregatedRunBest } from './bestEfforts';
+
 /**
  * VO2 demandé (mL/kg/min) à la vitesse v (m/min) — équation de régression Daniels & Gilbert.
  * Polynôme du 2e degré : VO2 = −4,60 + 0,182258×v + 0,000104×v².
@@ -50,6 +52,21 @@ function predictRaceTime(distanceM: number, vdot: number): number {
   return ((lo + hi) / 2) * 60; // seconds
 }
 
+/**
+ * Inverse de `predictRaceTime` : retrouve le VDOT impliqué par une performance réelle
+ * (distance + temps), par dichotomie (`predictRaceTime` est strictement décroissante en VDOT).
+ * Sert de base à une prédiction "depuis un vrai résultat de course" plutôt que depuis l'estimation
+ * sous-maximale FC/allure — voir `computeVDOTFromBests`.
+ */
+export function vdotFromPerformance(distanceM: number, timeS: number): number {
+  let lo = 20, hi = 85;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (predictRaceTime(distanceM, mid) > timeS) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 // ─── Public types ──────────────────────────────────────────────────────────────
 
 /** Temps prédit sur une distance de course standard, calculé à partir du VDOT. */
@@ -57,6 +74,10 @@ export interface VDOTRace {
   label: string;
   distance: number; // meters
   timeS: number;    // seconds
+  /** Vrai si `timeS` est un temps réellement couru (pas une prédiction du modèle). */
+  isActual?: boolean;
+  /** Référence réelle utilisée pour la prédiction (absent si `isActual` ou si aucun résultat réel disponible). */
+  sourceLabel?: string;
 }
 
 /** Zone d'allure d'entraînement Daniels (E, M, T, I, R) avec plage min/max en s/km. */
@@ -65,6 +86,8 @@ export interface VDOTPace {
   description: string;
   minPaceSecPerKm: number;
   maxPaceSecPerKm: number;
+  /** Référence réelle utilisée pour la prédiction (absent si aucun résultat réel disponible). */
+  sourceLabel?: string;
 }
 
 /** Résultat complet du calcul VDOT : valeur, temps de course prédits et zones d'allure. */
@@ -145,6 +168,87 @@ export function computeVDOT(vo2max: number): VDOTResult {
       maxPaceSecPerKm: toSecPerKm(repV),
     },
   ];
+
+  return { vdot, races, paces };
+}
+
+// ─── Prédiction depuis de vrais résultats de course ────────────────────────────
+//
+// L'estimation sous-maximale FC/allure (estimateVO2max) est peu fiable (voir feedback_vo2max_estimation) ;
+// un vrai résultat de course est une bien meilleure base. Mais un VDOT unique ne se transpose pas
+// forcément d'une distance à l'autre pour tout le monde : un coureur peut être "rapide sur courte
+// distance" et "endurant sur longue distance" dans des proportions différentes de ce que suppose le
+// modèle de Daniels (ex. un 10K rapide qui surestimerait le marathon prédit). Pour éviter ce biais,
+// chaque prédiction utilise le résultat réel le plus proche en distance (échelle logarithmique),
+// pas un seul VDOT appliqué partout.
+
+/** Distance de référence utilisée pour choisir le résultat réel le plus pertinent par allure Daniels. */
+const PACE_ANCHOR_METERS: Record<string, number> = { E: 42195, M: 42195, T: 15000, I: 5000, R: 1500 };
+
+/** Résultat réel dont la distance est la plus proche de `targetMeters` (ratio logarithmique, symétrique). */
+function nearestBest(targetMeters: number, bests: AggregatedRunBest[]): AggregatedRunBest | null {
+  let best: AggregatedRunBest | null = null, bestDist = Infinity;
+  for (const b of bests) {
+    const d = Math.abs(Math.log(b.meters / targetMeters));
+    if (d < bestDist) { bestDist = d; best = b; }
+  }
+  return best;
+}
+
+/** Formate un résultat réel en libellé court pour l'affichage ("10 km 39'52"" ). */
+function formatSourceLabel(b: AggregatedRunBest): string {
+  const totalS = Math.round(b.timeSeconds);
+  const h = Math.floor(totalS / 3600), m = Math.floor((totalS % 3600) / 60), s = totalS % 60;
+  const timeStr = h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}'${String(s).padStart(2, '0')}"`;
+  return `${b.label} ${timeStr}`;
+}
+
+/**
+ * Calcule temps prédits + allures d'entraînement à partir des meilleurs résultats réels de
+ * l'athlète (voir `aggregateBestRunEfforts`), en choisissant pour chaque distance/allure le
+ * résultat réel le plus proche plutôt qu'un VDOT unique. `fallbackVo2max` (estimation sous-maximale)
+ * n'est utilisé que pour les distances/allures sans résultat réel disponible.
+ */
+export function computeVDOTFromBests(bests: AggregatedRunBest[], fallbackVo2max: number | null): VDOTResult {
+  const fallback = fallbackVo2max != null ? computeVDOT(fallbackVo2max) : null;
+  const toSecPerKm = (v: number) => v > 0 ? 60000 / v : 0;
+
+  const races: VDOTRace[] = RACE_DISTANCES.map((r, i) => {
+    const exact = bests.find(b => b.meters === r.distance);
+    if (exact) return { ...r, timeS: exact.timeSeconds, isActual: true };
+    const near = nearestBest(r.distance, bests);
+    if (near) {
+      const vdot = vdotFromPerformance(near.meters, near.timeSeconds);
+      return { ...r, timeS: predictRaceTime(r.distance, vdot), sourceLabel: formatSourceLabel(near) };
+    }
+    return fallback ? fallback.races[i] : { ...r, timeS: 0 };
+  });
+
+  const PACE_DEFS: { label: string; description: string; compute: (vdot: number) => { min: number; max: number } }[] = [
+    { label: "E", description: "Endurance / Récup",
+      compute: vdot => ({ min: toSecPerKm(velocityAtPctVDOT(vdot, 0.74)), max: toSecPerKm(velocityAtPctVDOT(vdot, 0.59)) }) },
+    { label: "M", description: "Allure Marathon",
+      compute: vdot => { const p = predictRaceTime(42195, vdot) / 42.195; return { min: p, max: p }; } },
+    { label: "T", description: "Seuil / Tempo",
+      compute: vdot => { const v = toSecPerKm(velocityAtPctVDOT(vdot, 0.88)); return { min: v, max: v }; } },
+    { label: "I", description: "Intervalles VO2max",
+      compute: vdot => { const v = toSecPerKm(velocityAtPctVDOT(vdot, 1.00)); return { min: v, max: v }; } },
+    { label: "R", description: "Répétitions",
+      compute: vdot => { const v = toSecPerKm(velocityAtPctVDOT(vdot, 1.05)); return { min: v, max: v }; } },
+  ];
+
+  const paces: VDOTPace[] = PACE_DEFS.map(({ label, description, compute }) => {
+    const near = nearestBest(PACE_ANCHOR_METERS[label], bests);
+    if (near) {
+      const vdot = vdotFromPerformance(near.meters, near.timeSeconds);
+      const { min, max } = compute(vdot);
+      return { label, description, minPaceSecPerKm: min, maxPaceSecPerKm: max, sourceLabel: formatSourceLabel(near) };
+    }
+    const fb = fallback?.paces.find(p => p.label === label);
+    return fb ? { ...fb } : { label, description, minPaceSecPerKm: 0, maxPaceSecPerKm: 0 };
+  });
+
+  const vdot = fallback?.vdot ?? (bests.length > 0 ? vdotFromPerformance(bests[0].meters, bests[0].timeSeconds) : 0);
 
   return { vdot, races, paces };
 }

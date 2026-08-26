@@ -1,4 +1,5 @@
 import { aggregateBestRunEfforts, type BestEffortsData } from './bestEfforts';
+import type { ManualBests } from '../hooks/useManualBests';
 
 // ─── Vitesse critique (Critical Speed) — modèle hyperbolique de Monod & Scherrer (1965) ────────
 //
@@ -66,8 +67,9 @@ export function estimateCriticalSpeed(points: CSPoint[]): CriticalSpeedResult | 
 /** Construit les points (distance, temps) depuis l'historique Drive et ajuste le modèle CS/D'. */
 export function estimateCriticalSpeedFromHistory(
   history: { activityType: string; bestEfforts?: BestEffortsData; name: string; date: string }[],
+  manualBests?: ManualBests,
 ): CriticalSpeedResult | null {
-  const best = aggregateBestRunEfforts(history);
+  const best = aggregateBestRunEfforts(history, manualBests);
   return estimateCriticalSpeed(best.map(b => ({
     key: b.key, label: b.label, meters: b.meters, timeSeconds: b.timeSeconds,
     entryName: b.entryName, entryDate: b.entryDate,
