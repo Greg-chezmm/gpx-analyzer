@@ -3,7 +3,7 @@ import type { GPXActivity } from '../utils/gpxCore';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import type { StoredSegment } from '../utils/firestoreStorage';
 import {
-  fingerprintOverlap, matchStoredSegment, parseActivityRawToPoints, toCachedAttempt,
+  fingerprintOverlap, matchStoredSegmentAll, parseActivityRawToPoints, toCachedAttempt,
   type CachedSegmentAttempt,
 } from '../utils/segments';
 
@@ -22,10 +22,12 @@ export interface StoredSegmentScanHandle {
 
 /**
  * Compare un segment défini manuellement (géométrie de référence fixe) à l'historique — matching
- * à sens unique (référence → candidates), pas de découverte/regroupement. L'activité actuellement
- * ouverte est comparée sans téléchargement (déjà en mémoire). Le résultat (top 10) est remonté via
- * onScanComplete pour être persisté par l'appelant (voir useStoredSegments.updateAttempts) — ce
- * hook ne connaît pas Firestore directement.
+ * à sens unique (référence → candidates). Une même activité peut produire PLUSIEURS passages
+ * (`matchStoredSegmentAll`) — utile pour un fractionné en côte (plusieurs montées du même segment
+ * dans la même séance), chacune apparaît comme une ligne distincte du classement. L'activité
+ * actuellement ouverte est comparée sans téléchargement (déjà en mémoire). Le résultat (top 10) est
+ * remonté via onScanComplete pour être persisté par l'appelant (voir useStoredSegments.updateAttempts)
+ * — ce hook ne connaît pas Firestore directement.
  */
 export function useStoredSegmentScan(
   segment: StoredSegment,
@@ -69,8 +71,8 @@ export function useStoredSegmentScan(
     const found: CachedSegmentAttempt[] = [];
 
     if (activity) {
-      const m = matchStoredSegment(segment.points, segment.distance, { points: activity.points, date: currentDate }, true);
-      if (m) found.push(toCachedAttempt(m));
+      const ms = matchStoredSegmentAll(segment.points, segment.distance, { points: activity.points, date: currentDate, name: activity.name }, true);
+      found.push(...ms.map(toCachedAttempt));
     }
 
     setProgress({ done: 0, total: candidates.length });
@@ -79,8 +81,8 @@ export function useStoredSegmentScan(
       try {
         const raw = await loadFile(c.entry);
         const points = await parseActivityRawToPoints(raw, c.entry.fileName);
-        const m = matchStoredSegment(segment.points, segment.distance, { points, date: c.entry.date });
-        if (m) found.push(toCachedAttempt(m));
+        const ms = matchStoredSegmentAll(segment.points, segment.distance, { points, date: c.entry.date, name: c.entry.name });
+        found.push(...ms.map(toCachedAttempt));
       } catch {
         // Fichier illisible/supprimé côté cloud — ignoré silencieusement.
       }

@@ -12,6 +12,7 @@ import { useUserSettings } from "./hooks/useUserSettings";
 import { useTheme } from "./hooks/useTheme";
 import { useGoogleDrive } from "./hooks/useGoogleDrive";
 import { useRaceGoal } from "./hooks/useRaceGoal";
+import { useManualBests } from "./hooks/useManualBests";
 import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
 import { useFirebaseCloud } from "./hooks/useFirebaseCloud";
 import { loadFirestoreSettings, saveFirestoreSettings } from "./utils/firestoreStorage";
@@ -54,8 +55,8 @@ import { downloadGPX, exportToGPX } from "./utils/gpxExporter";
 import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, entryToWeather, type WeatherInfo } from "./utils/weather";
-import { computeBestEfforts } from "./utils/bestEfforts";
-import { computeFingerprint, matchStoredSegment, toCachedAttempt } from "./utils/segments";
+import { computeBestEfforts, aggregateBestRunEfforts } from "./utils/bestEfforts";
+import { computeFingerprint, matchStoredSegmentAll, toCachedAttempt } from "./utils/segments";
 import { useSegmentPicker } from "./hooks/useSegmentPicker";
 import { useStoredSegments } from "./hooks/useStoredSegments";
 
@@ -81,6 +82,7 @@ function App() {
   const { isDark, toggleTheme } = useTheme();
   const drive = useGoogleDrive();
   const { goal: raceGoal, setGoal: setRaceGoal } = useRaceGoal();
+  const { manualBests, setManualBests, setOne: setManualBest } = useManualBests();
   const firebaseAuth = useFirebaseAuth();
   const cloud = useFirebaseCloud(firebaseAuth, drive.token);
   const segmentPicker = useSegmentPicker();
@@ -176,6 +178,13 @@ function App() {
     [cloud.history, enrichedActivity]
   );
 
+  // Meilleurs temps réels agrégés (course) — utilisés en priorité sur l'estimation sous-maximale
+  // FC/allure par VDOTPredictor, voir computeVDOTFromBests.
+  const runBests = useMemo(
+    () => enrichedActivity?.activityType !== 'cycling' ? aggregateBestRunEfforts(sameTypeCloudHistory, manualBests) : [],
+    [sameTypeCloudHistory, enrichedActivity, manualBests]
+  );
+
   const normalizedPower = useMemo(
     () => (enrichedActivity ? calcNormalizedPower(enrichedActivity.points) : null),
     [enrichedActivity]
@@ -253,6 +262,7 @@ function App() {
       if (remote.birthYear > 0) setBirthYear(remote.birthYear);
       if (remote.sex === 'M' || remote.sex === 'F') setSex(remote.sex);
       if (remote.raceGoal) setRaceGoal(remote.raceGoal);
+      if (remote.manualBests) setManualBests(remote.manualBests);
       setTimeout(() => { skipFirestoreSettingsSync.current = false; }, 200);
     }).catch(() => { skipFirestoreSettingsSync.current = false; });
   }, [firebaseAuth.status, firebaseAuth.user]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -263,10 +273,10 @@ function App() {
     const uid = firebaseAuth.user.uid;
     if (firestoreSettingsSaveTimer.current) clearTimeout(firestoreSettingsSaveTimer.current);
     firestoreSettingsSaveTimer.current = setTimeout(() => {
-      saveFirestoreSettings(uid, { fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal });
+      saveFirestoreSettings(uid, { fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal, manualBests });
     }, 800);
     return () => { if (firestoreSettingsSaveTimer.current) clearTimeout(firestoreSettingsSaveTimer.current); };
-  }, [firebaseAuth.status, firebaseAuth.user, fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [firebaseAuth.status, firebaseAuth.user, fcMax, fcRest, vma, ftp, weight, birthYear, sex, raceGoal, manualBests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Revient sur l'onglet "Carte & analyse" à chaque nouvelle activité chargée.
   useEffect(() => { setActiveTab("overview"); }, [fileName]);
@@ -466,11 +476,13 @@ function App() {
     const date = enrichedActivity.startTime ? enrichedActivity.startTime.toISOString().slice(0, 10) : '';
     const matching = storedSegments.segments.filter(s => s.activityType === enrichedActivity.activityType);
     for (const seg of matching) {
-      const m = matchStoredSegment(seg.points, seg.distance, { points: enrichedActivity.points, date });
-      if (!m) continue;
-      // Remplace un éventuel passage existant à la même date (re-sauvegarde) plutôt que d'ajouter un doublon
+      // Une même activité peut contenir plusieurs passages (ex. fractionné en côte, plusieurs
+      // montées du même segment) — voir matchStoredSegmentAll.
+      const ms = matchStoredSegmentAll(seg.points, seg.distance, { points: enrichedActivity.points, date, name: enrichedActivity.name });
+      if (ms.length === 0) continue;
+      // Remplace d'éventuels passages existants à la même date (re-sauvegarde) plutôt que d'ajouter des doublons
       const withoutSameDate = (seg.attempts ?? []).filter(a => a.date !== date);
-      const merged = [...withoutSameDate, toCachedAttempt(m)].sort((a, b) => a.duration - b.duration).slice(0, 10);
+      const merged = [...withoutSameDate, ...ms.map(toCachedAttempt)].sort((a, b) => a.duration - b.duration).slice(0, 10);
       await storedSegments.updateAttempts(seg.id, merged);
     }
   };
@@ -613,6 +625,8 @@ function App() {
             tsb={tsbResult}
             raceGoal={raceGoal}
             setRaceGoal={setRaceGoal}
+            manualBests={manualBests}
+            setManualBest={setManualBest}
             onClose={() => setShowAthletePage(false)}
           />
         ) : !activity ? (
@@ -948,7 +962,7 @@ function App() {
             {vo2maxEst && <VO2maxEstimate estimate={vo2maxEst} />}
 
             {/* Prédictions VDOT Jack Daniels — running, fiabilité ≥ moyenne */}
-            {vo2maxEst && <VDOTPredictor estimate={vo2maxEst} />}
+            {vo2maxEst && <VDOTPredictor estimate={vo2maxEst} bests={runBests} />}
 
             {/* Métriques de puissance NP/IF/TSS — vélo + capteur de puissance */}
             {normalizedPower !== null && enrichedActivity!.activityType === 'cycling' && (

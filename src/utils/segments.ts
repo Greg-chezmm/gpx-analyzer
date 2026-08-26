@@ -66,15 +66,31 @@ const RESAMPLE_STEP_M = 20;
 const CORRIDOR_TOLERANCE_M = 30;
 const DIRECTION_TOLERANCE_DEG = 55;
 const MAX_GAP_POINTS = 4;
+// Un point rééchantillonné de A avance normalement d'environ 1 cran de B à chaque pas (même pas de
+// rééchantillonnage des deux côtés) — un saut en avant bien plus grand signale que l'appariement a
+// "sauté" vers un endroit du candidat déjà loin dans son propre parcours (carrefour/quartier
+// recroisé), pas une continuité réelle du même passage.
+const MAX_FORWARD_JUMP_POINTS = 5;
 const MIN_SEGMENT_DISTANCE_M = 300;
 const GRID_CELL_DEG = 0.005; // ~550m — bucket de pré-filtrage spatial pour le matching
 
 interface ResampledPoint { lat: number; lon: number; dist: number; origIndex: number; }
 
-/** Rééchantillonne un tracé à distance cumulée fixe, en conservant l'index d'origine pour retrouver les bornes exactes ensuite. */
-function resampleByDistance(points: GeoPoint[], stepMeters: number): ResampledPoint[] {
+/**
+ * Rééchantillonne un tracé à distance cumulée fixe, en conservant l'index d'origine pour retrouver
+ * les bornes exactes ensuite. `phase` ancre la grille d'échantillonnage sur une distance de référence
+ * commune (généralement le premier point du tracé A) plutôt que sur 0 — sans ça, un segment qui
+ * démarre à une distance arbitraire dans l'activité (pas un multiple rond du pas) produit une grille
+ * décalée de quelques mètres par rapport à celle de l'activité complète ; sur une ligne droite ça ne
+ * change rien, mais près d'un virage en épingle serré, ce décalage peut faire tomber le point
+ * échantillonné juste avant ou juste après l'épingle côté A vs côté B, donnant un cap local très
+ * différent pour ce qui est pourtant le même point physique — fragmentant la comparaison inutilement.
+ */
+function resampleByDistance(points: GeoPoint[], stepMeters: number, phase = 0): ResampledPoint[] {
   const out: ResampledPoint[] = [];
-  let nextDist = 0;
+  if (points.length === 0) return out;
+  const start = points[0].distFromStart;
+  let nextDist = start - (((start - phase) % stepMeters + stepMeters) % stepMeters);
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
     if (p.distFromStart >= nextDist) {
@@ -138,33 +154,93 @@ interface MatchResult { aStart: number; aEnd: number; bStart: number; bEnd: numb
 interface Run { aStart: number; aEnd: number; bMin: number; bMax: number; dist: number; }
 
 /**
- * Rééchantillonnage + appariement point-à-point (tolérance ~30m + cap cohérent à ±55° pour ignorer
- * un aller-retour sur le même chemin) entre deux tracés, puis découpage en "runs" (plages
- * globalement croissantes côté B, tolérant de petits trous GPS jusqu'à MAX_GAP_POINTS points
- * consécutifs non appariés). Un trou plus grand qu'un aller-retour normal (ex. une boucle ajoutée
- * au milieu du trajet, un dropout GPS) termine un run et en démarre un nouveau — c'est pour ça
- * qu'un même trajet réel peut produire PLUSIEURS runs distincts, voir computeTotalCoverage.
+ * Rééchantillonne les deux tracés (même pas, même phase) et apparie chaque point de A au point de B
+ * le plus cohérent avec la progression en cours (-1 si aucun) — factorisé entre `computeRuns` et
+ * `debugSegmentPointMatches` (visualisation carte des points non appariés).
+ *
+ * Le choix du "meilleur" candidat B ne se limite pas à la plus courte distance géométrique : sur un
+ * virage en épingle serré, deux jambes parallèles proches (ex. l'aller et le retour d'un grand lacet)
+ * peuvent chacune satisfaire corridor+cap pour un même point de A, et la plus proche des deux peut
+ * basculer d'un point à l'autre — ce ping-pong fragmente artificiellement le passage en une multitude
+ * de micro-runs sous le seuil minimal (`MIN_ROUTE_RUN_DISTANCE_M`), même si CHAQUE point pris
+ * individuellement trouve bien une correspondance (bug réel constaté : 100% des points appariés
+ * individuellement, mais seulement ~40% de couverture cumulée après reconstruction des runs). Une
+ * pénalité de progression (`PROGRESS_PENALTY_M_PER_POINT`) favorise le candidat qui continue le run
+ * en cours plutôt que le plus proche dans l'absolu, sans empêcher un vrai redémarrage après un trou.
  */
-function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; runs: Run[] } | null {
-  const rsA = resampleByDistance(pointsA, RESAMPLE_STEP_M);
-  const rsB = resampleByDistance(pointsB, RESAMPLE_STEP_M);
+const PROGRESS_PENALTY_M_PER_POINT = 4;
+
+// Plafond dur sur l'écart d'index par rapport à `expectedB` — au-delà, un candidat n'est même pas
+// considéré, quels que soient corridor/cap. Sans ça, la pénalité de progression ne fait que
+// départager entre candidats déjà valides : si le VRAI point de continuité est rejeté par le filtre
+// corridor/cap (ex. inversion brutale de direction au sommet d'une épingle), le seul candidat restant
+// peut être un point géographiquement proche mais très loin dans le tracé candidat (ex. la descente
+// d'un aller-retour qui repasse près de ce même endroit) — bug réel constaté : 4 points au sommet
+// d'un lacet appariés à un endroit à ~1199m de distance le long du candidat, coupant le corridor en
+// deux au lieu de laisser ces quelques points sans correspondance (tolérés par MAX_GAP_POINTS).
+const MAX_PROGRESS_GAP_POINTS = 10;
+
+// Si `expectedB` reste sans le moindre candidat valide pendant plusieurs points d'affilée, l'ancre
+// elle-même est probablement fausse (ex. le tout premier point du segment, i=0, où il n'existe encore
+// aucune continuité pour départager une ambiguïté géométrique locale, s'est accroché au mauvais
+// endroit) — sans réinitialisation, le plafond dur ci-dessus bloque alors TOUS les points suivants
+// dans une fenêtre proche de cette ancre erronée, avec 0% de couverture au lieu de "juste" quelques
+// points perdus (bug réel constaté : une activité valide, 0/25 points appariés). Après plusieurs
+// échecs consécutifs, on relâche l'ancrage pour permettre une recherche globale au point suivant.
+const MAX_PROGRESS_MISS_STREAK = 5;
+
+function computeMatchIndices(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; matchB: number[] } | null {
+  // Pas de rééchantillonnage adaptatif à la longueur de A (la référence, généralement la plus
+  // courte pour un segment manuel) — avec le pas fixe de 20m, un segment de ~60-80m produit moins
+  // de 5 points rééchantillonnés et échoue à se faire correspondre à lui-même (bug réel constaté :
+  // segment créé mais invisible même sur l'activité d'origine). Reste à 20m pour les tracés longs
+  // (trajets complets), inchangé.
+  const spanA = pointsA.length > 1 ? pointsA[pointsA.length - 1].distFromStart - pointsA[0].distFromStart : 0;
+  const stepMeters = spanA > 0 ? Math.min(RESAMPLE_STEP_M, Math.max(2, spanA / 10)) : RESAMPLE_STEP_M;
+
+  // Même phase des deux côtés (ancrée sur le premier point de A) — voir le commentaire de resampleByDistance.
+  const phase = pointsA[0]?.distFromStart ?? 0;
+  const rsA = resampleByDistance(pointsA, stepMeters, phase);
+  const rsB = resampleByDistance(pointsB, stepMeters, phase);
   if (rsA.length < 5 || rsB.length < 5) return null;
 
   const bearA = localBearings(rsA);
   const bearB = localBearings(rsB);
   const gridB = buildGridIndex(rsB);
 
-  const matchB: number[] = rsA.map((pa, i) => {
-    let best = -1, bestDist = CORRIDOR_TOLERANCE_M;
+  const matchB: number[] = [];
+  let expectedB: number | null = null;
+  let missStreak = 0;
+  for (let i = 0; i < rsA.length; i++) {
+    const pa = rsA[i];
+    let best = -1, bestScore = Infinity;
     for (const j of neighborIndices(gridB, pa.lat, pa.lon)) {
       const pb = rsB[j];
       const d = calculateDistance(pa.lat, pa.lon, pb.lat, pb.lon);
-      if (d < bestDist && angleDiff(bearA[i], bearB[j]) < DIRECTION_TOLERANCE_DEG) {
-        bestDist = d; best = j;
-      }
+      if (d >= CORRIDOR_TOLERANCE_M) continue;
+      if (angleDiff(bearA[i], bearB[j]) >= DIRECTION_TOLERANCE_DEG) continue;
+      const progressGap = expectedB !== null ? Math.abs(j - expectedB) : 0;
+      if (expectedB !== null && progressGap > MAX_PROGRESS_GAP_POINTS) continue;
+      const score = d + progressGap * PROGRESS_PENALTY_M_PER_POINT;
+      if (score < bestScore) { bestScore = score; best = j; }
     }
-    return best;
-  });
+    matchB.push(best);
+    if (best >= 0) {
+      expectedB = best + 1;
+      missStreak = 0;
+    } else if (expectedB !== null) {
+      missStreak++;
+      if (missStreak > MAX_PROGRESS_MISS_STREAK) expectedB = null;
+    }
+  }
+
+  return { rsA, rsB, matchB };
+}
+
+function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; runs: Run[] } | null {
+  const computed = computeMatchIndices(pointsA, pointsB);
+  if (!computed) return null;
+  const { rsA, rsB, matchB } = computed;
 
   const runs: Run[] = [];
   let cur: { aStart: number; aEnd: number; bLast: number; bMin: number; bMax: number; gaps: number } | null = null;
@@ -184,9 +260,14 @@ function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: Resampled
     }
     if (!cur) {
       cur = { aStart: i, aEnd: i, bLast: b, bMin: b, bMax: b, gaps: 0 };
-    } else if (b >= cur.bLast - 2) {
+    } else if (b >= cur.bLast - 2 && b <= cur.bLast + MAX_FORWARD_JUMP_POINTS) {
       cur.aEnd = i; cur.bLast = b; cur.bMin = Math.min(cur.bMin, b); cur.bMax = Math.max(cur.bMax, b); cur.gaps = 0;
     } else {
+      // Un saut en avant trop grand (ex. le candidat repasse par un carrefour/quartier déjà visité
+      // bien plus tôt dans son propre parcours) n'est pas non plus une continuité valide — sans cette
+      // borne, seuls les reculs étaient rejetés, laissant un run s'étendre arbitrairement loin sur le
+      // candidat tant que l'appariement ne recule jamais (bug réel : segment de 544m rapportant des
+      // "passages" de plusieurs km).
       flush();
       cur = { aStart: i, aEnd: i, bLast: b, bMin: b, bMax: b, gaps: 0 };
     }
@@ -196,19 +277,118 @@ function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: Resampled
   return { rsA, rsB, runs };
 }
 
+/** Un point rééchantillonné du segment de référence, avec le numéro du corridor (run) auquel il appartient — pour visualisation. */
+export interface SegmentPointRun { lat: number; lon: number; runIndex: number | null }
+
 /**
- * Trouve le plus long corridor commun UNIQUE entre deux tracés (un seul run contigu) — utilisé pour
- * un segment manuel, où le passage doit être continu par définition (une montée n'est pas coupable
- * en deux morceaux séparés par un détour).
+ * Rejoue la reconstruction des corridors (`computeRuns`) et retourne, pour chaque point rééchantillonné
+ * du segment, le numéro du run auquel il a été rattaché (null si aucun) — contrairement à
+ * `debugSegmentPointMatches` (juste "a une correspondance ou non"), révèle où le suivi de continuité
+ * fragmente le passage en plusieurs runs séparés, même quand chaque point pris individuellement matche.
+ */
+export function debugSegmentPointRuns(refPoints: GeoPoint[], candidatePoints: GeoPoint[]): SegmentPointRun[] {
+  const computed = computeRuns(refPoints, candidatePoints);
+  if (!computed) return [];
+  const { rsA, runs } = computed;
+  const runIndexByA: (number | null)[] = new Array(rsA.length).fill(null);
+  runs.forEach((run, idx) => {
+    for (let i = run.aStart; i <= run.aEnd; i++) runIndexByA[i] = idx;
+  });
+  return rsA.map((p, i) => ({ lat: p.lat, lon: p.lon, runIndex: runIndexByA[i] }));
+}
+
+// Distance minimale d'UN run pour être compté dans une comparaison fragmentée (trajet complet OU
+// segment manuel) — bien plus bas que le seuil global, car on additionne PLUSIEURS runs : un détour
+// ponctuel (boucle ajoutée, coupure GPS) ou une géométrie en lacets (montée en épingles) peut
+// légitimement fragmenter un même passage réel en plusieurs bouts sans que ce soit un vrai détour.
+const MIN_ROUTE_RUN_DISTANCE_M = 2 * RESAMPLE_STEP_M;
+
+// Écart maximal (le long du tracé candidat, en mètres) toléré entre deux runs pour les considérer
+// comme le MÊME passage fragmenté (ex. lacets d'une montée) plutôt que deux coïncidences
+// géométriques distinctes ailleurs sur une activité plus longue. Volontairement petit : un vrai
+// passage fragmenté par sa propre géométrie reste très localisé (quelques dizaines de mètres),
+// contrairement à des correspondances éparpillées sur plusieurs centaines de mètres/km.
+const MAX_SEGMENT_CLUSTER_GAP_M = 150;
+
+// Contrairement à MIN_ROUTE_RUN_DISTANCE_M (utilisé pour computeTotalCoverage), un run individuel
+// n'a pas besoin d'être significatif pour compter dans le regroupement d'un segment manuel — même un
+// fragment d'un seul point (~20m) près d'un virage serré fait partie du même passage réel une fois
+// regroupé par proximité (MAX_SEGMENT_CLUSTER_GAP_M). Le exigeait 40m par run AVANT regroupement
+// rejetait ces petits fragments avant même qu'ils puissent se recoller, perdant de la couverture
+// réelle malgré des points individuellement bien appariés (voir debugSegmentPointMatches).
+const MIN_SEGMENT_RUN_DISTANCE_M = 0;
+
+interface ClusterResult { dist: number; aStart: number; aEnd: number; bMin: number; bMax: number; runCount: number }
+interface ClusterGroups { clusters: ClusterResult[]; runGapsM: number[] }
+
+/**
+ * Regroupe les runs valides par proximité le long du tracé candidat (voir `MAX_SEGMENT_CLUSTER_GAP_M`)
+ * — retourne tous les groupes formés (pas seulement le meilleur) ainsi que les écarts entre runs
+ * consécutifs triés, pour permettre un diagnostic détaillé (voir `debugStoredSegmentMatch`).
+ *
+ * La couverture d'un groupe est mesurée par son ÉTENDUE côté référence (du premier au dernier point
+ * du groupe), pas par la somme des runs qui le composent — sommer les runs individuels exclut
+ * implicitement les micro-trous entre eux (quelques points sans correspondance nette, par ex. tout
+ * près d'un virage) même quand la quasi-totalité des points du segment sont par ailleurs bien
+ * appariés (voir debugSegmentPointMatches) : un segment avec 3 petits trous de 20m chacun perdait
+ * ainsi 60m de couverture "gratuitement", alors que ces trous font clairement partie du même passage.
+ */
+function groupSegmentRuns(runs: Run[], rsA: ResampledPoint[], rsB: ResampledPoint[]): ClusterGroups {
+  const valid = runs.filter(r => r.dist >= MIN_SEGMENT_RUN_DISTANCE_M);
+  if (valid.length === 0) return { clusters: [], runGapsM: [] };
+
+  const sorted = [...valid].sort((a, b) => a.bMin - b.bMin);
+  const runGapsM = sorted.slice(1).map((r, i) => rsB[r.bMin].dist - rsB[sorted[i].bMax].dist);
+
+  const groups: Run[][] = [sorted.slice(0, 1)];
+  for (let i = 1; i < sorted.length; i++) {
+    const prevCluster = groups[groups.length - 1];
+    const prevMax = Math.max(...prevCluster.map(r => r.bMax));
+    const gapM = rsB[sorted[i].bMin].dist - rsB[prevMax].dist;
+    if (gapM <= MAX_SEGMENT_CLUSTER_GAP_M) prevCluster.push(sorted[i]);
+    else groups.push([sorted[i]]);
+  }
+
+  const clusters = groups.map(cluster => {
+    const aStart = Math.min(...cluster.map(r => r.aStart));
+    const aEnd = Math.max(...cluster.map(r => r.aEnd));
+    return {
+      dist: rsA[aEnd].dist - rsA[aStart].dist,
+      aStart, aEnd,
+      bMin: Math.min(...cluster.map(r => r.bMin)),
+      bMax: Math.max(...cluster.map(r => r.bMax)),
+      runCount: cluster.length,
+    };
+  });
+  return { clusters, runGapsM };
+}
+
+/**
+ * Retourne le groupe de corridors le mieux couvert (voir `groupSegmentRuns`) — factorisé entre
+ * `findLongestMatch` et `debugStoredSegmentMatch` pour rester cohérents.
+ */
+function bestSegmentCluster(runs: Run[], rsA: ResampledPoint[], rsB: ResampledPoint[]): ClusterResult | null {
+  const { clusters } = groupSegmentRuns(runs, rsA, rsB);
+  if (clusters.length === 0) return null;
+  return clusters.reduce((a, b) => (b.dist > a.dist ? b : a));
+}
+
+/**
+ * Trouve le meilleur passage entre deux tracés — voir `bestSegmentCluster`. Nécessaire depuis la
+ * découverte qu'une montée en lacets serrés peut faire diverger le suivi d'index (`computeRuns`)
+ * même en comparant un tracé à lui-même, fragmentant un même passage réel en plusieurs runs proches
+ * dont aucun individuellement n'atteint le seuil — mais additionner TOUS les runs sans tenir compte
+ * de leur proximité (comme pour un trajet complet, voir `computeTotalCoverage`) recolle aussi à tort
+ * des coïncidences géométriques éparpillées sur toute une activité plus longue : d'où le regroupement
+ * par proximité plutôt qu'une simple somme globale.
  */
 function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM = MIN_SEGMENT_DISTANCE_M): MatchResult | null {
   const computed = computeRuns(pointsA, pointsB);
   if (!computed) return null;
   const { rsA, rsB, runs } = computed;
 
-  const valid = runs.filter(r => r.dist >= minDistanceM);
-  if (valid.length === 0) return null;
-  const best = valid.reduce((a, b) => (b.dist > a.dist ? b : a));
+  const best = bestSegmentCluster(runs, rsA, rsB);
+  if (!best || best.dist < minDistanceM) return null;
 
   return {
     aStart: rsA[best.aStart].origIndex,
@@ -217,11 +397,6 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
     bEnd: rsB[best.bMax].origIndex,
   };
 }
-
-// Distance minimale d'UN run pour être compté dans une comparaison de trajet complet — bien plus
-// bas que pour un segment, car ici on additionne PLUSIEURS runs : un détour au milieu du trajet
-// (boucle ajoutée, coupure GPS) peut légitimement fragmenter le même trajet réel en plusieurs bouts.
-const MIN_ROUTE_RUN_DISTANCE_M = 2 * RESAMPLE_STEP_M;
 
 /**
  * Additionne la distance de TOUS les runs trouvés entre deux tracés (pas seulement le plus long) —
@@ -257,6 +432,7 @@ export interface SegmentAttempt {
   avgHR: number | null;
   elevGain: number;  // m
   date: string;      // "YYYY-MM-DD"
+  name: string;
   isCurrent: boolean;
 }
 
@@ -264,6 +440,7 @@ export interface SegmentAttempt {
 export interface SegmentSource {
   points: GPXTrackPoint[];
   date: string;
+  name: string;
 }
 
 /**
@@ -276,6 +453,7 @@ export interface SegmentSource {
 export interface CachedSegmentAttempt {
   points: { lat: number; lon: number }[];
   date: string;
+  name: string;
   duration: number;
   avgPace: number;
   avgSpeed: number;
@@ -290,13 +468,13 @@ export function toCachedAttempt(a: SegmentAttempt): CachedSegmentAttempt {
   const slice = a.points.slice(a.startIndex, a.endIndex + 1);
   return {
     points: slice.map(p => ({ lat: p.lat, lon: p.lon })),
-    date: a.date, duration: a.duration, avgPace: a.avgPace, avgSpeed: a.avgSpeed,
+    date: a.date, name: a.name, duration: a.duration, avgPace: a.avgPace, avgSpeed: a.avgSpeed,
     avgHR: a.avgHR, distance: a.distance, elevGain: a.elevGain, isCurrent: a.isCurrent,
   };
 }
 
 /** Construit un passage à partir d'une plage [startIndex, endIndex] de points — partagé par le matching segment et trajet complet. */
-export function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: number, date: string, isCurrent: boolean): SegmentAttempt {
+export function buildAttempt(points: GPXTrackPoint[], startIndex: number, endIndex: number, date: string, name: string, isCurrent: boolean): SegmentAttempt {
   const slice = points.slice(startIndex, endIndex + 1);
   const distance = slice.length > 1 ? slice[slice.length - 1].distFromStart - slice[0].distFromStart : 0;
 
@@ -323,7 +501,7 @@ export function buildAttempt(points: GPXTrackPoint[], startIndex: number, endInd
     points, startIndex, endIndex, distance, duration,
     avgPace: distance > 0 ? duration / (distance / 1000) : 0,
     avgSpeed: duration > 0 ? (distance / duration) * 3.6 : 0,
-    avgHR, elevGain, date, isCurrent,
+    avgHR, elevGain, date, name, isCurrent,
   };
 }
 
@@ -355,18 +533,130 @@ export function buildSegmentGeometry(points: GPXTrackPoint[], startIndex: number
 }
 
 /**
+ * Seuil de distance minimale pour qu'un segment manuel soit considéré comme retrouvé : 90% de sa
+ * longueur, au moins 100m — sauf que pour un segment plus court que ~125m, ce plancher de 100m
+ * dépasserait sa propre longueur totale, rendant la correspondance mathématiquement impossible
+ * (même en le comparant à lui-même). Plafonné à 95% de sa propre longueur pour rester atteignable.
+ * Relevé de 60% à 90% une fois le bug de fragmentation d'index corrigé (voir MAX_PROGRESS_GAP_POINTS) :
+ * un vrai passage complet couvre désormais ~95%+, ce qui permet d'exclure les montées interrompues
+ * avant le sommet (cas réel confirmé par Greg : un arrêt aux 3/4 d'un lacet ne doit pas compter comme
+ * un passage du segment).
+ */
+function minSegmentMatchDistance(refDistance: number): number {
+  return Math.min(refDistance * 0.95, Math.max(100, refDistance * 0.9));
+}
+
+/**
  * Compare une activité (courante ou historique) à la géométrie de référence d'un segment manuel.
- * Le seuil de distance minimale s'adapte à la longueur du segment (60% de sa distance, au moins
- * 100m) — les segments courts définis à la main ne doivent pas être rejetés par le seuil global
- * de 300m utilisé pour la détection automatique.
+ * Le seuil de distance minimale s'adapte à la longueur du segment — les segments courts définis à
+ * la main ne doivent pas être rejetés par le seuil global de 300m utilisé pour la détection
+ * automatique, voir `minSegmentMatchDistance`.
  */
 export function matchStoredSegment(
   refPoints: GeoPoint[], refDistance: number, candidate: SegmentSource, isCurrent = false,
 ): SegmentAttempt | null {
-  const minDistanceM = Math.max(100, refDistance * 0.6);
-  const match = findLongestMatch(refPoints, candidate.points, minDistanceM);
+  const match = findLongestMatch(refPoints, candidate.points, minSegmentMatchDistance(refDistance));
   if (!match) return null;
-  return buildAttempt(candidate.points, match.bStart, match.bEnd, candidate.date, isCurrent);
+  return buildAttempt(candidate.points, match.bStart, match.bEnd, candidate.date, candidate.name, isCurrent);
+}
+
+/** Nombre maximal de passages recherchés sur une même activité — garde-fou, largement au-dessus de tout fractionné réaliste. */
+const MAX_SEGMENT_PASSES = 12;
+
+/**
+ * Comme `matchStoredSegment`, mais retourne TOUS les passages valides trouvés sur l'activité, pas
+ * seulement le mieux couvert — nécessaire pour détecter les répétitions d'un même segment au sein
+ * d'une seule séance (ex. 6 montées de la même côte en fractionné, cas réel signalé par Greg).
+ *
+ * Une simple lecture de TOUS les clusters de `groupSegmentRuns` en un seul passage ne suffit pas :
+ * une côte gravie plusieurs fois a une géométrie QUASI IDENTIQUE à chaque répétition, donc pendant le
+ * suivi de continuité (`computeMatchIndices`), après le trou causé par la descente entre deux montées,
+ * la recherche peut se "raccrocher" par erreur sur la 1ère montée déjà appariée plutôt que d'avancer
+ * vers la suivante (les deux sont à la même position géographique, seule leur position dans le temps
+ * du candidat diffère) — un seul passage était alors détecté au lieu de 6, les runs des montées 2 à 6
+ * n'existant tout simplement pas dans le résultat de `computeRuns`.
+ *
+ * Fix : après chaque passage trouvé, ses coordonnées sont neutralisées (hors de portée du corridor)
+ * dans une copie de travail du tracé candidat, puis la recherche est relancée depuis zéro — la
+ * répétition déjà détectée n'étant plus un candidat possible, la suivante devient sans ambiguïté la
+ * meilleure correspondance. Répété jusqu'à épuisement (plus aucun cluster valide) ou `MAX_SEGMENT_PASSES`.
+ */
+export function matchStoredSegmentAll(
+  refPoints: GeoPoint[], refDistance: number, candidate: SegmentSource, isCurrent = false,
+): SegmentAttempt[] {
+  const requiredM = minSegmentMatchDistance(refDistance);
+  const results: SegmentAttempt[] = [];
+  const working: GeoPoint[] = candidate.points.map(p => ({ lat: p.lat, lon: p.lon, distFromStart: p.distFromStart }));
+
+  for (let pass = 0; pass < MAX_SEGMENT_PASSES; pass++) {
+    const computed = computeRuns(refPoints, working);
+    if (!computed) break;
+    const { rsA, rsB, runs } = computed;
+    const best = bestSegmentCluster(runs, rsA, rsB);
+    if (!best || best.dist < requiredM) break;
+
+    const bStartOrig = rsB[best.bMin].origIndex;
+    const bEndOrig = rsB[best.bMax].origIndex;
+    results.push(buildAttempt(candidate.points, bStartOrig, bEndOrig, candidate.date, candidate.name, isCurrent));
+
+    // Neutralise la plage détectée (+1 point de marge) — coordonnées écartées à un endroit qui ne
+    // pourra plus jamais satisfaire la tolérance de corridor (30m), sans décaler les index.
+    for (let k = Math.max(0, bStartOrig - 1); k <= Math.min(working.length - 1, bEndOrig + 1); k++) {
+      working[k] = { lat: 90, lon: 0, distFromStart: working[k].distFromStart };
+    }
+  }
+
+  return results.sort((a, b) => a.startIndex - b.startIndex);
+}
+
+/** Point le plus proche de `target` dans `points` (recherche exhaustive, sans filtre de cap) — utilisé par le diagnostic uniquement. */
+function bruteForceNearest(target: GeoPoint, points: GeoPoint[]): number {
+  let best = Infinity;
+  for (const p of points) {
+    const d = calculateDistance(target.lat, target.lon, p.lat, p.lon);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+/** Diagnostic d'une comparaison segment manuel — pourquoi une activité n'a pas été retenue comme un passage. */
+export interface StoredSegmentMatchDebug {
+  refPointCount: number;
+  candidatePointCount: number;
+  /** Couverture du meilleur groupe de corridors proches trouvé (0 si aucun) — voir `bestSegmentCluster`. */
+  bestRunM: number;
+  /** Longueur minimale requise pour ce segment (voir `minSegmentMatchDistance`). */
+  requiredM: number;
+  /** Distance (m) du premier/dernier point du segment au point le plus proche de l'activité, recherche
+   * exhaustive sans filtre de cap — permet de distinguer "coordonnées éloignées" (bug de données) de
+   * "coordonnées proches mais cap/corridor rejeté" (bug d'algorithme). */
+  nearestStartM: number;
+  nearestEndM: number;
+  /** Nombre de corridors valides trouvés (avant regroupement) — voir `groupSegmentRuns`. */
+  totalRuns: number;
+  /** Nombre de corridors fusionnés dans le meilleur groupe. */
+  bestClusterRunCount: number;
+  /** Écarts (m) entre corridors valides consécutifs, triés le long du tracé candidat — permet de voir
+   * si la perte de couverture vient de plusieurs petits trous ou d'un seul gros trou. */
+  runGapsM: number[];
+}
+
+/** Rejoue la comparaison d'un segment manuel et retourne les valeurs brutes — utilisé pour comprendre pourquoi un segment n'apparaît pas sur une activité donnée. */
+export function debugStoredSegmentMatch(refPoints: GeoPoint[], refDistance: number, candidatePoints: GeoPoint[]): StoredSegmentMatchDebug {
+  const requiredM = minSegmentMatchDistance(refDistance);
+  const computed = computeRuns(refPoints, candidatePoints);
+  const { clusters, runGapsM } = computed ? groupSegmentRuns(computed.runs, computed.rsA, computed.rsB) : { clusters: [], runGapsM: [] };
+  const best = clusters.length > 0 ? clusters.reduce((a, b) => (b.dist > a.dist ? b : a)) : null;
+  const bestRunM = best?.dist ?? 0;
+  const bestClusterRunCount = best?.runCount ?? 0;
+  const totalRuns = clusters.reduce((s, c) => s + c.runCount, 0);
+  const nearestStartM = refPoints.length > 0 ? bruteForceNearest(refPoints[0], candidatePoints) : Infinity;
+  const nearestEndM = refPoints.length > 0 ? bruteForceNearest(refPoints[refPoints.length - 1], candidatePoints) : Infinity;
+  return {
+    refPointCount: refPoints.length, candidatePointCount: candidatePoints.length,
+    bestRunM, requiredM, nearestStartM, nearestEndM,
+    totalRuns, bestClusterRunCount, runGapsM: runGapsM.map(g => Math.round(g)),
+  };
 }
 
 // ─── Comparaison de trajets complets ─────────────────────────────────────────────
@@ -406,7 +696,7 @@ export function matchFullRoute(current: SegmentSource, candidate: SegmentSource,
   if (coverage.distA / totalCurrent < FULL_ROUTE_COVERAGE) return null;
   if (coverage.distB / totalCandidate < FULL_ROUTE_COVERAGE) return null;
 
-  return buildAttempt(candidate.points, 0, candidate.points.length - 1, candidate.date, isCurrent);
+  return buildAttempt(candidate.points, 0, candidate.points.length - 1, candidate.date, candidate.name, isCurrent);
 }
 
 /** Diagnostic d'une comparaison de trajet — pourquoi une candidate a (ou n'a pas) été retenue. */

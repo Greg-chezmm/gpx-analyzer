@@ -1,15 +1,19 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2 } from "lucide-react";
+import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2, ChevronDown, ChevronUp, Map as MapIcon, Bug } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { StoredSegment } from "../utils/firestoreStorage";
-import type { CachedSegmentAttempt } from "../utils/segments";
-import { buildSegmentGeometry, matchStoredSegment } from "../utils/segments";
+import type { CachedSegmentAttempt, StoredSegmentMatchDebug } from "../utils/segments";
+import {
+  buildSegmentGeometry, matchStoredSegment, debugStoredSegmentMatch, debugSegmentPointRuns,
+  parseActivityRawToPoints, type SegmentPointRun,
+} from "../utils/segments";
 import type { StoredSegmentsHandle } from "../hooks/useStoredSegments";
 import { useStoredSegmentScan } from "../hooks/useStoredSegmentScan";
 import type { SegmentPickerHandle } from "../hooks/useSegmentPicker";
 import { formatDuration, formatPace } from "./SplitsTable";
 import { SegmentMapModal } from "./SegmentMapModal";
+import { SegmentMatchDebugMapModal } from "./SegmentMatchDebugMapModal";
 
 interface StoredSegmentsProps {
   activity: GPXActivity;
@@ -25,9 +29,11 @@ interface AttemptRowProps {
   rank: number;
   activityType: GPXActivity['activityType'];
   onClick: () => void;
+  onDebug: () => void;
+  debugLoading: boolean;
 }
 
-function AttemptRow({ attempt, rank, activityType, onClick }: AttemptRowProps) {
+function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoading }: AttemptRowProps) {
   return (
     <tr
       onClick={onClick}
@@ -44,6 +50,17 @@ function AttemptRow({ attempt, rank, activityType, onClick }: AttemptRowProps) {
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem" }}>
         {new Date(attempt.date).toLocaleDateString("fr-FR")}
         {attempt.isCurrent && <span style={{ color: "var(--accent-primary)", fontWeight: 600 }}> (actuelle)</span>}
+        {attempt.name && (
+          <div style={{ fontSize: "0.72rem", color: "var(--text-tertiary)", fontWeight: 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "12rem" }}>
+            {attempt.name}
+          </div>
+        )}
+      </td>
+      <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+        {attempt.distance >= 1000 ? `${(attempt.distance / 1000).toFixed(2)} km` : `${Math.round(attempt.distance)} m`}
+      </td>
+      <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-ele)" }}>
+        {attempt.elevGain > 0 ? `+${Math.round(attempt.elevGain)} m` : "—"}
       </td>
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", fontWeight: 600 }}>
         {formatDuration(Math.round(attempt.duration))}
@@ -54,8 +71,26 @@ function AttemptRow({ attempt, rank, activityType, onClick }: AttemptRowProps) {
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-hr)" }}>
         {attempt.avgHR !== null ? `${attempt.avgHR} bpm` : "—"}
       </td>
+      <td style={{ padding: "0.45rem 0.75rem" }}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onDebug(); }}
+          title="Voir les points appariés/non appariés de ce passage (diagnostic)"
+          disabled={debugLoading}
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.15rem", display: "flex" }}
+        >
+          {debugLoading ? <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} /> : <Bug size={13} />}
+        </button>
+      </td>
     </tr>
   );
+}
+
+interface AttemptDebugResult {
+  points: SegmentPointRun[];
+  activityPoints: { lat: number; lon: number }[];
+  label: string;
+  debug: StoredSegmentMatchDebug;
 }
 
 interface StoredSegmentCardProps {
@@ -66,14 +101,45 @@ interface StoredSegmentCardProps {
   onDelete: () => void;
   onUpdateAttempts: (id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string) => Promise<void>;
   onSelectAttempt: (attempt: CachedSegmentAttempt) => void;
+  onShowMap: () => void;
 }
 
-function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt }: StoredSegmentCardProps) {
+function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt, onShowMap }: StoredSegmentCardProps) {
   const { status, progress, attempts, scan } = useStoredSegmentScan(
     segment, activity, history, loadFile,
     top => { onUpdateAttempts(segment.id, top, new Date().toISOString()); },
   );
   const hasCache = (segment.attempts?.length ?? 0) > 0 || attempts.length > 0;
+  const [debugLoadingKey, setDebugLoadingKey] = useState<number | null>(null);
+  const [debugResult, setDebugResult] = useState<AttemptDebugResult | null>(null);
+
+  // Diagnostic par passage : pour l'activité actuellement ouverte, ses points sont déjà en mémoire ;
+  // pour une activité passée du classement, on ne dispose que du sous-tracé du passage détecté
+  // (CachedSegmentAttempt.points), pas de l'activité complète — retéléchargement nécessaire pour voir
+  // les points non appariés en dehors du passage déjà trouvé.
+  const handleDebugAttempt = async (attempt: CachedSegmentAttempt, index: number) => {
+    setDebugLoadingKey(index);
+    try {
+      const points = attempt.isCurrent
+        ? activity.points
+        : await (async () => {
+            const entry = history.find(e => e.date === attempt.date);
+            if (!entry) throw new Error("Activité introuvable dans l'historique.");
+            const raw = await loadFile(entry);
+            return parseActivityRawToPoints(raw, entry.fileName);
+          })();
+      setDebugResult({
+        points: debugSegmentPointRuns(segment.points, points),
+        activityPoints: points,
+        label: attempt.isCurrent ? "Activité actuelle" : new Date(attempt.date).toLocaleDateString("fr-FR"),
+        debug: debugStoredSegmentMatch(segment.points, segment.distance, points),
+      });
+    } catch {
+      alert("Impossible de charger cette activité pour le diagnostic.");
+    } finally {
+      setDebugLoadingKey(null);
+    }
+  };
 
   // Segment tout juste créé (jamais scanné) — remplit le classement initial automatiquement,
   // une seule fois par segment, pour éviter un clic manuel en plus juste après la création.
@@ -126,6 +192,14 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
         </button>
         <button
           type="button"
+          onClick={onShowMap}
+          title="Voir le tracé du segment sur la carte"
+          style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.3rem", display: "flex" }}
+        >
+          <MapIcon size={15} />
+        </button>
+        <button
+          type="button"
           onClick={onDelete}
           title="Supprimer ce segment"
           style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.3rem", display: "flex" }}
@@ -153,7 +227,7 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-color)", background: "var(--bg-primary)" }}>
-                {["Rang", "Date", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure", "FC moy."].map(h => (
+                {["Rang", "Date", "Distance", "D+", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure", "FC moy.", ""].map(h => (
                   <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
                     {h}
                   </th>
@@ -162,11 +236,26 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
             </thead>
             <tbody>
               {attempts.map((a, i) => (
-                <AttemptRow key={i} attempt={a} rank={i + 1} activityType={activity.activityType} onClick={() => onSelectAttempt(a)} />
+                <AttemptRow
+                  key={i} attempt={a} rank={i + 1} activityType={activity.activityType}
+                  onClick={() => onSelectAttempt(a)}
+                  onDebug={() => handleDebugAttempt(a, i)}
+                  debugLoading={debugLoadingKey === i}
+                />
               ))}
             </tbody>
           </table>
         </div>
+      )}
+
+      {debugResult && (
+        <SegmentMatchDebugMapModal
+          points={debugResult.points}
+          activityPoints={debugResult.activityPoints}
+          segmentName={`${segment.name} — ${debugResult.label}`}
+          extraInfo={`Couverture retenue : ${Math.round(debugResult.debug.bestRunM)}m / ${Math.round(debugResult.debug.requiredM)}m requis · ${debugResult.debug.bestClusterRunCount} corridor${debugResult.debug.bestClusterRunCount > 1 ? "s" : ""} sur ${debugResult.debug.totalRuns} au total${debugResult.debug.runGapsM.length > 0 ? ` · écarts : ${debugResult.debug.runGapsM.join("m, ")}m` : ""}`}
+          onClose={() => setDebugResult(null)}
+        />
       )}
     </div>
   );
@@ -178,17 +267,29 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<CachedSegmentAttempt | null>(null);
+  const [mapSegment, setMapSegment] = useState<StoredSegment | null>(null);
+  const [debugMapSegment, setDebugMapSegment] = useState<StoredSegment | null>(null);
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
 
   const activityType = activity.activityType;
   const ofType = segments.filter(s => s.activityType === activityType);
 
   // N'affiche un segment que si l'activité actuellement ouverte suit bien son tracé — un segment
-  // défini sur un autre parcours (même type d'activité) n'a rien à faire ici.
-  const relevant = useMemo(
-    () => ofType.filter(s => matchStoredSegment(s.points, s.distance, { points: activity.points, date: "" }, true) !== null),
+  // défini sur un autre parcours (même type d'activité) n'a rien à faire ici. Les segments écartés
+  // sont gardés avec un diagnostic (voir showDiagnostic) plutôt que silencieusement masqués.
+  const { relevant, notRelevant } = useMemo(() => {
+    const rel: StoredSegment[] = [];
+    const notRel: { segment: StoredSegment; debug: StoredSegmentMatchDebug }[] = [];
+    for (const s of ofType) {
+      if (matchStoredSegment(s.points, s.distance, { points: activity.points, date: "", name: activity.name }, true) !== null) {
+        rel.push(s);
+      } else {
+        notRel.push({ segment: s, debug: debugStoredSegmentMatch(s.points, s.distance, activity.points) });
+      }
+    }
+    return { relevant: rel, notRelevant: notRel };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ofType, activity.points]
-  );
+  }, [ofType, activity.points]);
 
   if (activityType === "unknown") return null;
 
@@ -289,8 +390,47 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
               onDelete={() => remove(seg.id)}
               onUpdateAttempts={updateAttempts}
               onSelectAttempt={setSelected}
+              onShowMap={() => setMapSegment(seg)}
             />
           ))}
+        </div>
+      )}
+
+      {notRelevant.length > 0 && (
+        <div style={{ marginTop: relevant.length > 0 ? "0.75rem" : "0.5rem" }}>
+          <button type="button" onClick={() => setShowDiagnostic(v => !v)}
+            style={{
+              display: "flex", alignItems: "center", gap: "0.3rem", background: "none", border: "none",
+              cursor: "pointer", color: "var(--text-tertiary)", fontSize: "0.75rem", padding: 0,
+            }}>
+            {showDiagnostic ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            {notRelevant.length} segment{notRelevant.length > 1 ? "s" : ""} défini{notRelevant.length > 1 ? "s" : ""} pour ce type mais non retenu{notRelevant.length > 1 ? "s" : ""} sur cette activité (diagnostic)
+          </button>
+          {showDiagnostic && (
+            <div style={{ marginTop: "0.5rem", fontSize: "0.75rem", color: "var(--text-tertiary)" }}>
+              {notRelevant.map((n, i) => (
+                <div key={i} style={{ padding: "0.3rem 0", borderTop: i > 0 ? "1px solid var(--border-color)" : undefined, display: "flex", alignItems: "flex-start", gap: "0.4rem" }}>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ color: "var(--text-secondary)" }}>{n.segment.name}</strong>
+                    {" — "}
+                    {n.debug.refPointCount < 5 || n.debug.candidatePointCount < 5
+                      ? `géométrie insuffisante (${n.debug.refPointCount} pt segment / ${n.debug.candidatePointCount} pt activité)`
+                      : n.debug.bestRunM === 0
+                        ? `aucun corridor commun détecté (segment ${n.debug.refPointCount} pts, activité ${n.debug.candidatePointCount} pts) — point de départ à ${Math.round(n.debug.nearestStartM)}m du point le plus proche de l'activité, arrivée à ${Math.round(n.debug.nearestEndM)}m`
+                        : `couverture cumulée insuffisante (${Math.round(n.debug.bestRunM)}m / ${Math.round(n.debug.requiredM)}m requis, ${n.debug.bestClusterRunCount} corridor${n.debug.bestClusterRunCount > 1 ? "s" : ""} sur ${n.debug.totalRuns} au total${n.debug.runGapsM.length > 0 ? `, écarts entre corridors : ${n.debug.runGapsM.join("m, ")}m` : ""})`}
+                  </div>
+                  <button type="button" onClick={() => setMapSegment(n.segment)} title="Voir le tracé du segment sur la carte"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.1rem", display: "flex", flexShrink: 0 }}>
+                    <MapIcon size={13} />
+                  </button>
+                  <button type="button" onClick={() => setDebugMapSegment(n.segment)} title="Voir les points appariés/non appariés sur la carte"
+                    style={{ background: "none", border: "none", cursor: "pointer", color: "var(--text-tertiary)", padding: "0.1rem", display: "flex", flexShrink: 0 }}>
+                    <Bug size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -306,6 +446,28 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
             activity.activityType === "cycling" ? `${selected.avgSpeed.toFixed(1)} km/h` : `${formatPace(selected.avgPace)} /km`
           }`}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {mapSegment && (
+        <SegmentMapModal
+          points={mapSegment.points}
+          startIndex={0}
+          endIndex={mapSegment.points.length - 1}
+          segmentColor="#8b5cf6"
+          icon={<Route size={18} style={{ color: "#8b5cf6" }} />}
+          title={mapSegment.name}
+          subtitle={`${mapSegment.distance >= 1000 ? `${(mapSegment.distance / 1000).toFixed(2)} km` : `${Math.round(mapSegment.distance)} m`}${mapSegment.elevGain > 0 ? ` · D+ ${Math.round(mapSegment.elevGain)} m` : ""}`}
+          onClose={() => setMapSegment(null)}
+        />
+      )}
+
+      {debugMapSegment && (
+        <SegmentMatchDebugMapModal
+          points={debugSegmentPointRuns(debugMapSegment.points, activity.points)}
+          activityPoints={activity.points}
+          segmentName={debugMapSegment.name}
+          onClose={() => setDebugMapSegment(null)}
         />
       )}
     </div>

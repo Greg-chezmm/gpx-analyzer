@@ -52,6 +52,7 @@ function attemptFromEntry(entry: ActivityIndexEntry): SegmentAttempt {
     avgHR: entry.avgHeartRate ?? null,
     elevGain: entry.elevationGain,
     date: entry.date,
+    name: entry.name,
     isCurrent: false,
   };
 }
@@ -102,7 +103,7 @@ export function useFullRouteMatches(
         .map(id => history.find(e => e.cloudId === id))
         .filter((e): e is ActivityIndexEntry => !!e);
       const found: RouteMatch[] = [
-        { attempt: buildAttempt(activity.points, 0, activity.points.length - 1, currentDate, true), entry: null },
+        { attempt: buildAttempt(activity.points, 0, activity.points.length - 1, currentDate, activity.name, true), entry: null },
         ...matchedEntries.map(e => ({ attempt: attemptFromEntry(e), entry: e })),
       ];
       setMatches(found.length > 1 ? found.sort((a, b) => a.attempt.duration - b.attempt.duration) : []);
@@ -132,7 +133,7 @@ export function useFullRouteMatches(
       .map(s => s.entry);
 
     const found: RouteMatch[] = [
-      { attempt: buildAttempt(activity.points, 0, activity.points.length - 1, currentDate, true), entry: null },
+      { attempt: buildAttempt(activity.points, 0, activity.points.length - 1, currentDate, activity.name, true), entry: null },
     ];
     const rejectedList: RejectedCandidate[] = [];
 
@@ -141,8 +142,8 @@ export function useFullRouteMatches(
       try {
         const raw = await loadFile(c);
         const points = await parseActivityRawToPoints(raw, c.fileName);
-        const source = { points, date: c.date };
-        const currentSource = { points: activity.points, date: currentDate };
+        const source = { points, date: c.date, name: c.name };
+        const currentSource = { points: activity.points, date: currentDate, name: activity.name };
         const m = matchFullRoute(currentSource, source);
         if (m) {
           found.push({ attempt: m, entry: c });
