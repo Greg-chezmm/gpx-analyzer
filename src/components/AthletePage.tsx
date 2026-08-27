@@ -21,6 +21,8 @@ interface Props {
   setRaceGoal: (g: RaceGoalConfig | null) => void;
   manualBests: ManualBests;
   setManualBest: (key: string, best: ManualBest | null) => void;
+  fcMax: number;
+  fcRest: number;
   onClose: () => void;
 }
 
@@ -31,7 +33,7 @@ interface Props {
  * ces cartes dépendent de l'historique cloud (activités explicitement sauvegardées), pas de
  * l'activité en cours.
  */
-export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, manualBests, setManualBest, onClose }) => {
+export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, manualBests, setManualBest, fcMax, fcRest, onClose }) => {
   return (
     <>
       <div className="card animate-slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -59,7 +61,7 @@ export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, se
       <BestEffortsCurve cloud={cloud} manualBests={manualBests} setManualBest={setManualBest} />
       <TrainingBalance tsb={tsb} history={history} />
       <RaceGoal goal={raceGoal} setGoal={setRaceGoal} history={history} cloud={cloud} />
-      <ProgressChart history={history} />
+      <ProgressChart history={history} fcMax={fcMax} fcRest={fcRest} />
     </>
   );
 };

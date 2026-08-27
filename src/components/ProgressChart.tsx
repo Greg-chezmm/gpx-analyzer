@@ -2,13 +2,17 @@ import React, { useState } from "react";
 import { TrendingUp } from "lucide-react";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import { formatPace as fmtPace } from "../utils/format";
+import { calcEfficiencyPaceFromAggregate } from "../utils/trainingMetrics";
 
 interface Props {
   history: (ActivityIndexEntry & { trimp: number })[];
+  fcMax: number;
+  fcRest: number;
 }
 
 type ViewDays = 90 | 180 | 'all';
 type TabType  = 'running' | 'cycling';
+type MetricType = 'pace' | 'cardiac';
 
 /**
  * Calcule la moyenne mobile centrée sur les `w` dernières valeurs.
@@ -31,9 +35,10 @@ const VIEW_OPTS: { value: ViewDays; label: string }[] = [
  * Graphique de progression — allure moyenne (course) ou vitesse moyenne (vélo)
  * tracé dans le temps avec une moyenne mobile sur 5 séances.
  */
-export const ProgressChart: React.FC<Props> = ({ history }) => {
+export const ProgressChart: React.FC<Props> = ({ history, fcMax, fcRest }) => {
   const [viewDays, setViewDays] = useState<ViewDays>(90);
   const [tab, setTab] = useState<TabType>('running');
+  const [metric, setMetric] = useState<MetricType>('pace');
   const [hovIdx, setHovIdx] = useState<number | null>(null);
 
   const now = new Date();
@@ -60,15 +65,28 @@ export const ProgressChart: React.FC<Props> = ({ history }) => {
 
   // Si un seul type est disponible, on force cet onglet
   const activeTab: TabType = !hasRunning ? 'cycling' : !hasCycling ? 'running' : tab;
-  const entries = activeTab === 'running' ? running : cycling;
 
-  // Valeurs brutes : allure (s/km) pour course, vitesse (km/h) pour vélo
-  const rawVals = activeTab === 'running'
-    ? entries.map(e => e.avgPace!)
-    : entries.map(e => e.avgSpeed ?? (e.distance! / e.duration! * 3.6));
+  // Allure d'efficacité (course uniquement) : allure ramenée à un effort cardiaque de référence
+  // (65% de réserve FC) — une FC plus basse à vitesse égale, ou une vitesse plus haute à FC égale,
+  // donne toujours une meilleure allure d'efficacité, indépendamment de l'intensité de chaque
+  // séance. Calculée depuis les moyennes déjà stockées (pas de retéléchargement).
+  const runningWithEfficiency = running
+    .map(e => ({ e, efficiencyPace: e.avgHeartRate != null ? calcEfficiencyPaceFromAggregate(e.avgGAP ?? e.avgPace!, e.avgHeartRate, e.fcMax ?? fcMax, e.fcRest ?? fcRest) : null }))
+    .filter((r): r is { e: ActivityIndexEntry & { trimp: number }; efficiencyPace: number } => r.efficiencyPace !== null);
+  const hasEfficiency = activeTab === 'running' && runningWithEfficiency.length >= 2;
+  const activeMetric: MetricType = hasEfficiency ? metric : 'pace';
+
+  const entries = activeMetric === 'cardiac' ? runningWithEfficiency.map(r => r.e) : (activeTab === 'running' ? running : cycling);
+
+  // Valeurs brutes : allure/allure d'efficacité (s/km) pour course, vitesse (km/h) pour vélo
+  const rawVals = activeMetric === 'cardiac'
+    ? runningWithEfficiency.map(r => r.efficiencyPace)
+    : activeTab === 'running'
+      ? entries.map(e => e.avgPace!)
+      : entries.map(e => e.avgSpeed ?? (e.distance! / e.duration! * 3.6));
 
   const trend = rollingAvg(rawVals, 5);
-  // Allure = axe inversé (valeur haute → barre basse car grande valeur = lent)
+  // Allure/allure d'efficacité = axe inversé (valeur haute → barre basse car grande valeur = lent)
   const isInverted = activeTab === 'running';
 
   // Dimensions SVG
@@ -123,7 +141,7 @@ export const ProgressChart: React.FC<Props> = ({ history }) => {
   // 5 ticks réguliers sur l'axe Y
   const yTicks = Array.from({ length: 5 }, (_, i) => yMin + (yRange * i) / 4);
 
-  const accentColor = activeTab === 'running' ? '#818cf8' : '#34d399';
+  const accentColor = activeMetric === 'cardiac' ? '#a78bfa' : activeTab === 'running' ? '#818cf8' : '#34d399';
 
   return (
     <div className="card animate-slide-up" style={{ width: '100%' }}>
@@ -132,7 +150,7 @@ export const ProgressChart: React.FC<Props> = ({ history }) => {
           <TrendingUp size={18} style={{ color: accentColor }} />
           <span>Progression</span>
           <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', fontWeight: 500 }}>
-            · {activeTab === 'running' ? 'allure moyenne /km' : 'vitesse moyenne km/h'}
+            · {activeTab === 'running' ? (activeMetric === 'cardiac' ? "allure d'efficacité /km" : 'allure moyenne /km') : 'vitesse moyenne km/h'}
           </span>
         </h3>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -154,6 +172,30 @@ export const ProgressChart: React.FC<Props> = ({ history }) => {
                   }}
                 >
                   {t === 'running' ? '🏃' : '🚴'}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* Allure brute vs allure d'efficacité — course uniquement, si assez de séances avec FC exploitable */}
+          {hasEfficiency && (
+            <div
+              title="Allure d'efficacité : ton allure ramenée à un effort cardiaque de référence (65% de réserve FC). Une FC plus basse à vitesse égale, ou une vitesse plus haute à FC égale, donne toujours une meilleure allure d'efficacité — indépendamment de l'intensité de chaque séance."
+              style={{
+                display: 'flex', gap: '2px', background: 'var(--bg-primary)', padding: '2px',
+                borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-color)',
+              }}>
+              {(['pace', 'cardiac'] as const).map(m => (
+                <button key={m} type="button"
+                  onClick={() => setMetric(m)}
+                  style={{
+                    padding: '0.15rem 0.5rem', fontSize: '0.75rem', fontWeight: 600,
+                    borderRadius: 'calc(var(--radius-sm) - 2px)', border: 'none', cursor: 'pointer',
+                    background: activeMetric === m ? 'var(--accent-primary)' : 'transparent',
+                    color: activeMetric === m ? '#fff' : 'var(--text-secondary)',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  {m === 'pace' ? 'Allure' : 'Efficacité'}
                 </button>
               ))}
             </div>

@@ -1,4 +1,5 @@
 import type { GPXActivity } from './gpxCore';
+import { calcAvgGAP } from './splits';
 
 /** Un intervalle d'effort ou de récupération détecté dans une activité (fractionné). */
 export interface GPXInterval {
@@ -11,6 +12,7 @@ export interface GPXInterval {
   avgSpeed: number;       // m/s
   maxSpeed: number;       // m/s
   avgPace: number;        // s/km
+  avgGAP: number | null;  // s/km — allure ajustée à la pente (Minetti), voir splits.ts calcAvgGAP
   avgHeartRate: number | null;
   maxHeartRate: number | null;
   avgCadence: number | null;
@@ -114,6 +116,7 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
       avgSpeed: avgSpd,
       maxSpeed: maxSpd,
       avgPace: avgSpd > 0 ? 1000 / avgSpd : 0,
+      avgGAP: calcAvgGAP(pts),
       avgHeartRate: hrCount > 0 ? Math.round(hrSum / hrCount) : null,
       maxHeartRate: hrCount > 0 ? hrMax : null,
       avgCadence: cadCount > 0 ? Math.round(cadSum / cadCount) : null,

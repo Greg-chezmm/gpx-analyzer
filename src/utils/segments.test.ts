@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   geohashEncode, computeFingerprint, fingerprintOverlap, computeRouteGeometry,
-  checkFullRouteCoverage, matchFullRoute, matchStoredSegment, matchStoredSegmentAll,
+  checkFullRouteCoverage, matchFullRoute, matchStoredSegment, matchStoredSegmentAll, toCachedAttempt,
 } from './segments';
 import { ORIGIN, walkPath, toTrackPoints, reversePath } from './testFixtures';
 
@@ -157,5 +157,29 @@ describe('matchStoredSegment / matchStoredSegmentAll', () => {
       points: toTrackPoints(activity, 3), date: '2026-01-01', name: 'fractionné en côte',
     });
     expect(matches.length).toBeGreaterThanOrEqual(3);
+
+    // matchStoredSegmentAll trie déjà par startIndex (ordre chronologique dans l'activité) — le
+    // numéro de passage affiché à Greg (toCachedAttempt) doit suivre cet ordre, pas l'ordre dans
+    // lequel l'algorithme de masquage les a trouvés (qui priorise le meilleur cluster, pas le premier).
+    const cached = matches.map((a, i) => toCachedAttempt(a, i + 1, matches.length));
+    cached.forEach((c, i) => {
+      expect(c.passNumber).toBe(i + 1);
+      expect(c.totalPasses).toBe(matches.length);
+    });
+    // Chronologique : le startIndex de chaque passage doit être strictement croissant.
+    for (let i = 1; i < matches.length; i++) {
+      expect(matches[i].startIndex).toBeGreaterThan(matches[i - 1].startIndex);
+    }
+  });
+
+  it("n'ajoute pas passNumber/totalPasses quand un seul passage est trouvé (pas de fractionné)", () => {
+    const path = walkPath(ORIGIN, [{ bearingDeg: 0, distanceM: 600 }]);
+    const matches = matchStoredSegmentAll(path.slice(0, 30), 580, {
+      points: toTrackPoints(path, 3), date: '2026-01-01', name: 'sortie simple',
+    });
+    expect(matches.length).toBe(1);
+    const cached = toCachedAttempt(matches[0], 1, matches.length);
+    expect(cached.passNumber).toBeUndefined();
+    expect(cached.totalPasses).toBeUndefined();
   });
 });

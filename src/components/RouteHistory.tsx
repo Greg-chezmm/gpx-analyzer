@@ -1,9 +1,10 @@
-import React, { useState } from "react";
-import { Repeat2, Loader2, ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { Repeat2, Loader2, ChevronDown, ChevronUp, RefreshCw, TrendingDown, TrendingUp, Star } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import { useFullRouteMatches, type RouteMatch } from "../hooks/useFullRouteMatches";
 import { formatDuration, formatPace } from "../utils/format";
+import { computeEfficiencyTrend, type EfficiencyTrendPoint } from "../utils/trainingMetrics";
 
 interface RouteHistoryProps {
   activity: GPXActivity;
@@ -12,6 +13,8 @@ interface RouteHistoryProps {
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   onOpenActivity: (entry: ActivityIndexEntry) => Promise<void>;
   updateActivityMetaBatch: (items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[]) => Promise<void>;
+  fcMax: number;
+  fcRest: number;
 }
 
 const MEDALS = ["🥇", "🥈", "🥉"];
@@ -23,9 +26,13 @@ interface RowProps {
   activityType: GPXActivity['activityType'];
   onOpen: () => void;
   opening: boolean;
+  efficiency: EfficiencyTrendPoint | undefined;
+  showEfficiency: boolean;
+  isBestEfficiency: boolean;
+  hasGAP: boolean;
 }
 
-function Row({ match, rank, displayName, activityType, onOpen, opening }: RowProps) {
+function Row({ match, rank, displayName, activityType, onOpen, opening, efficiency, showEfficiency, isBestEfficiency, hasGAP }: RowProps) {
   const { attempt } = match;
   const clickable = !attempt.isCurrent;
   return (
@@ -58,12 +65,32 @@ function Row({ match, rank, displayName, activityType, onOpen, opening }: RowPro
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-speed)" }}>
         {activityType === "cycling" ? `${attempt.avgSpeed.toFixed(1)} km/h` : `${formatPace(attempt.avgPace)} /km`}
       </td>
+      {hasGAP && (
+        <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "#a78bfa" }}>
+          {attempt.avgGAP != null ? `${formatPace(attempt.avgGAP)} /km` : "—"}
+        </td>
+      )}
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem" }}>
         {attempt.elevGain > 0 ? `+${Math.round(attempt.elevGain)} m` : "—"}
       </td>
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-hr)" }}>
         {attempt.avgHR !== null ? `${attempt.avgHR} bpm` : "—"}
       </td>
+      {showEfficiency && (
+        <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "#a78bfa" }}>
+          {efficiency?.pace != null ? (
+            <span
+              title={isBestEfficiency ? "Meilleure allure d'efficacité sur ce trajet" : undefined}
+              style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontWeight: isBestEfficiency ? 700 : 400 }}
+            >
+              {isBestEfficiency && <Star size={12} fill="#f59e0b" style={{ color: "#f59e0b" }} />}
+              {formatPace(efficiency.pace)} /km
+              {efficiency.trend === "down" && <TrendingDown size={12} style={{ color: "#22c55e" }} />}
+              {efficiency.trend === "up" && <TrendingUp size={12} style={{ color: "#ef4444" }} />}
+            </span>
+          ) : "—"}
+        </td>
+      )}
       <td style={{ padding: "0.45rem 0.75rem" }}>
         {opening && <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />}
       </td>
@@ -79,10 +106,26 @@ function Row({ match, rank, displayName, activityType, onOpen, opening }: RowPro
  * diagnostic (repliable) liste les candidates plausibles écartées, utile tant que le réglage des
  * seuils de matching est encore en rodage.
  */
-export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity, updateActivityMetaBatch }) => {
+export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity, updateActivityMetaBatch, fcMax, fcRest }) => {
   const { status, progress, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch);
   const [openingKey, setOpeningKey] = useState<string | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
+
+  const efficiencies = useMemo(
+    () => computeEfficiencyTrend(
+      matches.map(m => ({ date: m.attempt.date, avgPace: m.attempt.avgPace, avgGAP: m.attempt.avgGAP, avgHR: m.attempt.avgHR, fcMax: m.entry?.fcMax, fcRest: m.entry?.fcRest })),
+      activity.activityType, fcMax, fcRest,
+    ),
+    [matches, activity.activityType, fcMax, fcRest]
+  );
+  const showEfficiency = [...efficiencies.values()].some(e => e.pace !== null);
+  const hasGAP = activity.activityType === 'running' && matches.some(m => m.attempt.avgGAP !== null);
+  // Index (dans `matches`) de la meilleure allure d'efficacité — mis en avant dans le tableau.
+  const bestEfficiencyIdx = [...efficiencies.entries()].reduce<number | null>((best, [idx, e]) => {
+    if (e.pace === null) return best;
+    if (best === null || e.pace < efficiencies.get(best)!.pace!) return idx;
+    return best;
+  }, null);
 
   const handleOpen = async (entry: ActivityIndexEntry, key: string) => {
     setOpeningKey(key);
@@ -153,11 +196,22 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--border-color)", background: "var(--bg-primary)" }}>
-                  {["Rang", "Nom", "Date", "Distance", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure", "D+", "FC moy.", ""].map(h => (
-                    <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
-                      {h}
-                    </th>
-                  ))}
+                  {(["Rang", "Nom", "Date", "Distance", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure"] as string[])
+                    .concat(hasGAP ? ["GAP"] : [])
+                    .concat(["D+", "FC moy."])
+                    .concat(showEfficiency ? ["Efficacité"] : [])
+                    .concat([""])
+                    .map(h => (
+                      <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}
+                        title={
+                          h === "Efficacité" ? "Allure d'efficacité — ton allure ramenée à un effort cardiaque de référence (65% de réserve FC). Une FC plus basse à vitesse égale, ou une vitesse plus haute à FC égale, donne toujours une meilleure allure d'efficacité. Baisse dans le temps = tu deviens plus efficace."
+                          : h === "GAP" ? "Allure ajustée à la pente (GAP, modèle Minetti) — équivalent plat à effort égal, crédite l'effort si le trajet grimpe"
+                          : undefined
+                        }
+                      >
+                        {h}
+                      </th>
+                    ))}
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +221,10 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
                     <Row key={i} match={m} rank={i + 1} displayName={displayName} activityType={activity.activityType}
                       onOpen={() => m.entry && handleOpen(m.entry, key)}
                       opening={openingKey === key}
+                      efficiency={efficiencies.get(i)}
+                      showEfficiency={showEfficiency}
+                      isBestEfficiency={i === bestEfficiencyIdx}
+                      hasGAP={hasGAP}
                     />
                   );
                 })}

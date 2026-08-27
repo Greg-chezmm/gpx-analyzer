@@ -42,6 +42,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   const hasCadence   = effortIntervals.some((iv) => iv.avgCadence !== null);
   const hasPower     = effortIntervals.some((iv) => iv.avgPower != null);
   const hasElevation = effortIntervals.some((iv) => (iv.totalAscent ?? 0) > 0 || (iv.totalDescent ?? 0) > 0);
+  const hasGAP       = !isCycling && effortIntervals.some((iv) => iv.avgGAP !== null);
 
   const avgEffortPace    = avg(effortIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
   const avgRecoveryPace  = avg(recoveryIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
@@ -131,6 +132,9 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
                 <th>Durée</th>
                 <th>Distance</th>
                 <th><span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem" }}><Zap size={13} /> Allure</span></th>
+                {hasGAP && (
+                  <th title="Allure ajustée à la pente (GAP, modèle Minetti) — équivalent plat à effort égal, crédite l'effort si le fractionné grimpe">GAP</th>
+                )}
                 <th>V. max</th>
                 {hasElevation && (
                   <th><span style={{ display: "inline-flex", alignItems: "center", gap: "0.25rem", color: "var(--color-ele)" }}><TrendingUp size={13} /> D+/D-</span></th>
@@ -164,6 +168,11 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
                   <td className="numeric" style={{ fontWeight: 600, color: "var(--color-time)" }}>
                     {formatPace(iv.avgPace)}
                   </td>
+                  {hasGAP && (
+                    <td className="numeric" style={{ color: "#a78bfa" }}>
+                      {iv.avgGAP !== null ? formatPace(iv.avgGAP) : "—"}
+                    </td>
+                  )}
                   <td className="numeric" style={{ fontWeight: 600 }}>
                     {(iv.maxSpeed * 3.6).toFixed(1)} km/h
                   </td>

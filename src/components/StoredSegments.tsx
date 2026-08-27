@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2, ChevronDown, ChevronUp, Map as MapIcon, Bug } from "lucide-react";
+import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2, ChevronDown, ChevronUp, Map as MapIcon, Bug, TrendingDown, TrendingUp, Star } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { StoredSegment } from "../utils/firestoreStorage";
@@ -12,6 +12,7 @@ import type { StoredSegmentsHandle } from "../hooks/useStoredSegments";
 import { useStoredSegmentScan } from "../hooks/useStoredSegmentScan";
 import type { SegmentPickerHandle } from "../hooks/useSegmentPicker";
 import { formatDuration, formatPace } from "../utils/format";
+import { computeEfficiencyTrend, type EfficiencyTrendPoint } from "../utils/trainingMetrics";
 import { SegmentMapModal } from "./SegmentMapModal";
 import { SegmentMatchDebugMapModal } from "./SegmentMatchDebugMapModal";
 
@@ -22,6 +23,8 @@ interface StoredSegmentsProps {
   picker: SegmentPickerHandle;
   /** Levé au niveau App — partagé avec la mise à jour incrémentale du cache à chaque sauvegarde (voir App.tsx mergeIntoStoredSegments). */
   storedSegments: StoredSegmentsHandle;
+  fcMax: number;
+  fcRest: number;
 }
 
 interface AttemptRowProps {
@@ -31,9 +34,13 @@ interface AttemptRowProps {
   onClick: () => void;
   onDebug: () => void;
   debugLoading: boolean;
+  efficiency: EfficiencyTrendPoint | undefined;
+  showEfficiency: boolean;
+  isBestEfficiency: boolean;
+  hasGAP: boolean;
 }
 
-function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoading }: AttemptRowProps) {
+function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoading, efficiency, showEfficiency, isBestEfficiency, hasGAP }: AttemptRowProps) {
   return (
     <tr
       onClick={onClick}
@@ -48,8 +55,22 @@ function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoadin
         {rank === 1 ? <Trophy size={14} /> : `#${rank}`}
       </td>
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem" }}>
-        {new Date(attempt.date).toLocaleDateString("fr-FR")}
-        {attempt.isCurrent && <span style={{ color: "var(--accent-primary)", fontWeight: 600 }}> (actuelle)</span>}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
+          {new Date(attempt.date).toLocaleDateString("fr-FR")}
+          {attempt.isCurrent && <span style={{ color: "var(--accent-primary)", fontWeight: 600 }}>(actuelle)</span>}
+          {attempt.totalPasses && attempt.totalPasses > 1 && (
+            <span
+              title="Numéro de ce passage parmi tous ceux trouvés sur cette même activité (ordre chronologique)"
+              style={{
+                fontSize: "0.72rem", fontWeight: 700, color: "#a855f7",
+                background: "rgba(168,85,247,0.12)", border: "1px solid rgba(168,85,247,0.3)",
+                borderRadius: "var(--radius-full)", padding: "0.05rem 0.45rem", whiteSpace: "nowrap",
+              }}
+            >
+              {attempt.passNumber}/{attempt.totalPasses}
+            </span>
+          )}
+        </span>
         {attempt.name && (
           <div style={{ fontSize: "0.72rem", color: "var(--text-tertiary)", fontWeight: 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "12rem" }}>
             {attempt.name}
@@ -68,9 +89,29 @@ function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoadin
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-speed)" }}>
         {activityType === "cycling" ? `${attempt.avgSpeed.toFixed(1)} km/h` : `${formatPace(attempt.avgPace)} /km`}
       </td>
+      {hasGAP && (
+        <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "#a78bfa" }}>
+          {attempt.avgGAP != null ? `${formatPace(attempt.avgGAP)} /km` : "—"}
+        </td>
+      )}
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-hr)" }}>
         {attempt.avgHR !== null ? `${attempt.avgHR} bpm` : "—"}
       </td>
+      {showEfficiency && (
+        <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "#a78bfa" }}>
+          {efficiency?.pace != null ? (
+            <span
+              title={isBestEfficiency ? "Meilleure allure d'efficacité sur ce segment" : undefined}
+              style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", fontWeight: isBestEfficiency ? 700 : 400 }}
+            >
+              {isBestEfficiency && <Star size={12} fill="#f59e0b" style={{ color: "#f59e0b" }} />}
+              {formatPace(efficiency.pace)} /km
+              {efficiency.trend === "down" && <TrendingDown size={12} style={{ color: "#22c55e" }} />}
+              {efficiency.trend === "up" && <TrendingUp size={12} style={{ color: "#ef4444" }} />}
+            </span>
+          ) : "—"}
+        </td>
+      )}
       <td style={{ padding: "0.45rem 0.75rem" }}>
         <button
           type="button"
@@ -102,16 +143,35 @@ interface StoredSegmentCardProps {
   onUpdateAttempts: (id: string, attempts: CachedSegmentAttempt[], lastFullScanAt?: string) => Promise<void>;
   onSelectAttempt: (attempt: CachedSegmentAttempt) => void;
   onShowMap: () => void;
+  fcMax: number;
+  fcRest: number;
 }
 
-function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt, onShowMap }: StoredSegmentCardProps) {
+function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt, onShowMap, fcMax, fcRest }: StoredSegmentCardProps) {
   const { status, progress, attempts, scan } = useStoredSegmentScan(
     segment, activity, history, loadFile,
     top => { onUpdateAttempts(segment.id, top, new Date().toISOString()); },
+    fcMax, fcRest,
   );
   const hasCache = (segment.attempts?.length ?? 0) > 0 || attempts.length > 0;
   const [debugLoadingKey, setDebugLoadingKey] = useState<number | null>(null);
   const [debugResult, setDebugResult] = useState<AttemptDebugResult | null>(null);
+
+  const efficiencies = useMemo(
+    () => computeEfficiencyTrend(
+      attempts.map(a => ({ date: a.date, avgPace: a.avgPace, avgGAP: a.avgGAP, avgHR: a.avgHR, fcMax: a.fcMax, fcRest: a.fcRest })),
+      activity.activityType, fcMax, fcRest,
+    ),
+    [attempts, activity.activityType, fcMax, fcRest]
+  );
+  const showEfficiency = [...efficiencies.values()].some(e => e.pace !== null);
+  const hasGAP = activity.activityType === 'running' && attempts.some(a => a.avgGAP !== null);
+  // Index (dans `attempts`) de la meilleure allure d'efficacité — mis en avant dans le tableau.
+  const bestEfficiencyIdx = [...efficiencies.entries()].reduce<number | null>((best, [idx, e]) => {
+    if (e.pace === null) return best;
+    if (best === null || e.pace < efficiencies.get(best)!.pace!) return idx;
+    return best;
+  }, null);
 
   // Diagnostic par passage : pour l'activité actuellement ouverte, ses points sont déjà en mémoire ;
   // pour une activité passée du classement, on ne dispose que du sous-tracé du passage détecté
@@ -227,11 +287,22 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-color)", background: "var(--bg-primary)" }}>
-                {["Rang", "Date", "Distance", "D+", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure", "FC moy.", ""].map(h => (
-                  <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
-                    {h}
-                  </th>
-                ))}
+                {(["Rang", "Date", "Distance", "D+", "Temps", activity.activityType === "cycling" ? "Vitesse" : "Allure"] as string[])
+                  .concat(hasGAP ? ["GAP"] : [])
+                  .concat(["FC moy."])
+                  .concat(showEfficiency ? ["Efficacité"] : [])
+                  .concat([""])
+                  .map(h => (
+                    <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}
+                      title={
+                        h === "Efficacité" ? "Allure d'efficacité — ton allure ramenée à un effort cardiaque de référence (65% de réserve FC). Une FC plus basse à vitesse égale, ou une vitesse plus haute à FC égale, donne toujours une meilleure allure d'efficacité. Baisse dans le temps = tu deviens plus efficace sur ce segment."
+                        : h === "GAP" ? "Allure ajustée à la pente (GAP, modèle Minetti) — équivalent plat à effort égal, crédite l'effort si le segment grimpe"
+                        : undefined
+                      }
+                    >
+                      {h}
+                    </th>
+                  ))}
               </tr>
             </thead>
             <tbody>
@@ -241,6 +312,10 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
                   onClick={() => onSelectAttempt(a)}
                   onDebug={() => handleDebugAttempt(a, i)}
                   debugLoading={debugLoadingKey === i}
+                  efficiency={efficiencies.get(i)}
+                  showEfficiency={showEfficiency}
+                  isBestEfficiency={i === bestEfficiencyIdx}
+                  hasGAP={hasGAP}
                 />
               ))}
             </tbody>
@@ -262,7 +337,7 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
 }
 
 /** Segments définis manuellement (deux clics sur la carte ou le graphique) et comparés à l'historique. Le classement (top 10) est mis en cache sur Firestore, voir useStoredSegments/useStoredSegmentScan. */
-export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, picker, storedSegments }) => {
+export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, picker, storedSegments, fcMax, fcRest }) => {
   const { segments, create, remove, updateAttempts } = storedSegments;
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -391,6 +466,8 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
               onUpdateAttempts={updateAttempts}
               onSelectAttempt={setSelected}
               onShowMap={() => setMapSegment(seg)}
+              fcMax={fcMax}
+              fcRest={fcRest}
             />
           ))}
         </div>

@@ -35,6 +35,11 @@ export function useStoredSegmentScan(
   history: ActivityIndexEntry[],
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>,
   onScanComplete?: (attempts: CachedSegmentAttempt[]) => void,
+  /** FCmax/FCrepos ACTUELS du profil — utilisées seulement pour les passages de l'activité en cours
+   * (pas encore sauvegardée) ; les candidats historiques utilisent leur propre FCmax/FCrepos figées
+   * (`entry.fcMax`/`entry.fcRest`), voir `CachedSegmentAttempt.fcMax`. */
+  fcMax?: number,
+  fcRest?: number,
 ): StoredSegmentScanHandle {
   const [status, setStatus] = useState<SegmentScanStatus>('idle');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -72,7 +77,7 @@ export function useStoredSegmentScan(
 
     if (activity) {
       const ms = matchStoredSegmentAll(segment.points, segment.distance, { points: activity.points, date: currentDate, name: activity.name }, true);
-      found.push(...ms.map(toCachedAttempt));
+      found.push(...ms.map((a, i) => toCachedAttempt(a, i + 1, ms.length, fcMax, fcRest)));
     }
 
     setProgress({ done: 0, total: candidates.length });
@@ -83,7 +88,7 @@ export function useStoredSegmentScan(
         const raw = await loadFile(c.entry);
         const points = await parseActivityRawToPoints(raw, c.entry.fileName);
         const ms = matchStoredSegmentAll(segment.points, segment.distance, { points, date: c.entry.date, name: c.entry.name });
-        found.push(...ms.map(toCachedAttempt));
+        found.push(...ms.map((a, i) => toCachedAttempt(a, i + 1, ms.length, c.entry.fcMax ?? fcMax, c.entry.fcRest ?? fcRest)));
       } catch {
         // Fichier illisible/supprimé côté cloud — ignoré silencieusement.
       }
@@ -96,7 +101,7 @@ export function useStoredSegmentScan(
     setAttempts(top);
     setStatus('done');
     onScanComplete?.(top);
-  }, [segment, activity, history, loadFile, onScanComplete]);
+  }, [segment, activity, history, loadFile, onScanComplete, fcMax, fcRest]);
 
   return { status, progress, attempts, scan };
 }

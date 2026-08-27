@@ -152,6 +152,7 @@ export const ClimbAnalysis: React.FC<ClimbAnalysisProps> = ({ climbs, points }) 
                 <th>Pente max</th>
                 <th>Durée</th>
                 <th>Allure</th>
+                <th title="Allure ajustée à la pente (GAP, modèle Minetti) — équivalent plat à effort égal, crédite l'effort de la montée">GAP</th>
                 {/* VAM = Vitesse Ascensionnelle Moyenne, en m/h — indicateur de forme en grimpée */}
                 <th>VAM</th>
                 {hasHR && <th style={{ color: "var(--color-hr)" }}>FC moy.</th>}
@@ -198,6 +199,9 @@ export const ClimbAnalysis: React.FC<ClimbAnalysisProps> = ({ climbs, points }) 
                     <td className="numeric">{climb.duration > 0 ? formatDuration(climb.duration) : "—"}</td>
                     <td className="numeric" style={{ fontWeight: 600 }}>
                       {climb.avgPace > 0 ? formatPace(climb.avgPace) + " /km" : "—"}
+                    </td>
+                    <td className="numeric" style={{ color: "#a78bfa" }}>
+                      {climb.avgGAP !== null ? formatPace(climb.avgGAP) + " /km" : "—"}
                     </td>
                     <td className="numeric" style={{ color: "#a78bfa", fontWeight: 600 }}>
                       {climb.vam > 0 ? `${climb.vam} m/h` : "—"}

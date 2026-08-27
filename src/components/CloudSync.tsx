@@ -8,6 +8,7 @@ import { parseGPX, type GPXTrackPoint } from '../utils/gpxCore';
 import { computeBestEfforts } from '../utils/bestEfforts';
 import { calcTRIMP } from '../utils/trainingMetrics';
 import { computeFingerprint, computeRouteGeometry } from '../utils/segments';
+import { calcAvgGAP } from '../utils/splits';
 
 /** Reparse une activité (GPX ou FIT) depuis son contenu brut. */
 async function parseEntryPoints(entry: ActivityIndexEntry, data: ArrayBuffer | string): Promise<GPXTrackPoint[]> {
@@ -25,6 +26,13 @@ function computeDerivedFields(entry: ActivityIndexEntry, points: GPXTrackPoint[]
     zoneMinutes: calcTRIMP(points, fcMax, fcRest)?.zoneMinutes,
     fingerprint: computeFingerprint(points),
     routeGeometry: computeRouteGeometry(points),
+    avgGAP: entry.activityType === 'running' ? calcAvgGAP(points) ?? undefined : undefined,
+    // Ne fige fcMax/fcRest QUE si absents — une activité déjà figée (sauvegardée depuis l'ajout de
+    // cette fonctionnalité) ne doit pas voir sa valeur historique écrasée par un recalcul ultérieur ;
+    // seules les entrées pré-existantes (jamais figées) reçoivent les réglages actuels en approximation
+    // best-effort, voir ActivityIndexEntry.fcMax.
+    fcMax: entry.fcMax ?? fcMax,
+    fcRest: entry.fcRest ?? fcRest,
   };
 }
 
@@ -417,10 +425,13 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
     }
   };
 
-  // Activités sans empreinte géographique OU sans géométrie allégée (calculées uniquement depuis
-  // l'ajout de la comparaison de trajets/segments) — ex. tout l'historique importé depuis Drive
-  // avant ces fonctionnalités, ou sauvegardé avant l'ajout de routeGeometry (voir segments.ts).
-  const missingGeometry = cloud.history.filter(e => !e.fingerprint || !e.routeGeometry);
+  // Activités sans empreinte géographique, géométrie allégée, allure GAP, ou FCmax/FCrepos figées
+  // (calculées uniquement depuis l'ajout de la comparaison de trajets/segments, du suivi d'efficacité
+  // GAP, ou du figeage de la FC de réserve) — ex. tout l'historique importé depuis Drive avant ces
+  // fonctionnalités. avgGAP/fcMax course uniquement.
+  const missingGeometry = cloud.history.filter(e =>
+    !e.fingerprint || !e.routeGeometry || (e.activityType === 'running' && (!e.avgGAP || !e.fcMax))
+  );
 
   /**
    * Recalcule empreinte + géométrie allégée + meilleurs efforts + zones FC pour toutes les activités
@@ -552,7 +563,7 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
         {missingGeometry.length > 0 && (
           <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
             <button type="button" onClick={handleBackfill} disabled={!!backfillProgress}
-              title="Télécharge et reparse chaque activité pour calculer sa géométrie (nécessaire à la comparaison de trajets et aux segments — une fois faite, plus besoin de retélécharger cette activité pour la comparer), ainsi que les meilleurs efforts et zones FC si absents"
+              title="Télécharge et reparse chaque activité pour calculer sa géométrie (nécessaire à la comparaison de trajets et aux segments — une fois faite, plus besoin de retélécharger cette activité pour la comparer) et son allure GAP (suivi d'efficacité), ainsi que les meilleurs efforts et zones FC si absents"
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
                 padding: '0.5rem', fontSize: '0.82rem', fontWeight: 600,

@@ -3,7 +3,7 @@ import {
   parseGPX, calculateSplits, detectIntervals,
   detectClimbs, classifySession, calcCardiacDrift,
   calcTRIMP, calcNormalizedPower, estimateVO2max, calcTSB,
-  calcCardiacPace, detectHillRepeats,
+  calcCardiacPace, detectHillRepeats, calcAvgGAP,
   type GPXActivity,
 } from "./utils/gpxParser";
 import { generateSampleGPX } from "./utils/sampleGPX";
@@ -443,7 +443,9 @@ function App() {
       fileName,
       avgHeartRate: enrichedActivity.avgHeartRate ?? undefined,
       avgPace: enrichedActivity.activityType !== 'cycling' ? enrichedActivity.avgPace : undefined,
+      avgGAP: enrichedActivity.activityType === 'running' ? calcAvgGAP(enrichedActivity.points) ?? undefined : undefined,
       avgSpeed: enrichedActivity.avgSpeed * 3.6,
+      fcMax, fcRest,
       trimp: trimp?.edwards,
       trimpBanister: trimp?.banister,
       zoneMinutes: trimp?.zoneMinutes,
@@ -478,7 +480,7 @@ function App() {
       if (ms.length === 0) continue;
       // Remplace d'éventuels passages existants à la même date (re-sauvegarde) plutôt que d'ajouter des doublons
       const withoutSameDate = (seg.attempts ?? []).filter(a => a.date !== date);
-      const merged = [...withoutSameDate, ...ms.map(toCachedAttempt)].sort((a, b) => a.duration - b.duration).slice(0, 10);
+      const merged = [...withoutSameDate, ...ms.map((a, i) => toCachedAttempt(a, i + 1, ms.length, fcMax, fcRest))].sort((a, b) => a.duration - b.duration).slice(0, 10);
       await storedSegments.updateAttempts(seg.id, merged);
     }
   };
@@ -612,6 +614,8 @@ function App() {
             setRaceGoal={setRaceGoal}
             manualBests={manualBests}
             setManualBest={setManualBest}
+            fcMax={fcMax}
+            fcRest={fcRest}
             onClose={() => setShowAthletePage(false)}
           />
         ) : !activity ? (
@@ -999,6 +1003,8 @@ function App() {
                     loadFile={cloud.loadFile}
                     onOpenActivity={handleOpenCloudActivity}
                     updateActivityMetaBatch={cloud.updateActivityMetaBatch}
+                    fcMax={fcMax}
+                    fcRest={fcRest}
                   />
                 </Suspense>
                 <Suspense fallback={sectionLoader}>
@@ -1008,6 +1014,8 @@ function App() {
                     loadFile={cloud.loadFile}
                     picker={segmentPicker}
                     storedSegments={storedSegments}
+                    fcMax={fcMax}
+                    fcRest={fcRest}
                   />
                 </Suspense>
               </>

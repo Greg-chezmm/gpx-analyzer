@@ -24,6 +24,19 @@ export interface ActivityIndexEntry {
   // Vitesse/allure moyenne — utilisées par le graphique de progression
   avgPace?: number;  // s/km (running)
   avgSpeed?: number; // km/h (cycling)
+  // Allure ajustée à la pente (GAP, Minetti) — course uniquement, voir splits.ts calcAvgGAP. Utilisée
+  // à la place de avgPace pour le suivi d'efficacité cardiaque (RouteHistory/StoredSegments/
+  // ProgressChart), pour ne pas pénaliser/avantager un trajet selon son dénivelé. Absente sur les
+  // activités sauvegardées avant l'ajout de cette fonctionnalité (rétro-calcul via "Calculer les
+  // empreintes" dans CloudSync.tsx).
+  avgGAP?: number;
+  // FCmax/FCrepos en vigueur au moment de la sauvegarde de cette activité — figées ici pour que
+  // l'Efficacité cardiaque (RouteHistory/StoredSegments/ProgressChart) ne bouge pas rétroactivement
+  // si le profil (FC repos notamment) change ensuite, voir computeEfficiencyTrend. Absentes sur les
+  // activités sauvegardées avant l'ajout de cette fonctionnalité — on retombe alors sur les réglages
+  // actuels du profil pour ces anciennes entrées (leur valeur historique réelle n'a jamais été notée).
+  fcMax?: number;
+  fcRest?: number;
   // Charge
   trimp?: number;
   trimpBanister?: number;

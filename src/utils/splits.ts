@@ -1,4 +1,4 @@
-import type { GPXActivity } from './gpxCore';
+import type { GPXActivity, GPXTrackPoint } from './gpxCore';
 
 /** Statistiques d'un segment kilométrique (ou de longueur personnalisée) d'une activité. */
 export interface GPXSplit {
@@ -39,13 +39,34 @@ function metabolicCost(grade: number): number {
 const FLAT_COST = metabolicCost(0);
 
 /**
- * Facteur de correction GAP pour une pente donnée : ratio coût_plat / coût_pente.
- * gapFactor > 1 en descente (la pente "aide"), gapFactor < 1 en montée (la pente "pénalise").
- * GAP_speed = speed_réelle × gapFactor → allure équivalente sur plat.
+ * Facteur de correction GAP pour une pente donnée : ratio coût_pente / coût_plat.
+ * gapFactor > 1 en montée (l'effort est crédité — cette énergie sur du plat irait plus vite),
+ * gapFactor < 1 en descente (la pente a "aidé" — son équivalent plat est plus lent).
+ * GAP_speed = speed_réelle × gapFactor → vitesse équivalente sur plat, à effort égal.
+ * Convention standard (ex. Strava) — voir discussion avec Greg (2026-08-27) : la version précédente
+ * (ratio inversé) donnait l'exact opposé, pénalisant les montées au lieu de créditer l'effort.
  */
 export function gapFactor(grade: number): number {
   const cost = metabolicCost(grade);
-  return cost > 0 ? FLAT_COST / cost : 1;
+  return cost > 0 ? cost / FLAT_COST : 1;
+}
+
+/**
+ * Allure GAP moyenne (s/km) sur un ensemble de points — même formule que `calculateSplits` (moyenne
+ * des vitesses ajustées par `gapFactor` point par point, convertie en allure), mais réutilisable sur
+ * n'importe quelle plage de points : une activité entière (`ActivityIndexEntry.avgGAP`) ou le
+ * sous-tracé d'un seul passage de segment (`CachedSegmentAttempt.avgGAP`). Retourne `null` si aucun
+ * point n'a de vitesse+pente exploitables.
+ */
+export function calcAvgGAP(points: GPXTrackPoint[]): number | null {
+  let gapSpeedSum = 0, gapSpeedCount = 0;
+  for (const pt of points) {
+    if (pt.speed !== null && pt.speed > 0 && pt.grade !== null) {
+      gapSpeedSum += pt.speed * gapFactor(pt.grade);
+      gapSpeedCount++;
+    }
+  }
+  return gapSpeedCount > 0 ? Math.round(1000 / (gapSpeedSum / gapSpeedCount)) : null;
 }
 
 /** Calcule les splits par tranche de `splitDistance` mètres (défaut 1 000 m) avec toutes les métriques par segment. */

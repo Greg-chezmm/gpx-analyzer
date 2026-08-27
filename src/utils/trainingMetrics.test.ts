@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { calcTSB, calcTRIMP, calcNormalizedPower, calcCardiacDrift, estimateVO2max } from './trainingMetrics';
+import {
+  calcTSB, calcTRIMP, calcNormalizedPower, calcCardiacDrift, estimateVO2max,
+  calcCardiacPaceFromAggregate, calcEfficiencyPaceFromAggregate, computeEfficiencyTrend,
+} from './trainingMetrics';
 import type { GPXTrackPoint, GPXActivity } from './gpxCore';
 
 /** Piste synthétique : FC et vitesse constantes (ou par étape), un point par seconde, terrain plat. */
@@ -138,5 +141,112 @@ describe('estimateVO2max', () => {
     const points = buildTrack([{ durationS: 900, hr: 150, speedMs: 8 }]);
     const activity = { activityType: 'cycling', points } as GPXActivity;
     expect(estimateVO2max(activity, 190, 50)).toBeNull();
+  });
+});
+
+describe('calcCardiacPaceFromAggregate', () => {
+  it('effort au-dessus de la référence (65% HRR) → allure cardiaque plus rapide que l\'allure brute', () => {
+    // HR=150, FCmax=190, FCrepos=50 → HRR=71.4%, au-dessus de la référence 65%.
+    const cardiacPace = calcCardiacPaceFromAggregate(300, 150, 190, 50); // allure brute 5:00/km
+    expect(cardiacPace).not.toBeNull();
+    expect(cardiacPace!).toBeLessThan(300);
+  });
+
+  it('effort en dessous de la référence → allure cardiaque plus lente que l\'allure brute', () => {
+    // HR=120, FCmax=190, FCrepos=50 → HRR=50%, en dessous de la référence 65%.
+    const cardiacPace = calcCardiacPaceFromAggregate(300, 120, 190, 50);
+    expect(cardiacPace).not.toBeNull();
+    expect(cardiacPace!).toBeGreaterThan(300);
+  });
+
+  it('retourne null hors de la plage HRR valide 20–99%', () => {
+    expect(calcCardiacPaceFromAggregate(300, 60, 190, 50)).toBeNull(); // HRR=7%, trop bas
+    expect(calcCardiacPaceFromAggregate(300, 189, 190, 50)).toBeNull(); // HRR=99.3%, trop haut
+  });
+});
+
+describe('calcEfficiencyPaceFromAggregate', () => {
+  it('une FC PLUS BASSE à allure égale donne une MEILLEURE (plus rapide) allure d\'efficacité — sens opposé à calcCardiacPaceFromAggregate', () => {
+    // Bug réel signalé par Greg (2026-08-27) : en réutilisant calcCardiacPaceFromAggregate pour le
+    // suivi d'efficacité, une FC plus basse à allure quasi identique donnait une "efficacité" PIRE.
+    // FCmax=190, FCrepos=50. HR=120 (50% HRR) doit donner une meilleure allure d'efficacité que HR=150 (71.4% HRR).
+    const lowerHR = calcEfficiencyPaceFromAggregate(300, 120, 190, 50);
+    const higherHR = calcEfficiencyPaceFromAggregate(300, 150, 190, 50);
+    expect(lowerHR).not.toBeNull();
+    expect(higherHR).not.toBeNull();
+    expect(lowerHR!).toBeLessThan(higherHR!); // FC plus basse → allure d'efficacité plus rapide (meilleure)
+  });
+
+  it('une allure PLUS RAPIDE à FC égale donne une MEILLEURE allure d\'efficacité', () => {
+    const fasterPace = calcEfficiencyPaceFromAggregate(280, 150, 190, 50);
+    const slowerPace = calcEfficiencyPaceFromAggregate(320, 150, 190, 50);
+    expect(fasterPace!).toBeLessThan(slowerPace!);
+  });
+
+  it('retourne null hors de la plage HRR valide 20–99%', () => {
+    expect(calcEfficiencyPaceFromAggregate(300, 60, 190, 50)).toBeNull(); // HRR=7%, trop bas
+    expect(calcEfficiencyPaceFromAggregate(300, 189, 190, 50)).toBeNull(); // HRR=99.3%, trop haut
+  });
+});
+
+describe('computeEfficiencyTrend', () => {
+  it('reproduit le cas réel signalé par Greg : FC plus basse à allure quasi identique = tendance "down" (amélioration), pas "up"', () => {
+    // Chiffres exacts du signalement : 19/05 (FC 168, 7:39/km=459s) puis 09/06 (FC 165, 7:38/km=458s).
+    // FCmax=195, FCrepos=52 (profil utilisateur). Avec l'ancienne formule (bug), 09/06 ressortait pire.
+    const items = [
+      { date: '2026-05-19', avgPace: 459, avgHR: 168 },
+      { date: '2026-06-09', avgPace: 458, avgHR: 165 },
+    ];
+    const result = computeEfficiencyTrend(items, 'running', 195, 52);
+    expect(result.get(0)!.trend).toBeNull(); // 19/05 = premier chronologiquement
+    expect(result.get(1)!.trend).toBe('down'); // 09/06 : FC plus basse, allure quasi égale → amélioration
+    expect(result.get(1)!.pace!).toBeLessThan(result.get(0)!.pace!);
+  });
+
+  it('calcule la tendance dans l\'ORDRE CHRONOLOGIQUE, pas l\'ordre du tableau d\'entrée (ex. trié par temps)', () => {
+    // Volontairement dans le désordre chronologique pour vérifier que le tri interne fonctionne :
+    // le passage le plus récent (index 0, mars) est meilleur (FC plus basse à allure égale) que le plus ancien (index 1, janvier).
+    const items = [
+      { date: '2026-03-01', avgPace: 300, avgHR: 120 }, // le plus récent, FC plus basse = meilleur
+      { date: '2026-01-01', avgPace: 300, avgHR: 150 }, // le plus ancien
+    ];
+    const result = computeEfficiencyTrend(items, 'running', 190, 50);
+    expect(result.get(1)!.trend).toBeNull(); // janvier = premier chronologiquement, pas de comparaison
+    expect(result.get(0)!.trend).toBe('down'); // mars vs janvier = allure d'efficacité plus rapide = amélioration
+  });
+
+  it('retourne une map vide pour une activité non-course (allure d\'efficacité course uniquement)', () => {
+    const items = [{ date: '2026-01-01', avgPace: 300, avgHR: 150 }, { date: '2026-02-01', avgPace: 290, avgHR: 150 }];
+    expect(computeEfficiencyTrend(items, 'cycling', 190, 50).size).toBe(0);
+  });
+
+  it('pas de tendance si le passage précédent n\'a pas de FC exploitable', () => {
+    const items = [
+      { date: '2026-01-01', avgPace: 300, avgHR: null }, // pas de FC
+      { date: '2026-02-01', avgPace: 300, avgHR: 150 },
+    ];
+    const result = computeEfficiencyTrend(items, 'running', 190, 50);
+    expect(result.get(0)!.pace).toBeNull();
+    expect(result.get(1)!.trend).toBeNull(); // rien à comparer, le seul précédent est non calculable
+  });
+
+  it('utilise le FCmax/FCrepos figés de chaque item plutôt que les réglages actuels du profil — les anciens chiffres ne doivent pas bouger si le profil change', () => {
+    // Demande de Greg (2026-08-27) : sa FC de repos change de semaine en semaine ; une "Efficacité"
+    // déjà calculée ne doit pas se remettre à bouger si le profil est modifié plus tard. On simule ce
+    // cas en passant un item avec sa PROPRE FCrepos figée (52, celle en vigueur à l'époque) alors que
+    // le profil ACTUEL (fallback) a changé (48) — le résultat doit suivre la valeur figée, pas l'actuelle.
+    const itemWithFrozenFc = [{ date: '2026-06-09', avgPace: 458, avgHR: 165, fcMax: 195, fcRest: 52 }];
+    const withFrozen = computeEfficiencyTrend(itemWithFrozenFc, 'running', 195, 48 /* profil actuel, différent */);
+    const withoutFrozen = computeEfficiencyTrend(
+      [{ date: '2026-06-09', avgPace: 458, avgHR: 165 }], 'running', 195, 52, // même valeur, mais via le fallback
+    );
+    expect(withFrozen.get(0)!.pace).toBeCloseTo(withoutFrozen.get(0)!.pace!, 5);
+
+    // Le même item, mais interprété avec le profil ACTUEL (48) au lieu de sa FCrepos figée (52), donne
+    // un résultat DIFFÉRENT — preuve que sans figeage, un changement de profil ferait bouger ce chiffre.
+    const withCurrentProfileInstead = computeEfficiencyTrend(
+      [{ date: '2026-06-09', avgPace: 458, avgHR: 165 }], 'running', 195, 48,
+    );
+    expect(withCurrentProfileInstead.get(0)!.pace).not.toBeCloseTo(withFrozen.get(0)!.pace!, 5);
   });
 });

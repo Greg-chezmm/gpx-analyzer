@@ -1,4 +1,5 @@
 import type { GPXActivity } from './gpxCore';
+import { calcAvgGAP } from './splits';
 
 // ─── Climb analysis ──────────────────────────────────────────────────────────
 
@@ -16,6 +17,7 @@ export interface ClimbSegment {
   maxGrade: number;   // %
   duration: number;   // seconds
   avgPace: number;    // s/km
+  avgGAP: number | null; // s/km — allure ajustée à la pente (Minetti), voir splits.ts calcAvgGAP
   vam: number;        // m/h
   avgHR: number | null;
 }
@@ -123,6 +125,7 @@ export function detectClimbs(activity: GPXActivity): ClimbSegment[] {
       maxGrade:  Math.round(maxGrade * 10) / 10,
       duration:  Math.round(duration),
       avgPace:   dist > 0 && duration > 0 ? (duration / (dist / 1000)) : 0,
+      avgGAP:    calcAvgGAP(pts.slice(s.start, s.end + 1)),
       // VAM (Vitesse Ascensionnelle Moyenne) = D+ en m/h
       vam:       duration > 0 ? Math.round(elevGain / (duration / 3600)) : 0,
       avgHR:     hrVals.length > 0 ? Math.round(hrVals.reduce((a, b) => a + b, 0) / hrVals.length) : null,

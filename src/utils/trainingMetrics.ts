@@ -189,7 +189,7 @@ export function calcTRIMP(
  * Interprétation : si HRR > 65%, on travaille plus que la référence
  * → allure cardiaque plus rapide (on "vaut mieux" que ce que la vitesse brute montre).
  */
-const CARDIAC_REF_HRR = 0.65;
+export const CARDIAC_REF_HRR = 0.65;
 
 /** Résultat du calcul d'allure cardiaque (vitesse normalisée par % HRR). */
 export interface CardiacPaceResult {
@@ -217,6 +217,112 @@ export function calcCardiacPace(
   }
   if (paces.length < 10) return { avgCardiacPace: null };
   return { avgCardiacPace: paces.reduce((a, b) => a + b, 0) / paces.length };
+}
+
+/**
+ * Version agrégée de `calcCardiacPace` — calcule l'allure cardiaque directement depuis une allure
+ * moyenne et une FC moyenne déjà stockées (`ActivityIndexEntry`), sans retélécharger/reparser le
+ * fichier brut. Applique la même formule à la moyenne de la séance plutôt que point par point —
+ * légèrement moins précis sur une séance à FC très variable (lisse l'effet), mais suffisant pour
+ * une tendance dans le temps (course sur plusieurs séances) sans coût réseau. Course à pied
+ * uniquement — même périmètre que `calcCardiacPace`.
+ */
+export function calcCardiacPaceFromAggregate(
+  avgPaceSecPerKm: number,
+  avgHR: number,
+  fcMax: number,
+  fcRest: number,
+): number | null {
+  const reserve = fcMax - fcRest;
+  if (reserve <= 0 || avgPaceSecPerKm <= 0) return null;
+  const hrr = (avgHR - fcRest) / reserve;
+  if (hrr < 0.2 || hrr > 0.99) return null;
+  return avgPaceSecPerKm * (CARDIAC_REF_HRR / hrr);
+}
+
+/**
+ * Allure normalisée à un effort de référence (65% HRR) — répond à une question DIFFÉRENTE de
+ * `calcCardiacPaceFromAggregate` : "à quelle vitesse est-ce que je vais physiologiquement,
+ * indépendamment de l'intensité fournie ?" (calcCardiacPaceFromAggregate répond plutôt à "quelle
+ * allure équivalente si j'avais fourni l'effort de référence ?", en CRÉDITANT un effort plus soutenu
+ * — utile pour comparer des séances d'intensités différentes, mais l'inverse de ce qu'on veut ici).
+ *
+ * Ratio inversé par rapport à `calcCardiacPaceFromAggregate` : allure × (HRR_actuel / HRR_ref) au
+ * lieu de allure × (HRR_ref / HRR_actuel) — une FC plus basse à vitesse égale (ou une vitesse plus
+ * haute à FC égale) donne TOUJOURS une meilleure (plus rapide) allure ajustée, ce qui n'était PAS le
+ * cas avec l'autre formule. Bug réel trouvé par Greg (2026-08-27) : en réutilisant
+ * `calcCardiacPaceFromAggregate` pour le suivi d'efficacité (RouteHistory/StoredSegments/ProgressChart),
+ * une FC plus basse à allure quasi identique donnait une "efficacité" pire — l'exact inverse de
+ * l'intention. Utilisée uniquement par `computeEfficiencyTrend` ci-dessous ; ne pas mélanger avec
+ * `calcCardiacPace`/`calcCardiacPaceFromAggregate` (KPI "Allure cardiaque" existant, comportement
+ * volontairement différent, ne pas modifier).
+ */
+export function calcEfficiencyPaceFromAggregate(
+  avgPaceSecPerKm: number,
+  avgHR: number,
+  fcMax: number,
+  fcRest: number,
+): number | null {
+  const reserve = fcMax - fcRest;
+  if (reserve <= 0 || avgPaceSecPerKm <= 0) return null;
+  const hrr = (avgHR - fcRest) / reserve;
+  if (hrr < 0.2 || hrr > 0.99) return null;
+  return avgPaceSecPerKm * (hrr / CARDIAC_REF_HRR);
+}
+
+/** Allure d'efficacité d'un passage/trajet + tendance vs le passage chronologiquement précédent sur ce même parcours. */
+export interface EfficiencyTrendPoint {
+  pace: number | null; // s/km, null si non calculable (pas de FC, ou hors plage HRR valide)
+  trend: 'up' | 'down' | 'flat' | null; // null = pas de comparaison possible (premier point calculable, ou l'un des deux non calculable)
+}
+
+/**
+ * Calcule l'allure d'efficacité de chaque item (course uniquement, voir `calcEfficiencyPaceFromAggregate`)
+ * et sa tendance par rapport à l'item chronologiquement précédent — indépendant de l'ordre du tableau
+ * d'entrée (généralement trié par temps, pas par date). Une allure d'efficacité qui baisse dans le
+ * temps = plus efficace (même vitesse pour moins d'effort, ou plus vite pour le même effort). Réutilisé
+ * par RouteHistory.tsx (trajets complets) et StoredSegments.tsx (segments manuels).
+ *
+ * Utilise `avgGAP` (allure ajustée à la pente, Minetti) en priorité sur `avgPace` quand disponible —
+ * demande de Greg (2026-08-27) : sans ça, un trajet/passage plus vallonné qu'un autre ressort
+ * artificiellement moins "efficace" à cause du relief, pas d'un vrai changement de forme. Retombe sur
+ * `avgPace` pour les activités pas encore rétro-calculées (voir "Calculer les empreintes").
+ *
+ * Utilise le FCmax/FCrepos PROPRES à chaque item (`item.fcMax`/`item.fcRest`, figés à la sauvegarde de
+ * l'activité concernée) plutôt que `fallbackFcMax`/`fallbackFcRest` (réglages ACTUELS du profil) quand
+ * disponibles — demande de Greg (2026-08-27) : sa FC de repos change de semaine en semaine, et une
+ * ancienne "Efficacité" ne doit pas se remettre à bouger rétroactivement à chaque changement de profil.
+ * `fallbackFcMax`/`fallbackFcRest` ne servent que pour les items sauvegardés avant l'ajout de ce figeage
+ * (dégradation gracieuse — leur valeur historique réelle n'a jamais été enregistrée).
+ */
+export function computeEfficiencyTrend(
+  items: { date: string; avgPace: number; avgGAP?: number | null; avgHR: number | null; fcMax?: number; fcRest?: number }[],
+  activityType: string,
+  fallbackFcMax: number,
+  fallbackFcRest: number,
+): Map<number, EfficiencyTrendPoint> {
+  const result = new Map<number, EfficiencyTrendPoint>();
+  if (activityType !== 'running') return result;
+
+  const chrono = items
+    .map((item, idx) => ({ idx, ...item }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  let prevPace: number | null = null;
+  for (const { idx, avgPace, avgGAP, avgHR, fcMax, fcRest } of chrono) {
+    const paceInput = avgGAP ?? avgPace;
+    const pace = avgHR !== null && paceInput > 0
+      ? calcEfficiencyPaceFromAggregate(paceInput, avgHR, fcMax ?? fallbackFcMax, fcRest ?? fallbackFcRest)
+      : null;
+    let trend: EfficiencyTrendPoint['trend'] = null;
+    if (pace !== null && prevPace !== null) {
+      const diffPct = (pace - prevPace) / prevPace;
+      trend = Math.abs(diffPct) < 0.01 ? 'flat' : diffPct < 0 ? 'down' : 'up';
+    }
+    result.set(idx, { pace, trend });
+    if (pace !== null) prevPace = pace;
+  }
+  return result;
 }
 
 // ─── Normalized Power ─────────────────────────────────────────────────────────

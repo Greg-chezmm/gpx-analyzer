@@ -10,6 +10,7 @@ export interface HillRepetition {
   elevGain: number;   // m
   duration: number;   // s
   avgPace: number;    // s/km
+  avgGAP: number | null; // s/km — allure ajustée à la pente (Minetti), voir splits.ts calcAvgGAP
   avgHR: number | null;
   vam: number;        // m/h
   recovery: { duration: number; distance: number } | null;
@@ -23,6 +24,7 @@ export interface HillRepeatSeries {
   avgDistance: number;  // m
   avgGrade: number;     // %
   avgPace: number;      // s/km
+  avgGAP: number | null; // s/km — moyenne des allures GAP valides des répétitions
   bestPace: number;     // s/km (le plus bas = le plus rapide)
   avgHR: number | null;
   avgVAM: number;       // m/h
@@ -129,6 +131,7 @@ export function detectHillRepeats(
         elevGain: c.elevGain,
         duration: c.duration,
         avgPace: c.avgPace,
+        avgGAP: c.avgGAP,
         avgHR: avgHR !== null ? Math.round(avgHR) : null,
         vam: c.vam,
         recovery,
@@ -137,6 +140,8 @@ export function detectHillRepeats(
 
     const validPaces = reps.map(r => r.avgPace).filter(p => p > 0);
     const avgPace = validPaces.reduce((a, b) => a + b, 0) / validPaces.length;
+    const validGAPs = reps.map(r => r.avgGAP).filter((g): g is number => g !== null);
+    const avgGAP = validGAPs.length > 0 ? Math.round(validGAPs.reduce((a, b) => a + b, 0) / validGAPs.length) : null;
     const avgElevGain = reps.reduce((a, r) => a + r.elevGain, 0) / reps.length;
     const avgDistance = reps.reduce((a, r) => a + r.distance, 0) / reps.length;
     const hrReps = reps.filter(r => r.avgHR !== null);
@@ -159,6 +164,7 @@ export function detectHillRepeats(
       avgDistance: Math.round(avgDistance),
       avgGrade: avgDistance > 0 ? Math.round((avgElevGain / avgDistance) * 100 * 10) / 10 : 0,
       avgPace,
+      avgGAP,
       bestPace: Math.min(...validPaces),
       avgHR,
       avgVAM: Math.round(reps.reduce((a, r) => a + r.vam, 0) / reps.length),

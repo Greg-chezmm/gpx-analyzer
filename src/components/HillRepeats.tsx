@@ -36,12 +36,13 @@ function FatigueBadge({ pct }: { pct: number | null }) {
 interface RepRowProps {
   rep: HillRepetition;
   hasHR: boolean;
+  hasGAP: boolean;
   isLast: boolean;
   onClick: () => void;
 }
 
 /** Ligne de tableau pour une répétition de côte individuelle. */
-function RepRow({ rep, hasHR, isLast, onClick }: RepRowProps) {
+function RepRow({ rep, hasHR, hasGAP, isLast, onClick }: RepRowProps) {
   return (
     <tr
       onClick={onClick}
@@ -66,6 +67,11 @@ function RepRow({ rep, hasHR, isLast, onClick }: RepRowProps) {
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--color-speed)", fontWeight: 600 }}>
         {rep.avgPace > 0 ? formatPace(rep.avgPace) + " /km" : "—"}
       </td>
+      {hasGAP && (
+        <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "#a78bfa" }}>
+          {rep.avgGAP !== null ? formatPace(rep.avgGAP) + " /km" : "—"}
+        </td>
+      )}
       {/* VAM = Vitesse Ascensionnelle Moyenne en m/h — compare l'efficacité en côte */}
       <td style={{ padding: "0.45rem 0.75rem", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
         {Math.round(rep.vam)} m/h
@@ -97,6 +103,7 @@ interface SeriesPanelProps {
 function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
   const [open, setOpen] = useState(true);
   const hasHR = s.avgHR !== null;
+  const hasGAP = s.reps.some(r => r.avgGAP !== null);
 
   return (
     <div style={{
@@ -127,8 +134,10 @@ function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.82rem" }}>
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border-color)", background: "var(--bg-primary)" }}>
-                {["#", "Distance", "D+", "Durée", "Allure", "VAM", ...(hasHR ? ["FC moy."] : []), "Récupération"].map(h => (
-                  <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>
+                {["#", "Distance", "D+", "Durée", "Allure", ...(hasGAP ? ["GAP"] : []), "VAM", ...(hasHR ? ["FC moy."] : []), "Récupération"].map(h => (
+                  <th key={h} style={{ padding: "0.4rem 0.75rem", textAlign: "left", fontWeight: 600, fontSize: "0.78rem", color: "var(--text-tertiary)", whiteSpace: "nowrap" }}
+                    title={h === "GAP" ? "Allure ajustée à la pente (GAP, modèle Minetti) — équivalent plat à effort égal, crédite l'effort de la montée" : undefined}
+                  >
                     {h}
                   </th>
                 ))}
@@ -140,6 +149,7 @@ function SeriesPanel({ s, onRepClick }: SeriesPanelProps) {
                   key={rep.startIndex}
                   rep={rep}
                   hasHR={hasHR}
+                  hasGAP={hasGAP}
                   isLast={i === s.reps.length - 1}
                   onClick={() => onRepClick(rep, s.id)}
                 />

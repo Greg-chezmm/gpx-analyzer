@@ -1,4 +1,5 @@
 import { calculateDistance, parseGPX, type GPXTrackPoint } from './gpxCore';
+import { calcAvgGAP } from './splits';
 
 /** Forme géométrique minimale requise pour le matching — un GPXTrackPoint la satisfait déjà (structural typing). */
 export interface GeoPoint { lat: number; lon: number; distFromStart: number; }
@@ -448,6 +449,7 @@ export interface SegmentAttempt {
   distance: number; // m
   duration: number;  // s
   avgPace: number;   // s/km
+  avgGAP: number | null; // s/km — allure ajustée à la pente (Minetti), voir splits.ts calcAvgGAP
   avgSpeed: number;  // km/h
   avgHR: number | null;
   elevGain: number;  // m
@@ -476,20 +478,40 @@ export interface CachedSegmentAttempt {
   name: string;
   duration: number;
   avgPace: number;
+  avgGAP: number | null; // s/km — allure ajustée à la pente (Minetti), voir splits.ts calcAvgGAP
   avgSpeed: number;
   avgHR: number | null;
   distance: number;
   elevGain: number;
   isCurrent: boolean;
+  /** Numéro du passage (1-indexé, ordre chronologique dans l'activité) et nombre total de passages
+   * trouvés sur CETTE activité — défini uniquement si l'activité contient plusieurs passages du même
+   * segment (ex. fractionné en côte, voir matchStoredSegmentAll). Demande de Greg (2026-08-27) : savoir
+   * quelle répétition d'une séance à plusieurs passages a été retenue dans le classement. */
+  passNumber?: number;
+  totalPasses?: number;
+  /** FCmax/FCrepos en vigueur au moment de l'activité source de ce passage — figées pour que
+   * l'Efficacité ne bouge pas rétroactivement si le profil change ensuite, voir
+   * `ActivityIndexEntry.fcMax`/`computeEfficiencyTrend`. */
+  fcMax?: number;
+  fcRest?: number;
 }
 
-/** Convertit un passage calculé en direct (référence à l'activité complète) en format cache/affichage léger. */
-export function toCachedAttempt(a: SegmentAttempt): CachedSegmentAttempt {
+/** Convertit un passage calculé en direct (référence à l'activité complète) en format cache/affichage léger.
+ * `passNumber`/`totalPasses` : à fournir quand l'activité source contient plusieurs passages (voir
+ * matchStoredSegmentAll, qui retourne déjà les passages triés chronologiquement — passNumber = leur index+1).
+ * `fcMax`/`fcRest` : FCmax/FCrepos en vigueur pour l'activité source de ce passage (voir CachedSegmentAttempt). */
+export function toCachedAttempt(
+  a: SegmentAttempt, passNumber?: number, totalPasses?: number, fcMax?: number, fcRest?: number,
+): CachedSegmentAttempt {
   const slice = a.points.slice(a.startIndex, a.endIndex + 1);
   return {
     points: slice.map(p => ({ lat: p.lat, lon: p.lon })),
-    date: a.date, name: a.name, duration: a.duration, avgPace: a.avgPace, avgSpeed: a.avgSpeed,
+    date: a.date, name: a.name, duration: a.duration, avgPace: a.avgPace, avgGAP: a.avgGAP, avgSpeed: a.avgSpeed,
     avgHR: a.avgHR, distance: a.distance, elevGain: a.elevGain, isCurrent: a.isCurrent,
+    ...(totalPasses && totalPasses > 1 ? { passNumber, totalPasses } : {}),
+    ...(fcMax !== undefined ? { fcMax } : {}),
+    ...(fcRest !== undefined ? { fcRest } : {}),
   };
 }
 
@@ -520,6 +542,7 @@ export function buildAttempt(points: GPXTrackPoint[], startIndex: number, endInd
   return {
     points, startIndex, endIndex, distance, duration,
     avgPace: distance > 0 ? duration / (distance / 1000) : 0,
+    avgGAP: calcAvgGAP(slice),
     avgSpeed: duration > 0 ? (distance / duration) * 3.6 : 0,
     avgHR, elevGain, date, name, isCurrent,
   };

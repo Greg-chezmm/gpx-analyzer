@@ -5,6 +5,7 @@ import type { GPXActivity, GPXTrackPoint, FitSummary } from './gpxCore';
 import { calculateDistance } from './gpxCore';
 import { enrichPoints, computeTrackStats } from './trackProcessing';
 import type { GPXInterval } from './intervals';
+import { calcAvgGAP } from './splits';
 
 // ─── Internal FIT types ──────────────────────────────────────────────────────
 
@@ -144,6 +145,8 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
     const dist = lap.total_distance ?? 0;
     const avgSpd = dur > 0 && dist > 0 ? dist / dur : (lap.avg_speed ?? 0);
     const num = type === 'effort' ? ++effortNum : ++recoveryNum;
+    const startIdx = closestPointIndex(points, lap.start_time!);
+    const endIdx = closestPointIndex(points, lap.timestamp!);
 
     intervals.push({
       number: num,
@@ -155,14 +158,15 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
       avgSpeed: avgSpd,
       maxSpeed: lap.max_speed ?? 0,
       avgPace: avgSpd > 0 ? 1000 / avgSpd : 0,
+      avgGAP: calcAvgGAP(points.slice(startIdx, endIdx + 1)),
       avgHeartRate: hr,
       maxHeartRate: lap.max_heart_rate ?? null,
       avgCadence: lap.avg_cadence ?? null,
       avgPower: lap.avg_power ?? null,
       totalAscent: lap.total_ascent ?? null,
       totalDescent: lap.total_descent ?? null,
-      startPointIndex: closestPointIndex(points, lap.start_time!),
-      endPointIndex: closestPointIndex(points, lap.timestamp!),
+      startPointIndex: startIdx,
+      endPointIndex: endIdx,
     });
   }
 

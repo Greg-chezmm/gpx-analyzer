@@ -50,6 +50,7 @@ function attemptFromEntry(entry: ActivityIndexEntry): SegmentAttempt {
     distance: entry.distance,
     duration: entry.duration,
     avgPace: entry.avgPace ?? (entry.duration > 0 ? entry.duration / (entry.distance / 1000) : 0),
+    avgGAP: entry.avgGAP ?? null,
     avgSpeed: entry.avgSpeed ?? (entry.duration > 0 ? (entry.distance / entry.duration) * 3.6 : 0),
     avgHR: entry.avgHeartRate ?? null,
     elevGain: entry.elevationGain,
