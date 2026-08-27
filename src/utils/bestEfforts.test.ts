@@ -46,6 +46,11 @@ describe('computeBestEfforts — course à pied', () => {
     const tooShort = constantPaceTrack({ durationS: 60, speedMs: 3 }); // 180m
     expect(computeBestEfforts(tooShort, 'running')).toBeNull();
   });
+
+  it('ne traite JAMAIS une activité de type "unknown" comme une course — non-régression (bug réel signalé par Greg : une sortie vélo mal détectée, type "unknown", contaminait la vitesse critique avec une vitesse vélo lue comme allure de course, ex. "balade en famille" → 1km en 2:45)', () => {
+    const bikeSpeed = constantPaceTrack({ durationS: 300, speedMs: 6 }); // 21.6 km/h — vitesse vélo plausible, allure course impossible sur la durée
+    expect(computeBestEfforts(bikeSpeed, 'unknown')).toBeNull();
+  });
 });
 
 describe('computeBestEfforts — vélo', () => {
@@ -80,6 +85,17 @@ describe('aggregateBestRunEfforts', () => {
     expect(fiveK).toBeDefined();
     expect(fiveK!.timeSeconds).toBe(1250);
     expect(fiveK!.entryName).toBe('Sortie B');
+  });
+
+  it('ignore une entrée de type "unknown", même avec un bestEfforts déjà calculé (données en cache avant le fix)', () => {
+    // Filtre par inclusion ('running' seulement), pas juste exclusion de 'cycling' — protège contre
+    // une activité 'unknown' dont le bestEfforts a été calculé par l'ancien code buggé.
+    const withUnknown = [
+      ...history,
+      { activityType: 'unknown', name: 'Contaminée', date: '2026-06-01', bestEfforts: { unit: 'time' as const, values: { '5km': 1 } } },
+    ];
+    const result = aggregateBestRunEfforts(withUnknown);
+    expect(result.find(r => r.key === '5km')!.timeSeconds).toBe(1250); // toujours Sortie B, pas 1s
   });
 
   it('la saisie manuelle prend toujours le dessus sur le temps auto-calculé', () => {

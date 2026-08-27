@@ -67,7 +67,11 @@ export function aggregateBestRunEfforts(
     const floor = (WORLD_RECORD_S[key] ?? 0) * PLAUSIBILITY_MARGIN;
     let best: AggregatedRunBest | null = null;
     for (const e of history) {
-      if (e.activityType === 'cycling') continue;
+      // Inclusion explicite (pas juste exclure 'cycling') — protège aussi contre une activité
+      // 'unknown' dont le bestEfforts a été calculé AVANT le fix de computeBestEfforts (données
+      // déjà en cache sur Firestore, potentiellement contaminées par une vitesse vélo lue comme
+      // allure de course).
+      if (e.activityType !== 'running') continue;
       const t = e.bestEfforts?.values[key];
       if (t === undefined || t < floor) continue;
       if (!best || t < best.timeSeconds) best = { key, label, meters, timeSeconds: t, entryName: e.name, entryDate: e.date };
@@ -174,6 +178,12 @@ export function computeBestEfforts(points: GPXTrackPoint[], activityType: string
     if (Object.keys(values).length === 0) return null;
     return { unit: hasPower ? 'power' : 'speed', values };
   }
+
+  // Branche course explicite (pas un "sinon" implicite) : une activité de type 'unknown' (détection
+  // auto échouée — voir gpxCore.ts/fitParser.ts) ne doit surtout pas être traitée comme une course,
+  // sous peine de lire une vitesse vélo comme une allure de course (bug réel signalé par Greg : une
+  // "balade en famille" mal détectée contaminait la vitesse critique avec un "1km en 2:45").
+  if (activityType !== 'running') return null;
 
   const values: Record<string, number> = {};
   for (const { key, meters } of RUN_DISTANCES) {
