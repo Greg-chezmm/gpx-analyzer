@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  uploadActivity, fetchActivityList, fetchActivityFile,
+  fetchActivityList, fetchActivityFile,
   saveUserSettings, fetchUserSettings,
   deleteActivity as deleteActivityStorage,
   updateActivityMeta as updateActivityMetaStorage,
@@ -33,10 +33,8 @@ export interface DriveHandle {
   // (solution hybride : fichier brut sur Drive, métadonnées sur Firestore).
   token: string | null;
   history: ActivityIndexEntry[];
-  isSaving: boolean;
   signIn(): void;
   signOut(): void;
-  save(rawData: string | ArrayBuffer, fileName: string, meta: Omit<ActivityIndexEntry, 'fileId'>): Promise<void>;
   loadFile(fileId: string, fileName: string): Promise<ArrayBuffer | string>;
   deleteActivity(fileId: string | null, entry: Pick<ActivityIndexEntry, 'date' | 'name'>): Promise<void>;
   updateActivityMeta(entry: Pick<ActivityIndexEntry, 'date' | 'name'>, updates: Partial<ActivityIndexEntry>): Promise<void>;
@@ -53,7 +51,6 @@ export function useGoogleDrive(): DriveHandle {
   const [status, setStatus] = useState<DriveStatus>(CLIENT_ID ? 'disconnected' : 'unavailable');
   const [token, setToken] = useState<string | null>(null);
   const [history, setHistory] = useState<ActivityIndexEntry[]>([]);
-  const [isSaving, setIsSaving] = useState(false);
   const clientRef = useRef<{ requestAccessToken(overrides?: { prompt?: string }): void } | null>(null);
   // Persiste à travers les refreshs : true tant que l'utilisateur n'a pas explicitement déconnecté
   const [wasAuthorized] = useState(() => localStorage.getItem(AUTHORIZED_KEY) === '1');
@@ -123,21 +120,6 @@ export function useGoogleDrive(): DriveHandle {
     setToken(null); setStatus('disconnected'); setHistory([]);
   }, [token]);
 
-  const save = useCallback(async (
-    rawData: string | ArrayBuffer,
-    fileName: string,
-    meta: Omit<ActivityIndexEntry, 'fileId'>
-  ) => {
-    if (!token) return;
-    setIsSaving(true);
-    try {
-      await uploadActivity(token, rawData, fileName, meta);
-      await refresh();
-    } finally {
-      setIsSaving(false);
-    }
-  }, [token, refresh]);
-
   const loadFile = useCallback(async (fileId: string, fileName: string) => {
     if (!token) throw new Error('Non connecté à Drive');
     return fetchActivityFile(token, fileId, fileName);
@@ -171,5 +153,5 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, wasAuthorized, token, history, isSaving, signIn, signOut, save, loadFile, deleteActivity, updateActivityMeta, refresh, saveSettings, loadSettings };
+  return { status, wasAuthorized, token, history, signIn, signOut, loadFile, deleteActivity, updateActivityMeta, refresh, saveSettings, loadSettings };
 }

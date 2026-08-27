@@ -3,7 +3,7 @@ import type { GPXActivity } from '../utils/gpxCore';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import {
   computeFingerprint, fingerprintOverlap, matchFullRoute, debugRouteCoverage, parseActivityRawToPoints,
-  buildAttempt, type SegmentAttempt,
+  buildAttempt, checkFullRouteCoverage, type SegmentAttempt,
 } from '../utils/segments';
 
 const DISTANCE_RATIO_TOLERANCE = 0.3; // ±30% — au-delà, ça ne peut structurellement pas être le même trajet complet
@@ -27,6 +27,8 @@ export interface RejectedCandidate {
 
 export interface FullRouteMatchesHandle {
   status: FullRouteMatchStatus;
+  /** Progression du scan complet (candidates déjà comparées / total) — `null` hors scan ou résultat en cache. */
+  progress: { done: number; total: number } | null;
   /** Activité courante + correspondances passées, triées par durée croissante ; vide si aucune correspondance. */
   matches: RouteMatch[];
   /** Candidates plausibles (distance+empreinte proches) mais rejetées à la vérification géométrique précise. Vide si le résultat vient du cache. */
@@ -75,6 +77,7 @@ export function useFullRouteMatches(
   updateActivityMetaBatch: (items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[]) => Promise<void>,
 ): FullRouteMatchesHandle {
   const [status, setStatus] = useState<FullRouteMatchStatus>('idle');
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [matches, setMatches] = useState<RouteMatch[]>([]);
   const [rejected, setRejected] = useState<RejectedCandidate[]>([]);
   const [fromCache, setFromCache] = useState(false);
@@ -88,6 +91,7 @@ export function useFullRouteMatches(
     if (!activity) return;
     const myRunId = ++runId.current;
     setStatus('scanning');
+    setProgress(null);
 
     const currentDate = activity.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
     const currentEntry = history.find(e =>
@@ -137,23 +141,41 @@ export function useFullRouteMatches(
     ];
     const rejectedList: RejectedCandidate[] = [];
 
+    setProgress({ done: 0, total: candidates.length });
+    let done = 0;
     for (const c of candidates) {
       if (myRunId !== runId.current) return; // une recherche plus récente a pris le relais
       try {
-        const raw = await loadFile(c);
-        const points = await parseActivityRawToPoints(raw, c.fileName);
-        const source = { points, date: c.date, name: c.name };
-        const currentSource = { points: activity.points, date: currentDate, name: activity.name };
-        const m = matchFullRoute(currentSource, source);
-        if (m) {
-          found.push({ attempt: m, entry: c });
+        if (c.routeGeometry && c.routeGeometry.length > 0) {
+          // Chemin rapide — géométrie déjà en cache Firestore (voir computeRouteGeometry), aucun
+          // téléchargement/reparsing nécessaire. Les stats du passage viennent directement de
+          // l'entrée d'index (déjà exactes : un match de trajet complet porte sur l'activité entière).
+          const cov = checkFullRouteCoverage(activity.points, c.routeGeometry);
+          if (cov.matches) {
+            found.push({ attempt: attemptFromEntry(c), entry: c });
+          } else if (cov.found) {
+            rejectedList.push({ name: c.name, date: c.date, found: cov.found, coverageCurrent: cov.coverageCurrent, coverageCandidate: cov.coverageCandidate });
+          }
         } else {
-          const dbg = debugRouteCoverage(currentSource, source);
-          rejectedList.push({ name: c.name, date: c.date, ...dbg });
+          // Filet de compatibilité — activité pas encore rétro-calculée avec la géométrie allégée
+          // (voir "Calculer les empreintes" dans CloudSync.tsx), on retélécharge comme avant.
+          const raw = await loadFile(c);
+          const points = await parseActivityRawToPoints(raw, c.fileName);
+          const source = { points, date: c.date, name: c.name };
+          const currentSource = { points: activity.points, date: currentDate, name: activity.name };
+          const m = matchFullRoute(currentSource, source);
+          if (m) {
+            found.push({ attempt: m, entry: c });
+          } else {
+            const dbg = debugRouteCoverage(currentSource, source);
+            rejectedList.push({ name: c.name, date: c.date, ...dbg });
+          }
         }
       } catch {
         // Fichier illisible/supprimé côté cloud — ignoré silencieusement.
       }
+      done++;
+      if (myRunId === runId.current) setProgress({ done, total: candidates.length });
     }
 
     if (myRunId !== runId.current) return;
@@ -161,6 +183,7 @@ export function useFullRouteMatches(
     setMatches(sorted);
     setRejected(rejectedList);
     setFromCache(false);
+    setProgress(null);
     const now = new Date().toISOString();
     setScannedAt(now);
     setStatus('done');
@@ -186,16 +209,17 @@ export function useFullRouteMatches(
 
   useEffect(() => {
     if (!activity) {
-      setMatches([]); setRejected([]); setStatus('idle'); setFromCache(false); setScannedAt(null);
+      setMatches([]); setRejected([]); setStatus('idle'); setFromCache(false); setScannedAt(null); setProgress(null);
       lastKeyRef.current = null;
       return;
     }
     const currentDate = activity.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
-    // `history.length` seul ne suffit pas : un rétro-calcul d'empreinte (voir CloudSync.tsx →
+    // `history.length` seul ne suffit pas : un rétro-calcul d'empreinte/géométrie (voir CloudSync.tsx →
     // "Calculer les empreintes") enrichit des entrées déjà présentes sans changer leur nombre —
-    // sans ce compte, une empreinte ajoutée après un premier scan ne déclencherait jamais de nouveau scan.
+    // sans ce compte, un rétro-calcul après un premier scan ne déclencherait jamais de nouveau scan.
     const withFingerprint = history.reduce((n, e) => n + (e.fingerprint ? 1 : 0), 0);
-    const key = `${currentDate}|${Math.round(activity.totalDistance)}|${history.length}|${withFingerprint}`;
+    const withGeometry = history.reduce((n, e) => n + (e.routeGeometry ? 1 : 0), 0);
+    const key = `${currentDate}|${Math.round(activity.totalDistance)}|${history.length}|${withFingerprint}|${withGeometry}`;
     if (key === lastKeyRef.current) return;
     lastKeyRef.current = key;
     runScan(false);
@@ -204,5 +228,5 @@ export function useFullRouteMatches(
 
   const rescan = useCallback(() => { runScan(true); }, [runScan]);
 
-  return { status, matches, rejected, fromCache, scannedAt, rescan };
+  return { status, progress, matches, rejected, fromCache, scannedAt, rescan };
 }

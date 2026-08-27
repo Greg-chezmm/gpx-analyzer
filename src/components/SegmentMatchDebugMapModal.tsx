@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import L from "leaflet";
 import { X } from "lucide-react";
 import type { SegmentPointRun } from "../utils/segments";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface MapPoint { lat: number; lon: number }
 
@@ -30,6 +31,7 @@ const NO_MATCH_COLOR = "#ef4444";
 export const SegmentMatchDebugMapModal: React.FC<Props> = ({ points, activityPoints, segmentName, extraInfo, onClose }) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const leafletRef = useRef<L.Map | null>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>(true);
 
   useEffect(() => {
     if (!mapRef.current || leafletRef.current || points.length === 0) return;
@@ -87,12 +89,18 @@ export const SegmentMatchDebugMapModal: React.FC<Props> = ({ points, activityPoi
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
-        background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
-        borderRadius: "var(--radius-lg)", width: "min(680px, 100%)",
-        maxHeight: "90vh", display: "flex", flexDirection: "column",
-        overflow: "hidden", boxShadow: "0 25px 50px rgba(0,0,0,0.35)",
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Diagnostic — ${segmentName}`}
+        tabIndex={-1}
+        style={{
+          background: "var(--bg-secondary)", border: "1px solid var(--border-color)",
+          borderRadius: "var(--radius-lg)", width: "min(680px, 100%)",
+          maxHeight: "90vh", display: "flex", flexDirection: "column",
+          overflow: "hidden", boxShadow: "0 25px 50px rgba(0,0,0,0.35)",
+        }}>
         <div style={{
           display: "flex", alignItems: "center", gap: "0.75rem",
           padding: "1rem 1.25rem", borderBottom: "1px solid var(--border-color)",
@@ -120,6 +128,8 @@ export const SegmentMatchDebugMapModal: React.FC<Props> = ({ points, activityPoi
           </div>
           <button
             onClick={onClose}
+            title="Fermer"
+            aria-label="Fermer"
             style={{
               background: "none", border: "none", cursor: "pointer",
               color: "var(--text-tertiary)", padding: "0.25rem",

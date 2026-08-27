@@ -839,9 +839,9 @@ h1, h2, h3, h4, h5, h6 {
 
   .chart-container { height: 260px; }
 
-  /* ActivityTabs: icon-only, tighter padding on mobile */
+  /* ActivityTabs: icon-only, tighter padding on mobile — min 40px pour la cible tactile */
   .activity-tab-btn span { display: none; }
-  .activity-tab-btn { padding: 9px; }
+  .activity-tab-btn { padding: 9px; min-width: 40px; min-height: 40px; justify-content: center; }
 
   /* Activity header stacks vertically on mobile — badge below title */
   .activity-header {

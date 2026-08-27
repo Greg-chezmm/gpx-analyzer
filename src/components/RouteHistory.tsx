@@ -80,7 +80,7 @@ function Row({ match, rank, displayName, activityType, onOpen, opening }: RowPro
  * seuils de matching est encore en rodage.
  */
 export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity, updateActivityMetaBatch }) => {
-  const { status, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch);
+  const { status, progress, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch);
   const [openingKey, setOpeningKey] = useState<string | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
 
@@ -118,10 +118,17 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
             title="Relancer une comparaison complète de tout l'historique"
             style={{ padding: "0.3rem 0.6rem", fontSize: "0.78rem" }}
           >
-            {status === "scanning"
-              ? <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
-              : <RefreshCw size={13} />}
-            <span>Actualiser</span>
+            {status === "scanning" ? (
+              <>
+                <Loader2 size={13} style={{ animation: "spin 0.8s linear infinite" }} />
+                <span>{progress && progress.total > 0 ? `${progress.done}/${progress.total}` : "Actualiser"}</span>
+              </>
+            ) : (
+              <>
+                <RefreshCw size={13} />
+                <span>Actualiser</span>
+              </>
+            )}
           </button>
         )}
       </div>
@@ -130,6 +137,7 @@ export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayNam
         <p style={{ fontSize: "0.82rem", color: "var(--text-tertiary)", display: "flex", alignItems: "center", gap: "0.4rem" }}>
           <Loader2 size={14} style={{ animation: "spin 0.8s linear infinite" }} />
           Recherche de trajets similaires dans l'historique…
+          {progress && progress.total > 0 && ` (${progress.done}/${progress.total})`}
         </p>
       )}
 

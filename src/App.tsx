@@ -45,7 +45,6 @@ import { ActivityTabs, type ActivityTabId } from "./components/ActivityTabs";
 import { AISummaryModal } from "./components/AISummary";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AthleteSettingsButton } from "./components/AthleteSettings";
-import { DriveSaveButton } from "./components/DriveSync";
 import { CloudSyncButton, CloudSaveButton, CloudActivityList } from "./components/CloudSync";
 import type { ActivityIndexEntry } from "./utils/driveStorage";
 import { ActivityNameEditor } from "./components/ActivityNameEditor";
@@ -57,7 +56,7 @@ import { DataQuality } from "./components/DataQuality";
 import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, entryToWeather, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts, aggregateBestRunEfforts } from "./utils/bestEfforts";
-import { computeFingerprint, matchStoredSegmentAll, toCachedAttempt } from "./utils/segments";
+import { computeFingerprint, computeRouteGeometry, matchStoredSegmentAll, toCachedAttempt } from "./utils/segments";
 import { useSegmentPicker } from "./hooks/useSegmentPicker";
 import { useStoredSegments } from "./hooks/useStoredSegments";
 
@@ -97,7 +96,6 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [showAISummary, setShowAISummary] = useState(false);
   const [rawFileData, setRawFileData] = useState<string | ArrayBuffer | null>(null);
-  const [savedToDrive, setSavedToDrive] = useState(false);
   const [savedToCloud, setSavedToCloud] = useState(false);
   const [customActivityName, setCustomActivityName] = useState<string>('');
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
@@ -350,7 +348,6 @@ function App() {
         setHoveredPointIndex(null);
         setSplitDistance(1000);
         setRawFileData(data);
-        setSavedToDrive(false);
         setSavedToCloud(false);
         setOverrideActivityType(null);
         segmentPicker.reset();
@@ -377,7 +374,6 @@ function App() {
     setHoveredPointIndex(null);
     setSplitDistance(1000);
     setRawFileData(null);
-    setSavedToDrive(false);
     setSavedToCloud(false);
     setMergeNotice(null);
     setOverrideActivityType(null);
@@ -403,7 +399,6 @@ function App() {
       const { activity: merged, info } = mergeActivities(activity, second);
       setActivity(merged);
       setMergeNotice(info);
-      setSavedToDrive(false);
       setSavedToCloud(false);
       // rawFileData devient le GPX fusionné — sauvegarde l'activité complète.
       const mergedGpx = exportToGPX(merged, merged.fitLaps ?? null);
@@ -424,8 +419,7 @@ function App() {
   const handleRename = (newName: string) => {
     if (!enrichedActivity) return;
     setCustomActivityName(newName);
-    setSavedToDrive(false); // permet une re-sauvegarde avec le nouveau nom
-    setSavedToCloud(false);
+    setSavedToCloud(false); // permet une re-sauvegarde avec le nouveau nom
   };
 
   /** Construit les métadonnées analytiques communes aux sauvegardes Drive et cloud. */
@@ -462,6 +456,7 @@ function App() {
       avgCadence: enrichedActivity.avgCadence ?? undefined,
       bestEfforts: computeBestEfforts(enrichedActivity.points, enrichedActivity.activityType) ?? undefined,
       fingerprint: computeFingerprint(enrichedActivity.points),
+      routeGeometry: computeRouteGeometry(enrichedActivity.points),
       ...weatherToEntryFields(weather),
     };
   };
@@ -488,21 +483,14 @@ function App() {
     }
   };
 
-  /** Sauvegarde l'activité courante sur Firebase (source principale). */
+  /** Sauvegarde l'activité courante — métadonnées Firestore + fichier brut Drive, et un filet de
+   * sécurité indépendant de Firestore (voir useFirebaseCloud.ts → save / mirrorToLegacyIndex). */
   const handleSaveToCloud = async () => {
     const meta = buildActivityMeta();
     if (!rawFileData || !meta) return;
     await cloud.save(rawFileData, fileName, meta);
     setSavedToCloud(true);
     await mergeIntoStoredSegments();
-  };
-
-  /** Sauvegarde l'activité courante sur Google Drive (export manuel de secours). */
-  const handleSaveToDrive = async () => {
-    const meta = buildActivityMeta();
-    if (!rawFileData || !meta) return;
-    await drive.save(rawFileData, fileName, meta);
-    setSavedToDrive(true);
   };
 
   /** Formate une date en français long + heure (ex. « 7 juin 2025 à 08:30 »). */
@@ -576,11 +564,7 @@ function App() {
           </button>
           <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} driveHistory={drive.history} />
           {enrichedActivity && (
-            <>
-              <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
-              {/* Drive gardé en export manuel de secours (copie indépendante de Firestore) */}
-              <DriveSaveButton drive={drive} onSave={handleSaveToDrive} alreadySaved={savedToDrive} />
-            </>
+            <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
           )}
           {enrichedActivity && (
             <button type="button" className="btn btn-outline"

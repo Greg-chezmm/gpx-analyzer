@@ -39,16 +39,36 @@ export function geohashEncode(lat: number, lon: number, precision = FINGERPRINT_
   return hash;
 }
 
-/** Calcule l'empreinte géographique d'un tracé : ensemble dédupliqué de cellules geohash traversées. */
-export function computeFingerprint(points: GeoPoint[]): string[] {
-  const cells = new Set<string>();
+/** Échantillonne un tracé tous les `FINGERPRINT_STEP_M` mètres — base commune à l'empreinte geohash
+ * (`computeFingerprint`) et à la géométrie allégée stockée pour le matching de trajet complet sans
+ * téléchargement (`computeRouteGeometry`). */
+function sampleRoutePoints(points: GeoPoint[]): GeoPoint[] {
+  const out: GeoPoint[] = [];
   let lastDist = -Infinity;
   for (const p of points) {
     if (p.distFromStart - lastDist < FINGERPRINT_STEP_M) continue;
     lastDist = p.distFromStart;
-    cells.add(geohashEncode(p.lat, p.lon));
+    out.push({ lat: p.lat, lon: p.lon, distFromStart: p.distFromStart });
   }
-  return Array.from(cells);
+  return out;
+}
+
+/** Calcule l'empreinte géographique d'un tracé : ensemble dédupliqué de cellules geohash traversées. */
+export function computeFingerprint(points: GeoPoint[]): string[] {
+  return Array.from(new Set(sampleRoutePoints(points).map(p => geohashEncode(p.lat, p.lon))));
+}
+
+/**
+ * Géométrie allégée d'un tracé (points échantillonnés tous les ~25m, lat/lon/distFromStart
+ * uniquement — pas de FC/altitude/temps), stockée sur `ActivityIndexEntry.routeGeometry` pour
+ * permettre à `checkFullRouteCoverage` de comparer deux trajets complets directement depuis
+ * Firestore, sans télécharger ni reparser le fichier brut sur Drive (voir useFullRouteMatches.ts).
+ * Suffisant pour la décision de matching (corridor/cap, voir computeRuns) mais pas pour les stats
+ * d'un passage partiel (FC/D+ d'un simple tronçon) — les segments manuels continuent de télécharger
+ * le fichier complet.
+ */
+export function computeRouteGeometry(points: GeoPoint[]): GeoPoint[] {
+  return sampleRoutePoints(points);
 }
 
 /** Score de recouvrement entre deux empreintes (coefficient de chevauchement, 0-1) — tolère qu'un tracé soit un sous-ensemble de l'autre. */
@@ -686,25 +706,50 @@ const FULL_ROUTE_COVERAGE = 0.9;
  * (boucle ajoutée, coupure GPS) — sinon un même trajet réel peut apparaître fragmenté en deux
  * moitiés dont aucune ne dépasse le seuil individuellement.
  */
-export function matchFullRoute(current: SegmentSource, candidate: SegmentSource, isCurrent = false): SegmentAttempt | null {
-  const totalCurrent = current.points[current.points.length - 1]?.distFromStart ?? 0;
-  const totalCandidate = candidate.points[candidate.points.length - 1]?.distFromStart ?? 0;
-  if (totalCurrent <= 0 || totalCandidate <= 0) return null;
-
-  const coverage = computeTotalCoverage(current.points, candidate.points);
-  if (!coverage) return null;
-  if (coverage.distA / totalCurrent < FULL_ROUTE_COVERAGE) return null;
-  if (coverage.distB / totalCandidate < FULL_ROUTE_COVERAGE) return null;
-
-  return buildAttempt(candidate.points, 0, candidate.points.length - 1, candidate.date, candidate.name, isCurrent);
-}
-
 /** Diagnostic d'une comparaison de trajet — pourquoi une candidate a (ou n'a pas) été retenue. */
 export interface RouteCoverageDebug {
   /** Au moins un run a été trouvé, même si la couverture cumulée ne passe pas le seuil ensuite. */
   found: boolean;
   coverageCurrent: number;   // 0-1
   coverageCandidate: number; // 0-1
+}
+
+/** Résultat de `checkFullRouteCoverage` — `matches` tranche déjà sur le seuil `FULL_ROUTE_COVERAGE`. */
+export interface RouteCoverageResult extends RouteCoverageDebug {
+  matches: boolean;
+}
+
+/**
+ * Vérifie si deux tracés suivent le même trajet complet, à partir de leur seule géométrie
+ * (lat/lon/distFromStart) — ne nécessite ni FC/altitude/temps ni donc le fichier brut complet :
+ * fonctionne aussi bien avec `GPXTrackPoint[]` (activité en mémoire) qu'avec la géométrie allégée
+ * `ActivityIndexEntry.routeGeometry` mise en cache sur Firestore (voir computeRouteGeometry).
+ * Factorisé entre `matchFullRoute` (télécharge et construit un `SegmentAttempt` complet) et le
+ * chemin rapide de `useFullRouteMatches.ts` (aucun téléchargement, stats reconstruites depuis
+ * l'entrée d'index déjà en mémoire via `attemptFromEntry`).
+ */
+export function checkFullRouteCoverage(currentPoints: GeoPoint[], candidatePoints: GeoPoint[]): RouteCoverageResult {
+  const totalCurrent = currentPoints[currentPoints.length - 1]?.distFromStart ?? 0;
+  const totalCandidate = candidatePoints[candidatePoints.length - 1]?.distFromStart ?? 0;
+  if (totalCurrent <= 0 || totalCandidate <= 0) return { matches: false, found: false, coverageCurrent: 0, coverageCandidate: 0 };
+
+  const coverage = computeTotalCoverage(currentPoints, candidatePoints);
+  if (!coverage) return { matches: false, found: false, coverageCurrent: 0, coverageCandidate: 0 };
+  const coverageCurrent = coverage.distA / totalCurrent;
+  const coverageCandidate = coverage.distB / totalCandidate;
+  const matches = coverageCurrent >= FULL_ROUTE_COVERAGE && coverageCandidate >= FULL_ROUTE_COVERAGE;
+  return { matches, found: true, coverageCurrent, coverageCandidate };
+}
+
+/**
+ * Compare deux trajets complets en téléchargeant/reconstruisant les stats du candidat depuis ses
+ * points complets (FC/D+/allure du passage) — voir `checkFullRouteCoverage` pour la seule décision
+ * de matching, utilisée sans téléchargement quand `routeGeometry` est déjà en cache.
+ */
+export function matchFullRoute(current: SegmentSource, candidate: SegmentSource, isCurrent = false): SegmentAttempt | null {
+  const cov = checkFullRouteCoverage(current.points, candidate.points);
+  if (!cov.matches) return null;
+  return buildAttempt(candidate.points, 0, candidate.points.length - 1, candidate.date, candidate.name, isCurrent);
 }
 
 /**
@@ -714,13 +759,7 @@ export interface RouteCoverageDebug {
  * (found=true, ex. un vrai détour partiel plutôt qu'une simple fragmentation GPS).
  */
 export function debugRouteCoverage(current: SegmentSource, candidate: SegmentSource): RouteCoverageDebug {
-  const totalCurrent = current.points[current.points.length - 1]?.distFromStart ?? 0;
-  const totalCandidate = candidate.points[candidate.points.length - 1]?.distFromStart ?? 0;
-  if (totalCurrent <= 0 || totalCandidate <= 0) return { found: false, coverageCurrent: 0, coverageCandidate: 0 };
-
-  const coverage = computeTotalCoverage(current.points, candidate.points);
-  if (!coverage) return { found: false, coverageCurrent: 0, coverageCandidate: 0 };
-  return { found: true, coverageCurrent: coverage.distA / totalCurrent, coverageCandidate: coverage.distB / totalCandidate };
+  return checkFullRouteCoverage(current.points, candidate.points);
 }
 
 /** Parse un fichier brut (GPX texte ou FIT binaire) en points enrichis — utilisé pour reconstruire une activité historique le temps du matching. */

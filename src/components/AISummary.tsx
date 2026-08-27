@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { X, Copy, Check, ExternalLink, Sparkles } from "lucide-react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 
 interface AISummaryProps {
   text: string;
@@ -11,6 +12,7 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
   const [copied, setCopied] = useState(false);
   const [context, setContext] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>(true);
 
   // Fermeture clavier via Escape.
   useEffect(() => {
@@ -40,16 +42,22 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
       }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
-        background: "var(--bg-secondary)",
-        border: "1px solid var(--border-color)",
-        borderRadius: "var(--radius-lg)",
-        width: "min(720px, 100%)",
-        maxHeight: "90vh",
-        display: "flex", flexDirection: "column",
-        overflow: "hidden",
-        boxShadow: "0 25px 50px rgba(0,0,0,0.35)",
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Résumé prêt pour l'IA"
+        tabIndex={-1}
+        style={{
+          background: "var(--bg-secondary)",
+          border: "1px solid var(--border-color)",
+          borderRadius: "var(--radius-lg)",
+          width: "min(720px, 100%)",
+          maxHeight: "90vh",
+          display: "flex", flexDirection: "column",
+          overflow: "hidden",
+          boxShadow: "0 25px 50px rgba(0,0,0,0.35)",
+        }}>
         {/* En-tête */}
         <div style={{
           display: "flex", alignItems: "center", gap: "0.75rem",
@@ -65,7 +73,7 @@ export const AISummaryModal: React.FC<AISummaryProps> = ({ text, onClose }) => {
               Modifie le texte si besoin, puis copie-le dans Claude.ai, ChatGPT ou Gemini
             </div>
           </div>
-          <button onClick={onClose} style={{
+          <button onClick={onClose} title="Fermer" aria-label="Fermer" style={{
             background: "none", border: "none", cursor: "pointer",
             color: "var(--text-tertiary)", padding: "0.25rem",
             display: "flex", alignItems: "center", borderRadius: "var(--radius-sm)",

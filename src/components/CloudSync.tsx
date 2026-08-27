@@ -1,12 +1,13 @@
-import { useState, type MouseEvent } from 'react';
+import { useState, useEffect, type MouseEvent } from 'react';
 import { CloudUpload, Download, Loader2, X, History, Trash2, Flag, Search, Zap, Flame, FolderDown } from 'lucide-react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 import type { CloudHandle } from '../hooks/useFirebaseCloud';
 import type { ActivityIndexEntry } from '../utils/driveStorage';
 import { entryToWeather, type WeatherInfo } from '../utils/weather';
 import { parseGPX, type GPXTrackPoint } from '../utils/gpxCore';
 import { computeBestEfforts } from '../utils/bestEfforts';
 import { calcTRIMP } from '../utils/trainingMetrics';
-import { computeFingerprint } from '../utils/segments';
+import { computeFingerprint, computeRouteGeometry } from '../utils/segments';
 
 /** Reparse une activité (GPX ou FIT) depuis son contenu brut. */
 async function parseEntryPoints(entry: ActivityIndexEntry, data: ArrayBuffer | string): Promise<GPXTrackPoint[]> {
@@ -23,6 +24,7 @@ function computeDerivedFields(entry: ActivityIndexEntry, points: GPXTrackPoint[]
     bestEfforts: computeBestEfforts(points, entry.activityType) ?? undefined,
     zoneMinutes: calcTRIMP(points, fcMax, fcRest)?.zoneMinutes,
     fingerprint: computeFingerprint(points),
+    routeGeometry: computeRouteGeometry(points),
   };
 }
 
@@ -340,19 +342,19 @@ export function CloudActivityList({ cloud, onLoad, fcMax, fcRest }: CloudActivit
                 {isConfirming ? (
                   <>
                     <button type="button" onClick={() => handleDelete(entry, key)} title="Confirmer la suppression"
-                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                      style={{ padding: '0.45rem 0.6rem', minHeight: '32px', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
                       Supprimer
                     </button>
                     <button type="button" onClick={() => setConfirmKey(null)} title="Annuler"
-                      style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                      style={{ padding: '0.45rem 0.6rem', minHeight: '32px', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
                       Annuler
                     </button>
                   </>
                 ) : isDeleting ? (
                   <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
                 ) : (
-                  <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer"
-                    style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center' }}
+                  <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer" aria-label="Supprimer cette activité"
+                    style={{ padding: '0.35rem', minWidth: '32px', minHeight: '32px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                     onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
                     onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
                   >
@@ -382,9 +384,21 @@ interface CloudHistoryPanelProps {
 
 /** Panneau latéral pleine hauteur listant toutes les activités cloud — chargement, suppression, recherche. */
 function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, driveHistory }: CloudHistoryPanelProps) {
+  const dialogRef = useFocusTrap<HTMLDivElement>(true);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
   const [confirmKey, setConfirmKey] = useState<string | null>(null);
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  // Filtrage debouncé (300 ms) — évite de refiltrer tout l'historique à chaque frappe sur un gros historique/mobile.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 300);
+    return () => clearTimeout(timer);
+  }, [query]);
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [importResult, setImportResult] = useState<{ imported: number; skipped: number } | null>(null);
   const [backfillProgress, setBackfillProgress] = useState<{ done: number; total: number } | null>(null);
@@ -403,21 +417,24 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
     }
   };
 
-  // Activités sans empreinte géographique (calculée uniquement depuis l'ajout de la comparaison
-  // de trajets/segments) — ex. tout l'historique importé depuis Drive avant cette fonctionnalité.
-  const missingFingerprint = cloud.history.filter(e => !e.fingerprint);
+  // Activités sans empreinte géographique OU sans géométrie allégée (calculées uniquement depuis
+  // l'ajout de la comparaison de trajets/segments) — ex. tout l'historique importé depuis Drive
+  // avant ces fonctionnalités, ou sauvegardé avant l'ajout de routeGeometry (voir segments.ts).
+  const missingGeometry = cloud.history.filter(e => !e.fingerprint || !e.routeGeometry);
 
   /**
-   * Recalcule empreinte + meilleurs efforts + zones FC pour toutes les activités qui n'ont pas encore
-   * d'empreinte — un seul téléchargement par activité sert aux trois calculs. Séquentiel (pas en
-   * parallèle) pour ne pas saturer l'API Drive avec des dizaines de téléchargements simultanés.
+   * Recalcule empreinte + géométrie allégée + meilleurs efforts + zones FC pour toutes les activités
+   * qui n'ont pas encore les deux premiers — un seul téléchargement par activité sert aux quatre
+   * calculs. Séquentiel (pas en parallèle) pour ne pas saturer l'API Drive avec des dizaines de
+   * téléchargements simultanés. Une fois fait, "Ton parcours habituel" n'a plus besoin de retélécharger
+   * cette activité pour la comparer (voir checkFullRouteCoverage dans useFullRouteMatches.ts).
    */
   const handleBackfill = async () => {
     setBackfillResult(null);
-    const total = missingFingerprint.length;
+    const total = missingGeometry.length;
     setBackfillProgress({ done: 0, total });
     let done = 0, failed = 0;
-    for (const entry of missingFingerprint) {
+    for (const entry of missingGeometry) {
       try {
         const data = await cloud.loadFile(entry);
         const points = await parseEntryPoints(entry, data);
@@ -434,7 +451,7 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
 
   /** Filtre une activité sur son nom, sa date (fr) ou sa discipline. */
   const matchesQuery = (entry: ActivityIndexEntry) => {
-    const q = query.trim().toLowerCase();
+    const q = debouncedQuery.trim().toLowerCase();
     if (!q) return true;
     const dateStr = new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(entry.date));
     const typeStr = entry.activityType === 'cycling' ? 'vélo cyclisme' : 'course running';
@@ -467,11 +484,17 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
       }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div style={{
-        width: '420px', maxWidth: '100vw', height: '100vh',
-        background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-color)',
-        display: 'flex', flexDirection: 'column', overflowY: 'auto',
-      }}>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Activités sauvegardées"
+        tabIndex={-1}
+        style={{
+          width: '420px', maxWidth: '100vw', height: '100vh',
+          background: 'var(--bg-secondary)', borderLeft: '1px solid var(--border-color)',
+          display: 'flex', flexDirection: 'column', overflowY: 'auto',
+        }}>
         <div style={{
           padding: '1.25rem 1.5rem', borderBottom: '1px solid var(--border-color)',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -490,11 +513,12 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
             </div>
           </div>
           <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button type="button" className="btn btn-outline" onClick={cloud.signOut} title="Déconnecter"
+            <button type="button" className="btn btn-outline" onClick={cloud.signOut} title="Déconnecter" aria-label="Déconnecter"
               style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               <X size={13} />
             </button>
-            <button type="button" className="btn btn-outline" onClick={onClose} style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}>
+            <button type="button" className="btn btn-outline" onClick={onClose} title="Fermer" aria-label="Fermer"
+              style={{ padding: '0.4rem 0.6rem', fontSize: '0.8rem' }}>
               <X size={15} />
             </button>
           </div>
@@ -525,10 +549,10 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
           </div>
         )}
 
-        {missingFingerprint.length > 0 && (
+        {missingGeometry.length > 0 && (
           <div style={{ padding: '0.75rem 1.5rem', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-secondary)' }}>
             <button type="button" onClick={handleBackfill} disabled={!!backfillProgress}
-              title="Télécharge et reparse chaque activité pour calculer son empreinte géographique (nécessaire à la comparaison de trajets et aux segments), ainsi que les meilleurs efforts et zones FC si absents"
+              title="Télécharge et reparse chaque activité pour calculer sa géométrie (nécessaire à la comparaison de trajets et aux segments — une fois faite, plus besoin de retélécharger cette activité pour la comparer), ainsi que les meilleurs efforts et zones FC si absents"
               style={{
                 width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem',
                 padding: '0.5rem', fontSize: '0.82rem', fontWeight: 600,
@@ -538,7 +562,7 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
               }}>
               {backfillProgress
                 ? <><Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> Analyse… {backfillProgress.done}/{backfillProgress.total}</>
-                : <><Zap size={14} /> Calculer les empreintes ({missingFingerprint.length} activité{missingFingerprint.length > 1 ? 's' : ''})</>
+                : <><Zap size={14} /> Calculer les empreintes ({missingGeometry.length} activité{missingGeometry.length > 1 ? 's' : ''})</>
               }
             </button>
             {backfillResult && (
@@ -563,7 +587,7 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
                 }}
               />
               {query && (
-                <button type="button" onClick={() => setQuery('')} title="Effacer"
+                <button type="button" onClick={() => setQuery('')} title="Effacer" aria-label="Effacer la recherche"
                   style={{ position: 'absolute', right: '0.4rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', display: 'flex', padding: '0.2rem' }}>
                   <X size={13} />
                 </button>
@@ -646,19 +670,19 @@ function CloudHistoryPanel({ cloud, loadingId, onLoad, onClose, fcMax, fcRest, d
                       {isConfirming ? (
                         <>
                           <button type="button" onClick={() => handleDelete(entry, key)} title="Confirmer la suppression"
-                            style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                            style={{ padding: '0.45rem 0.6rem', minHeight: '32px', fontSize: '0.75rem', fontWeight: 700, background: '#ef4444', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
                             Supprimer
                           </button>
                           <button type="button" onClick={() => setConfirmKey(null)} title="Annuler"
-                            style={{ padding: '0.3rem 0.5rem', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
+                            style={{ padding: '0.45rem 0.6rem', minHeight: '32px', fontSize: '0.75rem', background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', cursor: 'pointer' }}>
                             Annuler
                           </button>
                         </>
                       ) : isDeleting ? (
                         <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite', color: '#ef4444' }} />
                       ) : (
-                        <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer"
-                          style={{ padding: '0.35rem', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center' }}
+                        <button type="button" onClick={e => { e.stopPropagation(); setConfirmKey(key); }} title="Supprimer" aria-label="Supprimer cette activité"
+                          style={{ padding: '0.35rem', minWidth: '32px', minHeight: '32px', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                           onMouseEnter={e => (e.currentTarget.style.color = '#ef4444')}
                           onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-tertiary)')}
                         >

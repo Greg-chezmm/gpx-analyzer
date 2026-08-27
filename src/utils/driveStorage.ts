@@ -1,5 +1,6 @@
 import type { WeatherSource } from './weather';
 import type { BestEffortsData } from './bestEfforts';
+import type { GeoPoint } from './segments';
 
 /**
  * Entrée d'activité — Google Drive seul (`fileId` = index legacy) ou solution hybride cloud
@@ -54,6 +55,12 @@ export interface ActivityIndexEntry {
   // segments récurrents, voir utils/segments.ts. Absente sur les activités sauvegardées avant
   // l'ajout de cette fonctionnalité.
   fingerprint?: string[];
+  // Géométrie allégée du tracé (mêmes points échantillonnés que fingerprint, mais lat/lon/distance
+  // gardés au lieu du hash) — permet à "Ton parcours habituel" de comparer deux trajets complets
+  // sans télécharger/reparser le fichier brut, voir computeRouteGeometry/checkFullRouteCoverage
+  // dans utils/segments.ts. Absente sur les activités sauvegardées avant l'ajout de cette
+  // fonctionnalité (rétro-calcul via "Calculer les empreintes" dans CloudSync.tsx).
+  routeGeometry?: GeoPoint[];
   // Cache "Ton parcours habituel" (voir hooks/useFullRouteMatches.ts) — cloudId des autres
   // activités identifiées comme suivant le même trajet complet, évite de rescanner tout
   // l'historique à chaque ouverture. Mis à jour réciproquement sur chaque activité du groupe
@@ -147,12 +154,17 @@ async function saveIndex(token: string, folderId: string, id: string | null, dat
   });
 }
 
-/** Uploade un fichier d'activité (GPX ou FIT) sur Drive et met à jour l'index. Si l'activité existe déjà (même date+nom), seules les métadonnées sont rafraîchies sans ré-upload. */
-export async function uploadActivity(
+/**
+ * Ajoute (ou rafraîchit) une entrée dans l'ancien index Drive (activities-index.json) en réutilisant
+ * un fichier déjà uploadé par le flux hybride Firestore (`fileId`) — aucun second upload, juste un
+ * filet de sécurité indépendant de Firestore (voir useFirebaseCloud.ts → save). Remplace l'ancien
+ * bouton "Exporter (Drive)" séparé, qui uploadait un second fichier en double — fusionné dans la
+ * sauvegarde principale à la demande de Greg (2026-08-27, deux boutons de sauvegarde jugés confus).
+ */
+export async function mirrorToLegacyIndex(
   token: string,
-  rawData: string | ArrayBuffer,
-  fileName: string,
-  entry: Omit<ActivityIndexEntry, 'fileId'>
+  fileId: string,
+  entry: Omit<ActivityIndexEntry, 'fileId'>,
 ): Promise<void> {
   const folderId = await getOrCreateFolder(token);
   const { id: indexId, data: index } = await loadIndex(token, folderId);
@@ -164,30 +176,10 @@ export async function uploadActivity(
   }
 
   if (existingIdx >= 0) {
-    // Update metadata only — keep the existing file reference, no re-upload
-    index.activities[existingIdx] = {
-      ...index.activities[existingIdx],
-      ...entry,
-      fileId: index.activities[existingIdx].fileId,
-    };
-    await saveIndex(token, folderId, indexId, index);
-    return;
+    index.activities[existingIdx] = { ...index.activities[existingIdx], ...entry, fileId };
+  } else {
+    index.activities.unshift({ ...entry, fileId });
   }
-
-  const isFit = fileName.toLowerCase().endsWith('.fit');
-  const mime = isFit ? 'application/octet-stream' : 'application/gpx+xml';
-  const boundary = 'gpxanalyzer_file_271828';
-  const fileMeta = { name: fileName, parents: [folderId], mimeType: mime };
-  const fileBody = buildMultipart(boundary, fileMeta, rawData, mime);
-
-  const r = await req(`${BASE}/upload/drive/v3/files?uploadType=multipart&fields=id`, token, {
-    method: 'POST',
-    headers: { 'Content-Type': `multipart/related; boundary="${boundary}"` },
-    body: fileBody,
-  });
-  const { id: fileId } = await r.json() as { id: string };
-
-  index.activities.unshift({ ...entry, fileId });
   await saveIndex(token, folderId, indexId, index);
 }
 

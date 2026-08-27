@@ -4,7 +4,7 @@ import {
   updateCloudActivityMeta, deleteCloudActivityDoc,
 } from '../utils/firestoreStorage';
 import {
-  uploadRawFileToDrive, fetchActivityFile, deleteRawFileFromDrive,
+  uploadRawFileToDrive, fetchActivityFile, deleteRawFileFromDrive, mirrorToLegacyIndex,
   type ActivityIndexEntry,
 } from '../utils/driveStorage';
 import { isFirebaseConfigured } from '../utils/firebase';
@@ -95,6 +95,9 @@ export function useFirebaseCloud(auth: ReturnType<typeof useFirebaseAuth>, drive
       } else {
         await createCloudActivityMeta(auth.user.uid, { ...meta, fileId });
       }
+      // Filet de sécurité indépendant de Firestore — réutilise le même fichier Drive, pas de second
+      // upload. Best-effort : ne doit jamais faire échouer la sauvegarde principale ci-dessus.
+      mirrorToLegacyIndex(driveToken, fileId, meta).catch(() => {});
       await refresh();
     } finally {
       setIsSaving(false);
