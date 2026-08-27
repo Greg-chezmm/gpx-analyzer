@@ -2,6 +2,7 @@ import React from "react";
 import { Gauge } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { formatDuration, formatPace } from "../utils/format";
+import { NumericStepper } from "./NumericStepper";
 
 interface PaceZonesProps {
   points: GPXTrackPoint[];
@@ -31,37 +32,6 @@ function fmtPace(speedMs: number): string {
   if (speedMs <= 0) return "–";
   return formatPace(1000 / speedMs);
 }
-
-/** Stepper +/− pour régler la VMA en km/h par paliers de 0,5. */
-const Stepper: React.FC<{
-  value: number; min: number; max: number; step: number;
-  onChange: (v: number) => void;
-}> = ({ value, min, max, step, onChange }) => {
-  const dec = () => { if (value > min) onChange(Math.max(min, parseFloat((value - step).toFixed(1)))); };
-  const inc = () => { if (value < max) onChange(Math.min(max, parseFloat((value + step).toFixed(1)))); };
-  const btn: React.CSSProperties = {
-    width: "32px", height: "32px", border: "none", background: "transparent",
-    cursor: "pointer", color: "var(--color-speed)", fontWeight: 800, fontSize: "1.1rem",
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-  };
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>VMA :</span>
-      <div style={{
-        display: "flex", alignItems: "center",
-        border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)",
-        background: "var(--color-speed-light)", overflow: "hidden",
-      }}>
-        <button type="button" onClick={dec} disabled={value <= min} style={btn} aria-label="Diminuer VMA">−</button>
-        <span style={{ minWidth: "44px", textAlign: "center", fontSize: "0.95rem", fontWeight: 700, color: "var(--color-speed)", fontFamily: "var(--font-heading)" }}>
-          {value.toFixed(1)}
-        </span>
-        <button type="button" onClick={inc} disabled={value >= max} style={btn} aria-label="Augmenter VMA">+</button>
-      </div>
-      <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>km/h</span>
-    </div>
-  );
-};
 
 /** Affiche les zones d'allure Z1–Z5 en % VMA avec stepper VMA réactif et plages allure /km. */
 export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }) => {
@@ -99,7 +69,11 @@ export const PaceZones: React.FC<PaceZonesProps> = ({ points, vma, onVmaChange }
             · % VMA
           </span>
         </h3>
-        <Stepper value={vma} min={10} max={30} step={0.5} onChange={onVmaChange} />
+        <NumericStepper
+          id="vma-input" label="VMA :" value={vma} min={10} max={30} step={0.5} decimals={1} unit="km/h"
+          color="var(--color-speed)" colorLight="var(--color-speed-light)"
+          onChange={onVmaChange}
+        />
       </div>
 
       {/* Barre empilée proportionnelle au temps total */}

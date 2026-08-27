@@ -78,6 +78,7 @@ export function useStoredSegmentScan(
     setProgress({ done: 0, total: candidates.length });
     let done = 0;
     for (const c of candidates) {
+      if (myRunId !== runId.current) return; // un nouveau scan (ou segment) a pris le relais
       try {
         const raw = await loadFile(c.entry);
         const points = await parseActivityRawToPoints(raw, c.entry.fileName);

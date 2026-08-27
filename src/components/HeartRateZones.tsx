@@ -3,6 +3,7 @@ import { Heart } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { karvonenBounds } from "../utils/gpxParser";
 import { formatDuration } from "../utils/format";
+import { NumericStepper } from "./NumericStepper";
 
 interface HeartRateZonesProps {
   points: GPXTrackPoint[];
@@ -41,44 +42,6 @@ function getZoneIndex(hr: number, bounds: number[]): number {
   return 0;
 }
 
-/** Stepper +/− réactif pour saisir FC max ou FC repos. */
-const NumberInput: React.FC<{
-  id: string; label: string; value: number; min: number; max: number; unit: string;
-  color: string; colorLight: string; onChange: (v: number) => void;
-}> = ({ id, label, value, min, max, unit, color, colorLight, onChange }) => {
-  const dec = () => { if (value > min) onChange(value - 1); };
-  const inc = () => { if (value < max) onChange(value + 1); };
-  const btnStyle: React.CSSProperties = {
-    width: "32px", height: "32px", border: "none", background: "transparent",
-    cursor: "pointer", color, fontWeight: 800, fontSize: "1.1rem", lineHeight: 1,
-    display: "flex", alignItems: "center", justifyContent: "center",
-    flexShrink: 0,
-  };
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-      <label htmlFor={id} style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>
-        {label}
-      </label>
-      <div style={{
-        display: "flex", alignItems: "center",
-        border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)",
-        background: colorLight, overflow: "hidden",
-      }}>
-        <button type="button" onClick={dec} disabled={value <= min} style={btnStyle} aria-label={`Diminuer ${label}`}>−</button>
-        <span id={id} style={{
-          minWidth: "44px", textAlign: "center",
-          fontSize: "0.95rem", fontWeight: 700, color,
-          fontFamily: "var(--font-heading)",
-        }}>
-          {value}
-        </span>
-        <button type="button" onClick={inc} disabled={value >= max} style={btnStyle} aria-label={`Augmenter ${label}`}>+</button>
-      </div>
-      <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>{unit}</span>
-    </div>
-  );
-};
-
 /** Affiche les zones de fréquence cardiaque Z1–Z5 (méthode Karvonen) avec steppers FC max / FC repos réactifs. */
 export const HeartRateZones: React.FC<HeartRateZonesProps> = ({
   points, fcMax, fcRest, onFcMaxChange, onFcRestChange,
@@ -112,12 +75,12 @@ export const HeartRateZones: React.FC<HeartRateZonesProps> = ({
           </span>
         </h3>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
-          <NumberInput
+          <NumericStepper
             id="fcmax-input" label="FC max :" value={fcMax} min={100} max={230} unit="bpm"
             color="var(--color-hr)" colorLight="var(--color-hr-light)"
             onChange={onFcMaxChange}
           />
-          <NumberInput
+          <NumericStepper
             id="fcrest-input" label="FC repos :" value={fcRest} min={30} max={100} unit="bpm"
             color="#a78bfa" colorLight="#f5f3ff"
             onChange={onFcRestChange}

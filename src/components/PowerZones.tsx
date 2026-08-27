@@ -2,6 +2,7 @@ import React from "react";
 import { Zap } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { formatDuration } from "../utils/format";
+import { NumericStepper } from "./NumericStepper";
 
 interface PowerZonesProps {
   points: GPXTrackPoint[];
@@ -37,37 +38,6 @@ function getZoneIndex(power: number, ftp: number): number {
   }
   return 0;
 }
-
-/** Stepper +/− pour régler le FTP par paliers configurables. */
-const Stepper: React.FC<{
-  label: string; value: number; min: number; max: number; step: number; unit: string;
-  color: string; colorLight: string; onChange: (v: number) => void;
-}> = ({ label, value, min, max, step, unit, color, colorLight, onChange }) => {
-  const dec = () => { if (value > min) onChange(Math.max(min, value - step)); };
-  const inc = () => { if (value < max) onChange(Math.min(max, value + step)); };
-  const btn: React.CSSProperties = {
-    width: "32px", height: "32px", border: "none", background: "transparent",
-    cursor: "pointer", color, fontWeight: 800, fontSize: "1.1rem", lineHeight: 1,
-    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-  };
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{label}</span>
-      <div style={{
-        display: "flex", alignItems: "center",
-        border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)",
-        background: colorLight, overflow: "hidden",
-      }}>
-        <button type="button" onClick={dec} disabled={value <= min} style={btn} aria-label={`Diminuer ${label}`}>−</button>
-        <span style={{ minWidth: "48px", textAlign: "center", fontSize: "0.95rem", fontWeight: 700, color, fontFamily: "var(--font-heading)" }}>
-          {value}
-        </span>
-        <button type="button" onClick={inc} disabled={value >= max} style={btn} aria-label={`Augmenter ${label}`}>+</button>
-      </div>
-      <span style={{ fontSize: "0.85rem", color: "var(--text-secondary)" }}>{unit}</span>
-    </div>
-  );
-};
 
 /** Affiche les zones de puissance Z1–Z7 (modèle Coggan) avec stepper FTP réactif et ratio W/kg. */
 export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange, weight }) => {
@@ -105,8 +75,8 @@ export const PowerZones: React.FC<PowerZonesProps> = ({ points, ftp, onFtpChange
           </span>
         </h3>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
-          <Stepper
-            label="FTP :" value={ftp} min={50} max={500} step={5} unit="W"
+          <NumericStepper
+            id="ftp-input" label="FTP :" value={ftp} min={50} max={500} step={5} unit="W" valueWidth="48px"
             color="var(--color-power)" colorLight="var(--color-power-light)"
             onChange={onFtpChange}
           />
