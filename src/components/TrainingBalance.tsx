@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Activity, AlertTriangle, CheckCircle } from "lucide-react";
 import type { TSBResult } from "../utils/trainingMetrics";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
-import { formatPace as fmtPace } from "./SplitsTable";
+import { formatPace as fmtPace } from "../utils/format";
 
 interface Props {
   tsb:     TSBResult;

@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import { TrendingUp, Info, ChevronDown, ChevronUp } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { karvonenBounds } from "../utils/gpxParser";
-import { formatPace as fmtPace } from "./SplitsTable";
+import { formatPace as fmtPace } from "../utils/format";
 
 interface ScatterPlotProps {
   points: GPXTrackPoint[];

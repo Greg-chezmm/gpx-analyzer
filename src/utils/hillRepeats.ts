@@ -106,7 +106,7 @@ export function detectHillRepeats(
         const recDist = recPts.length > 1
           ? recPts[recPts.length - 1].distFromStart - recPts[0].distFromStart
           : 0;
-        let recDur = 0;
+        let recDur: number;
         if (recPts[0]?.time && recPts[recPts.length - 1]?.time) {
           recDur = (recPts[recPts.length - 1].time!.getTime() - recPts[0].time!.getTime()) / 1000;
         } else {

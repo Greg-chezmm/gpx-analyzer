@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Mountain, ChevronDown } from "lucide-react";
 import type { ClimbSegment, ClimbCategory, GPXTrackPoint } from "../utils/gpxParser";
 import { CLIMB_CATEGORIES } from "../utils/gpxParser";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { ClimbMapModal } from "./ClimbMapModal";
 
 interface ClimbAnalysisProps {
@@ -26,6 +26,9 @@ const CATEGORY_ORDER: ClimbCategory[] = ['moderate', 'steep', 'very_steep'];
 
 /** Tableau des segments de montée détectés, avec résumé par catégorie et clic → carte. */
 export const ClimbAnalysis: React.FC<ClimbAnalysisProps> = ({ climbs, points }) => {
+  const [open, setOpen] = useState(false);
+  const [selectedClimb, setSelectedClimb] = useState<{ climb: ClimbSegment; index: number } | null>(null);
+
   if (climbs.length === 0) return null;
 
   // Agrégation des statistiques par catégorie (moyenne pondérée par le nombre de segments)
@@ -60,9 +63,6 @@ export const ClimbAnalysis: React.FC<ClimbAnalysisProps> = ({ climbs, points }) 
       });
     }
   }
-
-  const [open, setOpen] = useState(false);
-  const [selectedClimb, setSelectedClimb] = useState<{ climb: ClimbSegment; index: number } | null>(null);
 
   const hasHR        = climbs.some(c => c.avgHR !== null);
   const totalGain    = climbs.reduce((sum, c) => sum + c.elevGain, 0);

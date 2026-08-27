@@ -19,9 +19,9 @@ export function generateSampleGPX(): string {
     <trkseg>
 `;
 
-  let currentLat = startLat;
-  let currentLon = startLon;
-  let currentEle = 35.0; // base height in Paris (meters)
+  let currentLat: number;
+  let currentLon: number;
+  let currentEle: number; // base height in Paris (meters)
 
   // Generating a beautiful loop track: Tower -> river banks -> Trocadero -> back
   for (let i = 0; i < numPoints; i++) {

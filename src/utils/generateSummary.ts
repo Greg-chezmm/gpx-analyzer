@@ -5,7 +5,7 @@ import type {
 import type { FitSummary } from "./gpxCore";
 import type { HillRepeatSeries } from "./hillRepeats";
 import { CLIMB_CATEGORIES } from "./gpxParser";
-import { formatDuration, formatPace } from "../components/SplitsTable";
+import { formatDuration, formatPace } from "./format";
 import { describeWeatherCode, windDirectionLabel, describeTimeOfDay, type WeatherInfo } from "./weather";
 
 /** Options d'entrée pour la génération du résumé IA. */

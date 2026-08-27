@@ -3,7 +3,7 @@ import { Repeat2, Loader2, ChevronDown, ChevronUp, RefreshCw } from "lucide-reac
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import { useFullRouteMatches, type RouteMatch } from "../hooks/useFullRouteMatches";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 
 interface RouteHistoryProps {
   activity: GPXActivity;

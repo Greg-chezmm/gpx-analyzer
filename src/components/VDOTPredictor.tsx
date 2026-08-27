@@ -3,7 +3,7 @@ import { Target } from "lucide-react";
 import type { VO2maxEstimate } from "../utils/gpxParser";
 import type { AggregatedRunBest } from "../utils/bestEfforts";
 import { computeVDOTFromBests } from "../utils/vdot";
-import { formatPace, formatDuration } from "./SplitsTable";
+import { formatPace, formatDuration } from "../utils/format";
 
 /** Couleurs par type d'allure Jack Daniels (E/M/T/I/R). */
 const PACE_COLORS: Record<string, string> = {

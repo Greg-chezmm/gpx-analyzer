@@ -1,7 +1,7 @@
 import React from "react";
 import { Gauge } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 
 interface PaceZonesProps {
   points: GPXTrackPoint[];

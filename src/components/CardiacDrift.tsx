@@ -1,7 +1,7 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import type { CardiacDrift as CardiacDriftData } from "../utils/gpxParser";
-import { formatPace } from "./SplitsTable";
+import { formatPace } from "../utils/format";
 
 interface CardiacDriftProps {
   drift: CardiacDriftData;

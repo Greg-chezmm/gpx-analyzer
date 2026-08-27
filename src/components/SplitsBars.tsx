@@ -1,6 +1,6 @@
 import React from "react";
 import type { GPXSplit } from "../utils/gpxParser";
-import { formatPace } from "./SplitsTable";
+import { formatPace } from "../utils/format";
 import { BarChart2 } from "lucide-react";
 
 interface SplitsBarsProps {

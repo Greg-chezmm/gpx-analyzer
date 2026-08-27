@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Zap, AlertTriangle, Heart, Gauge, ChevronDown, Watch, TrendingUp } from "lucide-react";
 import type { GPXInterval } from "../utils/gpxParser";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { IntervalMapModal } from "./IntervalMapModal";
 
 interface IntervalAnalysisProps {
@@ -25,6 +25,9 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   points,
   source = "detected",
 }) => {
+  const [open, setOpen] = useState(false);
+  const [selectedInterval, setSelectedInterval] = useState<{ iv: GPXInterval; idx: number } | null>(null);
+
   const effortIntervals   = intervals.filter((iv) => iv.type === "effort");
   const recoveryIntervals = intervals.filter((iv) => iv.type === "recovery");
 
@@ -55,9 +58,6 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
       showFatigueBadge = (avgLast - avgFirst) / avgFirst > 0.05;
     }
   }
-
-  const [open, setOpen] = useState(false);
-  const [selectedInterval, setSelectedInterval] = useState<{ iv: GPXInterval; idx: number } | null>(null);
 
   return (
     <div className="card animate-slide-up" style={{ width: "100%" }}>

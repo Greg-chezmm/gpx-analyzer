@@ -2,7 +2,7 @@ import React from "react";
 import { Repeat } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import type { HillRepetition } from "../utils/hillRepeats";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { SegmentMapModal } from "./SegmentMapModal";
 
 interface HillRepeatMapModalProps {

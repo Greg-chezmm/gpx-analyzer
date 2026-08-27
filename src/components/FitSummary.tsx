@@ -2,7 +2,7 @@ import React from "react";
 import { Watch } from "lucide-react";
 import type { FitSummary as FitSummaryData } from "../utils/gpxCore";
 import type { TRIMPResult, VO2maxEstimate } from "../utils/gpxParser";
-import { formatDuration } from "./SplitsTable";
+import { formatDuration } from "../utils/format";
 
 interface Props {
   fit: FitSummaryData;

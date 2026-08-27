@@ -4,7 +4,7 @@ import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { ManualBest, ManualBests } from "../hooks/useManualBests";
 import { RUN_DISTANCES, BIKE_DURATIONS, aggregateBestRunEfforts } from "../utils/bestEfforts";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 
 interface Props {
   cloud: CloudHandle;

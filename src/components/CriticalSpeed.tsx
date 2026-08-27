@@ -3,7 +3,7 @@ import { Gauge } from "lucide-react";
 import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import type { ManualBests } from "../hooks/useManualBests";
 import { estimateCriticalSpeedFromHistory, dPrimeProfile } from "../utils/criticalSpeed";
-import { formatPace as fmtPace } from "./SplitsTable";
+import { formatPace as fmtPace } from "../utils/format";
 
 interface Props {
   cloud: CloudHandle;

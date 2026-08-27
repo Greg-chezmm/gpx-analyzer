@@ -2,7 +2,7 @@ import React from "react";
 import { Zap } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import type { GPXInterval } from "../utils/intervals";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { SegmentMapModal } from "./SegmentMapModal";
 
 interface IntervalMapModalProps {

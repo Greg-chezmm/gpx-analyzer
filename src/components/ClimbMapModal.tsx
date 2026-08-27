@@ -2,7 +2,7 @@ import React from "react";
 import { Mountain } from "lucide-react";
 import type { GPXTrackPoint, ClimbSegment } from "../utils/gpxParser";
 import { CLIMB_CATEGORIES } from "../utils/gpxParser";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { SegmentMapModal } from "./SegmentMapModal";
 
 interface ClimbMapModalProps {

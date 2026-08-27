@@ -162,7 +162,7 @@ export function calculateSplits(activity: GPXActivity, splitDistance = 1000): GP
     if (pt.distFromStart >= currentKmTarget || i === points.length - 1) {
       const distCovered = pt.distFromStart - splitStartDist;
 
-      let duration = 0;
+      let duration: number;
       if (pt.time && splitStartTime) {
         duration = (pt.time.getTime() - splitStartTime.getTime()) / 1000;
       } else {

@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { TrendingUp } from "lucide-react";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
-import { formatPace as fmtPace } from "./SplitsTable";
+import { formatPace as fmtPace } from "../utils/format";
 
 interface Props {
   history: (ActivityIndexEntry & { trimp: number })[];

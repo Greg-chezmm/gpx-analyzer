@@ -2,7 +2,7 @@ import React from "react";
 import { Heart } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { karvonenBounds } from "../utils/gpxParser";
-import { formatDuration } from "./SplitsTable";
+import { formatDuration } from "../utils/format";
 
 interface HeartRateZonesProps {
   points: GPXTrackPoint[];

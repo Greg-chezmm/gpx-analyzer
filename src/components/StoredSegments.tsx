@@ -11,7 +11,7 @@ import {
 import type { StoredSegmentsHandle } from "../hooks/useStoredSegments";
 import { useStoredSegmentScan } from "../hooks/useStoredSegmentScan";
 import type { SegmentPickerHandle } from "../hooks/useSegmentPicker";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { SegmentMapModal } from "./SegmentMapModal";
 import { SegmentMatchDebugMapModal } from "./SegmentMatchDebugMapModal";
 

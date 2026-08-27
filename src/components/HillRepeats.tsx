@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Repeat, ChevronDown, ChevronUp } from "lucide-react";
 import type { HillRepeatSeries, HillRepetition } from "../utils/hillRepeats";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { formatDuration, formatPace } from "./SplitsTable";
+import { formatDuration, formatPace } from "../utils/format";
 import { HillRepeatMapModal } from "./HillRepeatMapModal";
 
 interface HillRepeatsProps {

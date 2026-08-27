@@ -18,5 +18,11 @@ export default defineConfig([
     languageOptions: {
       globals: globals.browser,
     },
+    rules: {
+      // Règle orientée React Compiler ajoutée au preset "recommended" v7 : flague aussi
+      // les patterns classiques légitimes (reset d'état au changement de prop, fetch-on-mount) —
+      // beaucoup de faux positifs ici, downgradé pour ne pas bloquer `npm run lint` sur du style.
+      'react-hooks/set-state-in-effect': 'warn',
+    },
   },
 ])

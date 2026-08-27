@@ -1,7 +1,7 @@
 import React from "react";
 import { Zap } from "lucide-react";
 import type { TRIMPResult } from "../utils/gpxParser";
-import { formatDuration } from "./SplitsTable";
+import { formatDuration } from "../utils/format";
 
 interface TrainingLoadProps {
   trimp: TRIMPResult;

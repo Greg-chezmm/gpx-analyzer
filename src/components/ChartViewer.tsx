@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { TrendingUp, Eye, Maximize2, Minimize2, ZoomIn } from "lucide-react";
-import { formatPace } from "./SplitsTable";
+import { formatPace } from "../utils/format";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -428,7 +428,7 @@ export const ChartViewer: React.FC<ChartViewerProps> = ({
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement> | React.TouchEvent<SVGSVGElement>) => {
     if (!svgRef.current || points.length === 0) return;
     const rect = svgRef.current.getBoundingClientRect();
-    let rawClientX = 0;
+    let rawClientX: number;
     if ("touches" in e) {
       if (e.touches.length === 0) return;
       rawClientX = e.touches[0].clientX;

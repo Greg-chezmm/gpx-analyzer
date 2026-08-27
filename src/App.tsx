@@ -19,7 +19,8 @@ import { loadFirestoreSettings, saveFirestoreSettings } from "./utils/firestoreS
 import { Dropzone } from "./components/Dropzone";
 import { MetricCard } from "./components/MetricCard";
 import { ChartViewer } from "./components/ChartViewer";
-import { SplitsTable, formatDuration, formatPace } from "./components/SplitsTable";
+import { SplitsTable } from "./components/SplitsTable";
+import { formatDuration, formatPace } from "./utils/format";
 import { HeartRateZones } from "./components/HeartRateZones";
 
 // Chargés à la demande — Leaflet (~150 KB) et fit-file-parser (~80 KB) absents du bundle initial
