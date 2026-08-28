@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import type { GPXTrackPoint } from "../utils/gpxParser";
-import { MapPin } from "lucide-react";
+import { MapPin, Layers, Maximize2, Minimize2 } from "lucide-react";
+import { useBasemap } from "../hooks/useBasemap";
+import { BASEMAPS } from "../utils/basemaps";
 
 // Correction des icônes Leaflet : le bundler Vite ne résout pas _getIconUrl correctement
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -77,6 +79,7 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef          = useRef<L.Map | null>(null);
+  const tileLayerRef    = useRef<L.TileLayer | null>(null);
   const polylineRef     = useRef<L.Polyline | null>(null);
   const colorSegmentsRef = useRef<L.Polyline[]>([]);
   const hoverMarkerRef  = useRef<L.Marker | null>(null);
@@ -85,6 +88,16 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
   const onHoverRef = useRef(onHoverPointChange);
   const onClickRef = useRef(onPointClick);
   const [colorMode, setColorMode] = useState<ColorMode>('none');
+  const [expanded, setExpanded] = useState(false);
+  const { basemapDef, basemapId, setBasemapId, tile, tracestrackKey, setTracestrackKey } = useBasemap();
+
+  // Leaflet met en cache la taille de son conteneur — sans invalidateSize(), la carte garde son
+  // ancienne taille (zones grises) après le passage en plein écran (voir ChartViewer pour le même
+  // bouton Agrandir/Réduire côté graphique).
+  useEffect(() => {
+    const id = requestAnimationFrame(() => mapRef.current?.invalidateSize());
+    return () => cancelAnimationFrame(id);
+  }, [expanded]);
 
   useEffect(() => { onHoverRef.current = onHoverPointChange; }, [onHoverPointChange]);
   useEffect(() => { onClickRef.current = onPointClick; }, [onPointClick]);
@@ -104,12 +117,8 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       .setView([startPt.lat, startPt.lon], 13);
     mapRef.current = map;
 
-    // Fond de carte CartoDB Voyager (léger, adapté aux tracés sportifs)
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 20,
-    }).addTo(map);
+    // Fond de carte ajouté par l'effet dédié ci-dessous (dépend de `tile`, qui s'exécute aussi au
+    // montage) — évite de charger les tuiles deux fois au premier rendu.
 
     map.fitBounds(
       L.latLngBounds(points.map(p => [p.lat, p.lon] as [number, number])),
@@ -202,6 +211,22 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
       mapRef.current = null;
     };
   }, [points]);
+
+  // Bascule de fond de carte sans reconstruire toute la carte (perdrait le zoom/centrage courant).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (tileLayerRef.current) map.removeLayer(tileLayerRef.current);
+    tileLayerRef.current = L.tileLayer(tile.url, {
+      attribution: tile.attribution,
+      // Passer explicitement `undefined` écraserait le défaut Leaflet ('abc') plutôt que de le
+      // laisser s'appliquer — Leaflet lit `subdomains.length` sans vérifier sa présence, même pour
+      // une URL sans `{s}` (cas de Tracestrack, servi depuis un seul domaine) : plantage réel
+      // constaté par Greg ("Cannot read properties of undefined (reading 'length')").
+      subdomains: tile.subdomains ?? 'abc',
+      maxZoom: tile.maxZoom,
+    }).addTo(map);
+  }, [tile]);
 
   // Rendu du tracé — reconstruit uniquement quand le mode de couleur change
   useEffect(() => {
@@ -300,13 +325,80 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
   ];
 
   return (
-    <div className="card animate-slide-up" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <>
+      {expanded && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 1199, background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+          onClick={() => setExpanded(false)}
+        />
+      )}
+      <div className="card animate-slide-up" style={{
+        display: "flex", flexDirection: "column", height: "100%",
+        ...(expanded ? { position: 'fixed', inset: '0.75rem', zIndex: 1200, height: 'auto', boxShadow: 'var(--shadow-xl)' } : {}),
+      }}>
       <div className="panel-header" style={{ flexWrap: "wrap", gap: "0.75rem" }}>
         <h3 className="panel-title">
           <MapPin size={18} style={{ color: "var(--accent-primary)" }} />
           <span>📍 Carte Interactive du Parcours</span>
         </h3>
         <div className="panel-actions" style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setExpanded(e => !e)}
+            title={expanded ? 'Réduire' : 'Agrandir'}
+            style={{
+              background: 'none', border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)', padding: '0.3rem 0.4rem',
+              cursor: 'pointer', color: 'var(--text-secondary)',
+              display: 'flex', alignItems: 'center', order: -1,
+            }}
+          >
+            {expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+          {/* Sélecteur de fond de carte (Rues/Relief/Cyclisme) */}
+          <div style={{
+            display: "flex", alignItems: "center", gap: "2px",
+            backgroundColor: "var(--bg-primary)",
+            padding: "3px",
+            borderRadius: "var(--radius-sm)",
+            border: "1px solid var(--border-color)",
+          }}>
+            <Layers size={13} style={{ color: "var(--text-tertiary)", marginLeft: "0.3rem" }} />
+            {BASEMAPS.map(bm => (
+              <button
+                key={bm.id}
+                type="button"
+                onClick={() => setBasemapId(bm.id)}
+                title={`Fond de carte : ${bm.label}`}
+                style={{
+                  padding: "0.25rem 0.6rem",
+                  fontSize: "0.78rem",
+                  borderRadius: "calc(var(--radius-sm) - 2px)",
+                  border: "none",
+                  backgroundColor: basemapId === bm.id ? "var(--accent-primary)" : "transparent",
+                  color: basemapId === bm.id ? "#ffffff" : "var(--text-secondary)",
+                  cursor: "pointer",
+                  fontWeight: basemapId === bm.id ? 700 : 400,
+                  transition: "all 0.15s",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {bm.label}
+              </button>
+            ))}
+          </div>
+          {/* Clé API Tracestrack — nécessaire uniquement pour le fond "Relief", stockée en local */}
+          {basemapDef.requiresKey && !tracestrackKey && (
+            <input
+              type="text"
+              placeholder="Clé API Tracestrack"
+              onBlur={e => { if (e.target.value.trim()) setTracestrackKey(e.target.value.trim()); }}
+              onKeyDown={e => { if (e.key === "Enter") setTracestrackKey(e.currentTarget.value.trim()); }}
+              style={{
+                padding: "0.3rem 0.6rem", fontSize: "0.78rem", minWidth: "10rem",
+                borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)",
+                background: "var(--bg-primary)", color: "var(--text-primary)",
+              }}
+            />
+          )}
           {/* Sélecteur de mode de couleur du tracé */}
           <div style={{
             display: "flex", gap: "2px",
@@ -386,7 +478,8 @@ export const ActivityMap: React.FC<ActivityMapProps> = ({
         </div>
       )}
 
-      <div className="map-wrapper" ref={mapContainerRef} />
-    </div>
+      <div className="map-wrapper" ref={mapContainerRef} style={expanded ? { flex: 1, height: "auto" } : undefined} />
+      </div>
+    </>
   );
 };

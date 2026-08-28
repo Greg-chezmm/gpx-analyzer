@@ -999,6 +999,7 @@ function App() {
                   <RouteHistory
                     activity={enrichedActivity!}
                     displayName={displayName}
+                    fileName={fileName}
                     history={sameTypeCloudHistory}
                     loadFile={cloud.loadFile}
                     onOpenActivity={handleOpenCloudActivity}
@@ -1010,6 +1011,8 @@ function App() {
                 <Suspense fallback={sectionLoader}>
                   <StoredSegments
                     activity={enrichedActivity!}
+                    displayName={displayName}
+                    fileName={fileName}
                     history={sameTypeCloudHistory}
                     loadFile={cloud.loadFile}
                     picker={segmentPicker}

@@ -52,14 +52,18 @@ export const SegmentMapModal: React.FC<SegmentMapModalProps> = ({
   useEffect(() => {
     if (!mapRef.current || leafletRef.current) return;
 
+    // OpenStreetMap France — CARTO (utilisé auparavant) exige désormais une clé API sur son offre
+    // gratuite (2026-08-28). Le thème sombre est géré par un filtre CSS sur .leaflet-tile-pane
+    // (voir index.css), indépendant du fournisseur de tuiles.
     const isDark = document.documentElement.getAttribute("data-theme") === "dark";
-    const tileUrl = isDark
-      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-      : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
 
     const map = L.map(mapRef.current, { zoomControl: true, scrollWheelZoom: true });
     leafletRef.current = map;
-    L.tileLayer(tileUrl, { attribution: "© CARTO", maxZoom: 19 }).addTo(map);
+    L.tileLayer("https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png", {
+      attribution: '&copy; OpenStreetMap France | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      subdomains: 'abc',
+      maxZoom: 19,
+    }).addTo(map);
 
     // Tracé complet en gris fin (contexte géographique)
     if (points.length > 1) {

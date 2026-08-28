@@ -76,6 +76,9 @@ export function useFullRouteMatches(
   history: ActivityIndexEntry[],
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>,
   updateActivityMetaBatch: (items: { entry: ActivityIndexEntry; updates: Partial<ActivityIndexEntry> }[]) => Promise<void>,
+  /** Nom du fichier brut actuellement chargé — identifiant plus fiable que distance/durée (±3%) pour
+   * reconnaître l'entrée d'historique correspondant à l'activité déjà ouverte, voir plus bas. */
+  currentFileName?: string,
 ): FullRouteMatchesHandle {
   const [status, setStatus] = useState<FullRouteMatchStatus>('idle');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -95,10 +98,16 @@ export function useFullRouteMatches(
     setProgress(null);
 
     const currentDate = activity.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
+    // Stats ±3% en premier ; repli sur `fileName` (identifiant plus stable, insensible à une dérive
+    // des stats stockées depuis la sauvegarde — ex. fusion de fichier après coup, recalcul différent)
+    // si le premier échoue — cas réel constaté par Greg (2026-08-28) côté segments manuels : une
+    // activité pas reconnue comme "courante" se comparait à tort à elle-même comme un doublon.
     const currentEntry = history.find(e =>
       e.cloudId && e.date === currentDate &&
-      closeEnough(activity.totalDistance, e.distance) &&
-      closeEnough(activity.movingTime, e.duration)
+      (
+        (closeEnough(activity.totalDistance, e.distance) && closeEnough(activity.movingTime, e.duration)) ||
+        (!!currentFileName && e.fileName === currentFileName)
+      )
     ) ?? null;
 
     // Résultat déjà en cache pour cette activité — reconstruit l'affichage depuis les métadonnées
@@ -206,7 +215,7 @@ export function useFullRouteMatches(
       ];
       updateActivityMetaBatch(items).catch(() => {});
     }
-  }, [activity, history, loadFile, updateActivityMetaBatch]);
+  }, [activity, history, loadFile, updateActivityMetaBatch, currentFileName]);
 
   useEffect(() => {
     if (!activity) {

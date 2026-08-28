@@ -9,6 +9,8 @@ import { computeEfficiencyTrend, type EfficiencyTrendPoint } from "../utils/trai
 interface RouteHistoryProps {
   activity: GPXActivity;
   displayName: string;
+  /** Nom du fichier brut actuellement chargé — voir useFullRouteMatches pour l'usage. */
+  fileName: string;
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   onOpenActivity: (entry: ActivityIndexEntry) => Promise<void>;
@@ -106,8 +108,8 @@ function Row({ match, rank, displayName, activityType, onOpen, opening, efficien
  * diagnostic (repliable) liste les candidates plausibles écartées, utile tant que le réglage des
  * seuils de matching est encore en rodage.
  */
-export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, history, loadFile, onOpenActivity, updateActivityMetaBatch, fcMax, fcRest }) => {
-  const { status, progress, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch);
+export const RouteHistory: React.FC<RouteHistoryProps> = ({ activity, displayName, fileName, history, loadFile, onOpenActivity, updateActivityMetaBatch, fcMax, fcRest }) => {
+  const { status, progress, matches, rejected, fromCache, scannedAt, rescan } = useFullRouteMatches(activity, history, loadFile, updateActivityMetaBatch, fileName);
   const [openingKey, setOpeningKey] = useState<string | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
 

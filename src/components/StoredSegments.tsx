@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
-import { Route, Plus, X, Search, RefreshCw, Loader2, Trophy, Trash2, ChevronDown, ChevronUp, Map as MapIcon, Bug, TrendingDown, TrendingUp, Star } from "lucide-react";
+import { Route, Plus, Search, RefreshCw, Loader2, Trophy, Trash2, ChevronDown, ChevronUp, Map as MapIcon, Bug, TrendingDown, TrendingUp, Star } from "lucide-react";
 import type { GPXActivity } from "../utils/gpxCore";
 import type { ActivityIndexEntry } from "../utils/driveStorage";
 import type { StoredSegment } from "../utils/firestoreStorage";
@@ -15,9 +15,17 @@ import { formatDuration, formatPace } from "../utils/format";
 import { computeEfficiencyTrend, type EfficiencyTrendPoint } from "../utils/trainingMetrics";
 import { SegmentMapModal } from "./SegmentMapModal";
 import { SegmentMatchDebugMapModal } from "./SegmentMatchDebugMapModal";
+import { SegmentPickerMapModal } from "./SegmentPickerMapModal";
 
 interface StoredSegmentsProps {
   activity: GPXActivity;
+  /** Nom personnalisé de l'activité courante (renommage via ActivityNameEditor) — distinct de
+   * `activity.name` (nom brut issu du parsing GPX/FIT, ex. horodatage Suunto), voir RouteHistory.tsx
+   * qui applique déjà ce même distinguo pour sa ligne "actuelle". */
+  displayName: string;
+  /** Nom du fichier brut actuellement chargé — voir useStoredSegmentScan pour l'usage (exclusion fiable
+   * de l'activité courante des candidats comparés). */
+  fileName: string;
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   picker: SegmentPickerHandle;
@@ -29,6 +37,8 @@ interface StoredSegmentsProps {
 
 interface AttemptRowProps {
   attempt: CachedSegmentAttempt;
+  /** Nom à afficher pour la ligne "actuelle" — voir StoredSegmentsProps.displayName. */
+  displayName: string;
   rank: number;
   activityType: GPXActivity['activityType'];
   onClick: () => void;
@@ -40,7 +50,7 @@ interface AttemptRowProps {
   hasGAP: boolean;
 }
 
-function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoading, efficiency, showEfficiency, isBestEfficiency, hasGAP }: AttemptRowProps) {
+function AttemptRow({ attempt, displayName, rank, activityType, onClick, onDebug, debugLoading, efficiency, showEfficiency, isBestEfficiency, hasGAP }: AttemptRowProps) {
   return (
     <tr
       onClick={onClick}
@@ -71,9 +81,9 @@ function AttemptRow({ attempt, rank, activityType, onClick, onDebug, debugLoadin
             </span>
           )}
         </span>
-        {attempt.name && (
+        {(attempt.isCurrent ? displayName : attempt.name) && (
           <div style={{ fontSize: "0.72rem", color: "var(--text-tertiary)", fontWeight: 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "12rem" }}>
-            {attempt.name}
+            {attempt.isCurrent ? displayName : attempt.name}
           </div>
         )}
       </td>
@@ -137,6 +147,8 @@ interface AttemptDebugResult {
 interface StoredSegmentCardProps {
   segment: StoredSegment;
   activity: GPXActivity;
+  displayName: string;
+  fileName: string;
   history: ActivityIndexEntry[];
   loadFile: (entry: ActivityIndexEntry) => Promise<ArrayBuffer | string>;
   onDelete: () => void;
@@ -147,11 +159,11 @@ interface StoredSegmentCardProps {
   fcRest: number;
 }
 
-function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt, onShowMap, fcMax, fcRest }: StoredSegmentCardProps) {
+function StoredSegmentCard({ segment, activity, displayName, fileName, history, loadFile, onDelete, onUpdateAttempts, onSelectAttempt, onShowMap, fcMax, fcRest }: StoredSegmentCardProps) {
   const { status, progress, attempts, scan } = useStoredSegmentScan(
     segment, activity, history, loadFile,
     top => { onUpdateAttempts(segment.id, top, new Date().toISOString()); },
-    fcMax, fcRest,
+    fcMax, fcRest, fileName,
   );
   const hasCache = (segment.attempts?.length ?? 0) > 0 || attempts.length > 0;
   const [debugLoadingKey, setDebugLoadingKey] = useState<number | null>(null);
@@ -308,7 +320,7 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
             <tbody>
               {attempts.map((a, i) => (
                 <AttemptRow
-                  key={i} attempt={a} rank={i + 1} activityType={activity.activityType}
+                  key={i} attempt={a} displayName={displayName} rank={i + 1} activityType={activity.activityType}
                   onClick={() => onSelectAttempt(a)}
                   onDebug={() => handleDebugAttempt(a, i)}
                   debugLoading={debugLoadingKey === i}
@@ -337,7 +349,7 @@ function StoredSegmentCard({ segment, activity, history, loadFile, onDelete, onU
 }
 
 /** Segments définis manuellement (deux clics sur la carte ou le graphique) et comparés à l'historique. Le classement (top 10) est mis en cache sur Firestore, voir useStoredSegments/useStoredSegmentScan. */
-export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, history, loadFile, picker, storedSegments, fcMax, fcRest }) => {
+export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, displayName, fileName, history, loadFile, picker, storedSegments, fcMax, fcRest }) => {
   const { segments, create, remove, updateAttempts } = storedSegments;
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -390,8 +402,6 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
     }
   };
 
-  const picking = picker.stage === "pick-start" || picker.stage === "pick-end";
-
   return (
     <div className="card animate-slide-up" style={{ marginTop: "1rem" }}>
       <div className="panel-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
@@ -410,39 +420,19 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
             <span>Définir un segment</span>
           </button>
         )}
-        {(picking || picker.stage === "ready") && (
-          <button type="button" className="btn btn-outline" onClick={picker.reset} style={{ padding: "0.4rem 0.8rem", fontSize: "0.82rem" }}>
-            <X size={14} />
-            <span>Annuler la sélection</span>
-          </button>
-        )}
       </div>
 
-      {picking && (
-        <p style={{ fontSize: "0.85rem", color: "var(--accent-primary)", fontWeight: 600, marginTop: "0.75rem" }}>
-          {picker.stage === "pick-start"
-            ? "Clique le point de départ du segment sur la carte ou le graphique."
-            : "Clique maintenant le point d'arrivée (carte ou graphique)."}
-        </p>
-      )}
-
-      {picker.stage === "ready" && (
-        <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
-          <input
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Nom du segment"
-            autoFocus
-            style={{
-              flex: 1, minWidth: "10rem", padding: "0.45rem 0.7rem", fontSize: "0.85rem",
-              borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)",
-              background: "var(--bg-primary)", color: "var(--text-primary)",
-            }}
-          />
-          <button type="button" className="btn btn-outline" onClick={handleSave} disabled={!name.trim() || saving} style={{ padding: "0.45rem 0.9rem", fontSize: "0.82rem" }}>
-            {saving ? <Loader2 size={14} style={{ animation: "spin 0.8s linear infinite" }} /> : "Enregistrer"}
-          </button>
-        </div>
+      {/* Grande carte dédiée à la sélection précise du départ/arrivée — remplace le petit formulaire
+       * inline (carte du dashboard trop petite pour cliquer finement, voir demande de Greg 2026-08-28). */}
+      {picker.stage !== "idle" && (
+        <SegmentPickerMapModal
+          points={activity.points}
+          picker={picker}
+          name={name}
+          onNameChange={setName}
+          onSave={handleSave}
+          saving={saving}
+        />
       )}
 
       {relevant.length === 0 && picker.stage === "idle" && (
@@ -460,6 +450,8 @@ export const StoredSegments: React.FC<StoredSegmentsProps> = ({ activity, histor
               key={seg.id}
               segment={seg}
               activity={activity}
+              displayName={displayName}
+              fileName={fileName}
               history={history}
               loadFile={loadFile}
               onDelete={() => remove(seg.id)}

@@ -84,14 +84,24 @@ export function fingerprintOverlap(a: string[], b: string[]): number {
 // ─── Matching précis — recherche du plus long corridor commun entre deux tracés ────
 
 const RESAMPLE_STEP_M = 20;
+// Pas de rééchantillonnage plus fin, réservé aux segments manuels (voir findLongestMatch/
+// matchStoredSegmentAll) — pas utilisé pour la comparaison de trajets complets (computeTotalCoverage/
+// checkFullRouteCoverage), où le nombre de points en jeu est déjà bien plus grand (km vs centaines de
+// mètres) et où 20m suffit. Demande de Greg (2026-08-28) : plus de résolution autour d'une jonction
+// délicate (ex. approche qui rejoint la côte) pourrait faire la différence entre matcher ou non.
+const SEGMENT_RESAMPLE_STEP_M = 10;
 const CORRIDOR_TOLERANCE_M = 30;
 const DIRECTION_TOLERANCE_DEG = 55;
-const MAX_GAP_POINTS = 4;
+// Tolérances exprimées en MÈTRES (pas en nombre de points) — converties en points selon le pas de
+// rééchantillonnage réellement utilisé (`stepMeters`, voir computeMatchIndices/computeRuns), pour que
+// ces tolérances gardent le même sens physique quel que soit le pas (20m route, 10m segment). Valeurs
+// choisies pour reproduire exactement le comportement historique calibré à 20m/point (4, 5, 10, 5 pts).
+const MAX_GAP_M = 80;
 // Un point rééchantillonné de A avance normalement d'environ 1 cran de B à chaque pas (même pas de
 // rééchantillonnage des deux côtés) — un saut en avant bien plus grand signale que l'appariement a
 // "sauté" vers un endroit du candidat déjà loin dans son propre parcours (carrefour/quartier
 // recroisé), pas une continuité réelle du même passage.
-const MAX_FORWARD_JUMP_POINTS = 5;
+const MAX_FORWARD_JUMP_M = 100;
 const MIN_SEGMENT_DISTANCE_M = 300;
 const GRID_CELL_DEG = 0.005; // ~550m — bucket de pré-filtrage spatial pour le matching
 
@@ -198,8 +208,8 @@ const PROGRESS_PENALTY_M_PER_POINT = 4;
 // peut être un point géographiquement proche mais très loin dans le tracé candidat (ex. la descente
 // d'un aller-retour qui repasse près de ce même endroit) — bug réel constaté : 4 points au sommet
 // d'un lacet appariés à un endroit à ~1199m de distance le long du candidat, coupant le corridor en
-// deux au lieu de laisser ces quelques points sans correspondance (tolérés par MAX_GAP_POINTS).
-const MAX_PROGRESS_GAP_POINTS = 10;
+// deux au lieu de laisser ces quelques points sans correspondance (tolérés par MAX_GAP_M).
+const MAX_PROGRESS_GAP_M = 200;
 
 // Si `expectedB` reste sans le moindre candidat valide pendant plusieurs points d'affilée, l'ancre
 // elle-même est probablement fausse (ex. le tout premier point du segment, i=0, où il n'existe encore
@@ -208,16 +218,21 @@ const MAX_PROGRESS_GAP_POINTS = 10;
 // dans une fenêtre proche de cette ancre erronée, avec 0% de couverture au lieu de "juste" quelques
 // points perdus (bug réel constaté : une activité valide, 0/25 points appariés). Après plusieurs
 // échecs consécutifs, on relâche l'ancrage pour permettre une recherche globale au point suivant.
-const MAX_PROGRESS_MISS_STREAK = 5;
+const MAX_PROGRESS_MISS_STREAK_M = 100;
 
-function computeMatchIndices(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; matchB: number[] } | null {
+function computeMatchIndices(
+  pointsA: GeoPoint[], pointsB: GeoPoint[], baseStepM: number = RESAMPLE_STEP_M,
+): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; matchB: number[]; stepMeters: number } | null {
   // Pas de rééchantillonnage adaptatif à la longueur de A (la référence, généralement la plus
-  // courte pour un segment manuel) — avec le pas fixe de 20m, un segment de ~60-80m produit moins
-  // de 5 points rééchantillonnés et échoue à se faire correspondre à lui-même (bug réel constaté :
-  // segment créé mais invisible même sur l'activité d'origine). Reste à 20m pour les tracés longs
-  // (trajets complets), inchangé.
+  // courte pour un segment manuel) — avec un pas fixe, un segment très court produirait moins de 5
+  // points rééchantillonnés et échouerait à se faire correspondre à lui-même (bug réel constaté :
+  // segment créé mais invisible même sur l'activité d'origine).
   const spanA = pointsA.length > 1 ? pointsA[pointsA.length - 1].distFromStart - pointsA[0].distFromStart : 0;
-  const stepMeters = spanA > 0 ? Math.min(RESAMPLE_STEP_M, Math.max(2, spanA / 10)) : RESAMPLE_STEP_M;
+  const stepMeters = spanA > 0 ? Math.min(baseStepM, Math.max(2, spanA / 10)) : baseStepM;
+  // Tolérances de progression/ancrage en nombre de points, dérivées de leur équivalent en mètres —
+  // gardent le même sens physique quel que soit le pas de rééchantillonnage effectif.
+  const maxProgressGapPoints = Math.max(1, Math.round(MAX_PROGRESS_GAP_M / stepMeters));
+  const maxProgressMissStreak = Math.max(1, Math.round(MAX_PROGRESS_MISS_STREAK_M / stepMeters));
 
   // Même phase des deux côtés (ancrée sur le premier point de A) — voir le commentaire de resampleByDistance.
   const phase = pointsA[0]?.distFromStart ?? 0;
@@ -241,7 +256,7 @@ function computeMatchIndices(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: R
       if (d >= CORRIDOR_TOLERANCE_M) continue;
       if (angleDiff(bearA[i], bearB[j]) >= DIRECTION_TOLERANCE_DEG) continue;
       const progressGap = expectedB !== null ? Math.abs(j - expectedB) : 0;
-      if (expectedB !== null && progressGap > MAX_PROGRESS_GAP_POINTS) continue;
+      if (expectedB !== null && progressGap > maxProgressGapPoints) continue;
       const score = d + progressGap * PROGRESS_PENALTY_M_PER_POINT;
       if (score < bestScore) { bestScore = score; best = j; }
     }
@@ -251,17 +266,23 @@ function computeMatchIndices(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: R
       missStreak = 0;
     } else if (expectedB !== null) {
       missStreak++;
-      if (missStreak > MAX_PROGRESS_MISS_STREAK) expectedB = null;
+      if (missStreak > maxProgressMissStreak) expectedB = null;
     }
   }
 
-  return { rsA, rsB, matchB };
+  return { rsA, rsB, matchB, stepMeters };
 }
 
-function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; runs: Run[] } | null {
-  const computed = computeMatchIndices(pointsA, pointsB);
+function computeRuns(
+  pointsA: GeoPoint[], pointsB: GeoPoint[], baseStepM: number = RESAMPLE_STEP_M,
+): { rsA: ResampledPoint[]; rsB: ResampledPoint[]; runs: Run[] } | null {
+  const computed = computeMatchIndices(pointsA, pointsB, baseStepM);
   if (!computed) return null;
-  const { rsA, rsB, matchB } = computed;
+  const { rsA, rsB, matchB, stepMeters } = computed;
+  // Tolérances de gap/saut en avant en nombre de points, dérivées de leur équivalent en mètres — voir
+  // computeMatchIndices pour le même principe appliqué à la progression/ancrage.
+  const maxGapPoints = Math.max(1, Math.round(MAX_GAP_M / stepMeters));
+  const maxForwardJumpPoints = Math.max(1, Math.round(MAX_FORWARD_JUMP_M / stepMeters));
 
   const runs: Run[] = [];
   let cur: { aStart: number; aEnd: number; bLast: number; bMin: number; bMax: number; gaps: number } | null = null;
@@ -275,13 +296,13 @@ function computeRuns(pointsA: GeoPoint[], pointsB: GeoPoint[]): { rsA: Resampled
     if (b < 0) {
       if (cur) {
         cur.gaps++;
-        if (cur.gaps > MAX_GAP_POINTS) { flush(); cur = null; }
+        if (cur.gaps > maxGapPoints) { flush(); cur = null; }
       }
       continue;
     }
     if (!cur) {
       cur = { aStart: i, aEnd: i, bLast: b, bMin: b, bMax: b, gaps: 0 };
-    } else if (b >= cur.bLast - 2 && b <= cur.bLast + MAX_FORWARD_JUMP_POINTS) {
+    } else if (b >= cur.bLast - 2 && b <= cur.bLast + maxForwardJumpPoints) {
       cur.aEnd = i; cur.bLast = b; cur.bMin = Math.min(cur.bMin, b); cur.bMax = Math.max(cur.bMax, b); cur.gaps = 0;
     } else {
       // Un saut en avant trop grand (ex. le candidat repasse par un carrefour/quartier déjà visité
@@ -308,7 +329,7 @@ export interface SegmentPointRun { lat: number; lon: number; runIndex: number | 
  * fragmente le passage en plusieurs runs séparés, même quand chaque point pris individuellement matche.
  */
 export function debugSegmentPointRuns(refPoints: GeoPoint[], candidatePoints: GeoPoint[]): SegmentPointRun[] {
-  const computed = computeRuns(refPoints, candidatePoints);
+  const computed = computeRuns(refPoints, candidatePoints, SEGMENT_RESAMPLE_STEP_M);
   if (!computed) return [];
   const { rsA, runs } = computed;
   const runIndexByA: (number | null)[] = new Array(rsA.length).fill(null);
@@ -404,7 +425,7 @@ function bestSegmentCluster(runs: Run[], rsA: ResampledPoint[], rsB: ResampledPo
  * par proximité plutôt qu'une simple somme globale.
  */
 function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM = MIN_SEGMENT_DISTANCE_M): MatchResult | null {
-  const computed = computeRuns(pointsA, pointsB);
+  const computed = computeRuns(pointsA, pointsB, SEGMENT_RESAMPLE_STEP_M);
   if (!computed) return null;
   const { rsA, rsB, runs } = computed;
 
@@ -632,7 +653,7 @@ export function matchStoredSegmentAll(
   const working: GeoPoint[] = candidate.points.map(p => ({ lat: p.lat, lon: p.lon, distFromStart: p.distFromStart }));
 
   for (let pass = 0; pass < MAX_SEGMENT_PASSES; pass++) {
-    const computed = computeRuns(refPoints, working);
+    const computed = computeRuns(refPoints, working, SEGMENT_RESAMPLE_STEP_M);
     if (!computed) break;
     const { rsA, rsB, runs } = computed;
     const best = bestSegmentCluster(runs, rsA, rsB);
@@ -687,7 +708,7 @@ export interface StoredSegmentMatchDebug {
 /** Rejoue la comparaison d'un segment manuel et retourne les valeurs brutes — utilisé pour comprendre pourquoi un segment n'apparaît pas sur une activité donnée. */
 export function debugStoredSegmentMatch(refPoints: GeoPoint[], refDistance: number, candidatePoints: GeoPoint[]): StoredSegmentMatchDebug {
   const requiredM = minSegmentMatchDistance(refDistance);
-  const computed = computeRuns(refPoints, candidatePoints);
+  const computed = computeRuns(refPoints, candidatePoints, SEGMENT_RESAMPLE_STEP_M);
   const { clusters, runGapsM } = computed ? groupSegmentRuns(computed.runs, computed.rsA, computed.rsB) : { clusters: [], runGapsM: [] };
   const best = clusters.length > 0 ? clusters.reduce((a, b) => (b.dist > a.dist ? b : a)) : null;
   const bestRunM = best?.dist ?? 0;

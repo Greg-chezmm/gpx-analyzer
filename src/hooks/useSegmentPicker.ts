@@ -12,6 +12,11 @@ export interface SegmentPickerHandle {
   handleClick: (index: number) => void;
   /** Annule la sélection en cours ou termine après enregistrement/abandon du formulaire de nommage. */
   reset: () => void;
+  /** Déplace le point de départ de `delta` index (borné à [0, end-1] une fois la fin fixée, sinon
+   * [0, maxIndex]) — permet d'affiner la sélection point par point (voir SegmentPickerMapModal). */
+  nudgeStart: (delta: number, maxIndex: number) => void;
+  /** Déplace le point d'arrivée de `delta` index (borné à [start+1, maxIndex]). */
+  nudgeEnd: (delta: number, maxIndex: number) => void;
 }
 
 interface PickerState { stage: PickerStage; start: number | null; end: number | null; }
@@ -35,5 +40,23 @@ export function useSegmentPicker(): SegmentPickerHandle {
     });
   }, []);
 
-  return { ...state, begin, handleClick, reset };
+  const nudgeStart = useCallback((delta: number, maxIndex: number) => {
+    setState(s => {
+      if (s.start === null) return s;
+      const upperBound = s.end !== null ? s.end - 1 : maxIndex;
+      const next = Math.max(0, Math.min(upperBound, s.start + delta));
+      return next === s.start ? s : { ...s, start: next };
+    });
+  }, []);
+
+  const nudgeEnd = useCallback((delta: number, maxIndex: number) => {
+    setState(s => {
+      if (s.end === null) return s;
+      const lowerBound = s.start !== null ? s.start + 1 : 0;
+      const next = Math.max(lowerBound, Math.min(maxIndex, s.end + delta));
+      return next === s.end ? s : { ...s, end: next };
+    });
+  }, []);
+
+  return { ...state, begin, handleClick, reset, nudgeStart, nudgeEnd };
 }

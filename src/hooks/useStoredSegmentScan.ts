@@ -40,6 +40,9 @@ export function useStoredSegmentScan(
    * (`entry.fcMax`/`entry.fcRest`), voir `CachedSegmentAttempt.fcMax`. */
   fcMax?: number,
   fcRest?: number,
+  /** Nom du fichier brut actuellement chargé (`fileName` dans App.tsx) — signal d'identité fiable pour
+   * exclure l'activité courante des candidats comparés, voir plus bas. */
+  currentFileName?: string,
 ): StoredSegmentScanHandle {
   const [status, setStatus] = useState<SegmentScanStatus>('idle');
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -54,15 +57,24 @@ export function useStoredSegmentScan(
     const currentDate = activity?.startTime ? activity.startTime.toISOString().slice(0, 10) : '';
 
     // Exclut l'activité courante de l'historique comparé — sinon, si elle y est déjà sauvegardée,
-    // elle est comptée deux fois (une fois en mémoire ci-dessous, une fois via les candidats).
-    // Le nom seul n'est pas fiable (renommage, doublon de migration...), on compare plutôt
-    // distance et durée totales (±3%).
+    // elle est comptée deux fois (une fois en mémoire ci-dessous, une fois via les candidats), avec
+    // un risque réel de résultats incohérents entre les deux passages (cas réel constaté par Greg,
+    // 2026-08-28 : la copie candidate, reparsée depuis le fichier cloud, donnait 0 passage alors que
+    // la version en mémoire en trouvait 4 — activité étiquetée à tort comme "pas courante"). Le nom
+    // affiché seul n'est pas fiable (renommage, doublon de migration...), on compare distance et
+    // durée totales (±3%) — mais cette tolérance peut échouer si les stats stockées ont dérivé depuis
+    // la sauvegarde (fusion de fichier après coup, recalcul différent). `fileName` (nom du fichier
+    // brut importé, distinct du nom d'affichage éditable) est un identifiant bien plus stable :
+    // comparé en plus, en OR, jamais en remplacement (garde le filtre existant pour les cas où
+    // `currentFileName` est indisponible, ex. activité pas encore sauvegardée).
     const closeEnough = (a: number, b: number) => a > 0 && Math.abs(a - b) / a < 0.03;
     const pool = activity
       ? history.filter(e => !(
           e.date === currentDate &&
-          closeEnough(activity.totalDistance, e.distance) &&
-          closeEnough(activity.movingTime, e.duration)
+          (
+            (closeEnough(activity.totalDistance, e.distance) && closeEnough(activity.movingTime, e.duration)) ||
+            (!!currentFileName && e.fileName === currentFileName)
+          )
         ))
       : history;
 
@@ -101,7 +113,7 @@ export function useStoredSegmentScan(
     setAttempts(top);
     setStatus('done');
     onScanComplete?.(top);
-  }, [segment, activity, history, loadFile, onScanComplete, fcMax, fcRest]);
+  }, [segment, activity, history, loadFile, onScanComplete, fcMax, fcRest, currentFileName]);
 
   return { status, progress, attempts, scan };
 }
