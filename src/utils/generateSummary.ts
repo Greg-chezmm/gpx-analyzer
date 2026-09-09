@@ -210,12 +210,12 @@ export function generateSummary(opts: SummaryOptions): string {
     const rec = [...intervals!.recoveries].sort(
       (a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0)
     );
-    push(`DÉTAIL PAR RÉPÉTITION (${eff.length}, issu du .fit)`);
+    push(`DÉTAIL PAR RÉPÉTITION (${eff.length} EFFORT(S), issu du .fit — chaque ligne indique explicitement EFFORT ou RÉCUP, ne pas déduire le rôle de l'allure)`);
     for (let i = 0; i < eff.length; i++) {
       const iv = eff[i];
       const distLabel = iv.distance >= 1000 ? `${(iv.distance / 1000).toFixed(2)} km` : `${Math.round(iv.distance)} m`;
       const vam = intervalVAM(iv);
-      let line = `• Rép. ${i + 1} : ${formatDuration(Math.round(iv.duration))}, ${distLabel}`;
+      let line = `• [EFFORT ${i + 1}] : ${formatDuration(Math.round(iv.duration))}, ${distLabel}`;
       if (vam !== null) line += `, VAM ${vam} m/h`;
       if (iv.avgHeartRate) line += `, FC ${iv.avgHeartRate}${iv.maxHeartRate ? `/${iv.maxHeartRate}` : ""} bpm (moy/max)`;
       line += `, allure ${formatPace(iv.avgPace)} /km`;
@@ -231,7 +231,7 @@ export function generateSummary(opts: SummaryOptions): string {
         const rDistLabel = followingRecovery.distance >= 1000
           ? `${(followingRecovery.distance / 1000).toFixed(2)} km`
           : `${Math.round(followingRecovery.distance)} m`;
-        line += ` — récup : ${formatDuration(Math.round(followingRecovery.duration))}, ${rDistLabel}, allure ${formatPace(followingRecovery.avgPace)} /km`;
+        line += ` — [RÉCUP ${followingRecovery.number}] : ${formatDuration(Math.round(followingRecovery.duration))}, ${rDistLabel}, allure ${formatPace(followingRecovery.avgPace)} /km`;
         if (followingRecovery.avgHeartRate) line += `, FC ${followingRecovery.avgHeartRate} bpm`;
       }
 
