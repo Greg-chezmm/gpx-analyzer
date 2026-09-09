@@ -207,6 +207,9 @@ export function generateSummary(opts: SummaryOptions): string {
   if (isVmaSession) {
     // ── Détail par répétition (VMA / intervalles, laps .fit prioritaires) ────────
     const eff = intervals!.efforts;
+    const rec = [...intervals!.recoveries].sort(
+      (a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0)
+    );
     push(`DÉTAIL PAR RÉPÉTITION (${eff.length}, issu du .fit)`);
     for (let i = 0; i < eff.length; i++) {
       const iv = eff[i];
@@ -216,6 +219,22 @@ export function generateSummary(opts: SummaryOptions): string {
       if (vam !== null) line += `, VAM ${vam} m/h`;
       if (iv.avgHeartRate) line += `, FC ${iv.avgHeartRate}${iv.maxHeartRate ? `/${iv.maxHeartRate}` : ""} bpm (moy/max)`;
       line += `, allure ${formatPace(iv.avgPace)} /km`;
+
+      // Récup qui suit cet effort chronologiquement, avant le prochain effort
+      const nextEffortStart = eff[i + 1]?.startTime?.getTime() ?? Infinity;
+      const ivEnd = iv.endTime?.getTime() ?? iv.startTime?.getTime() ?? 0;
+      const followingRecovery = rec.find(r => {
+        const rStart = r.startTime?.getTime() ?? -Infinity;
+        return rStart >= ivEnd && rStart < nextEffortStart;
+      });
+      if (followingRecovery) {
+        const rDistLabel = followingRecovery.distance >= 1000
+          ? `${(followingRecovery.distance / 1000).toFixed(2)} km`
+          : `${Math.round(followingRecovery.distance)} m`;
+        line += ` — récup : ${formatDuration(Math.round(followingRecovery.duration))}, ${rDistLabel}, allure ${formatPace(followingRecovery.avgPace)} /km`;
+        if (followingRecovery.avgHeartRate) line += `, FC ${followingRecovery.avgHeartRate} bpm`;
+      }
+
       push(line);
     }
     sep();

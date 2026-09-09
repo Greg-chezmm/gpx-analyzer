@@ -1,5 +1,5 @@
 import React from "react";
-import { Zap } from "lucide-react";
+import { Zap, RotateCcw } from "lucide-react";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import type { GPXInterval } from "../utils/intervals";
 import { formatDuration, formatPace } from "../utils/format";
@@ -7,18 +7,19 @@ import { SegmentMapModal } from "./SegmentMapModal";
 
 interface IntervalMapModalProps {
   interval: GPXInterval;
-  intervalIndex: number;
   points: GPXTrackPoint[];
   onClose: () => void;
 }
 
-/** Modale carte pour un intervalle de fractionné — délègue à SegmentMapModal. */
+/** Modale carte pour un intervalle de fractionné (effort ou récupération) — délègue à SegmentMapModal. */
 export const IntervalMapModal: React.FC<IntervalMapModalProps> = ({
   interval,
-  intervalIndex,
   points,
   onClose,
 }) => {
+  const isEffort = interval.type === "effort";
+  const accent = isEffort ? "#f97316" : "#3b82f6";
+
   const distLabel = interval.distance >= 1000
     ? `${(interval.distance / 1000).toFixed(2)} km`
     : `${Math.round(interval.distance)} m`;
@@ -35,12 +36,12 @@ export const IntervalMapModal: React.FC<IntervalMapModalProps> = ({
       points={points}
       startIndex={interval.startPointIndex}
       endIndex={interval.endPointIndex}
-      segmentColor="#f97316"
-      icon={<Zap size={18} style={{ color: "#f97316" }} />}
+      segmentColor={accent}
+      icon={isEffort ? <Zap size={18} style={{ color: accent }} /> : <RotateCcw size={18} style={{ color: accent }} />}
       title={
         <>
-          Effort #{intervalIndex + 1} —{" "}
-          <span style={{ color: "#f97316" }}>Fractionné</span>
+          {isEffort ? "Effort" : "Récupération"} #{interval.number} —{" "}
+          <span style={{ color: accent }}>Fractionné</span>
         </>
       }
       subtitle={subtitle}

@@ -109,6 +109,21 @@ function closestPointIndex(points: GPXTrackPoint[], time: Date): number {
   return best;
 }
 
+// Splits values into a "slow" and a "fast" cluster at their widest gap (1D natural-breaks),
+// instead of the raw median — a plain median misclassifies laps that sit close to the
+// middle of the pack (e.g. a longer 300m recovery jog) whenever the fast/slow group sizes
+// are uneven, since the median then lands inside the larger group rather than in the gap
+// between the two real clusters.
+function largestGapThreshold(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  let maxGap = -Infinity, gapIdx = Math.floor(sorted.length / 2);
+  for (let i = 1; i < sorted.length; i++) {
+    const gap = sorted[i] - sorted[i - 1];
+    if (gap > maxGap) { maxGap = gap; gapIdx = i; }
+  }
+  return (sorted[gapIdx - 1] + sorted[gapIdx]) / 2;
+}
+
 function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterval[] | null {
   const meaningful = laps.filter(l =>
     STRUCTURED_TRIGGERS.has(l.lap_trigger ?? '') &&
@@ -120,11 +135,16 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
 
   if (meaningful.length < 2) return null;
 
-  // Classify effort vs recovery by HR (universally applicable: high HR = effort)
-  const hrs = meaningful.map(l => l.avg_heart_rate ?? null).filter((h): h is number => h !== null);
-  const medianHR = hrs.length > 0
-    ? [...hrs].sort((a, b) => a - b)[Math.floor(hrs.length / 2)]
-    : null;
+  // Classify effort vs recovery by speed, not HR: on short reps (e.g. 200m/100m fractionné)
+  // HR lags behind pace and keeps climbing into the recovery jog, so an HR-based split
+  // frequently mislabels a fast rep as "recovery" and a slow jog as "effort". Speed reacts
+  // immediately and matches the convention already used by detectIntervals() for GPX-detected splits.
+  const speeds = meaningful.map(l => {
+    const dur = l.total_elapsed_time ?? 0;
+    const dist = l.total_distance ?? 0;
+    return dur > 0 && dist > 0 ? dist / dur : (l.avg_speed ?? 0);
+  });
+  const threshold = largestGapThreshold(speeds);
 
   const intervals: GPXInterval[] = [];
   let effortNum = 0, recoveryNum = 0;
@@ -132,18 +152,10 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
   for (let i = 0; i < meaningful.length; i++) {
     const lap = meaningful[i];
     const hr = lap.avg_heart_rate ?? null;
-
-    let type: 'effort' | 'recovery';
-    if (medianHR !== null && hr !== null) {
-      type = hr >= medianHR ? 'effort' : 'recovery';
-    } else {
-      // No HR data — alternate starting with effort
-      type = i % 2 === 0 ? 'effort' : 'recovery';
-    }
-
+    const avgSpd = speeds[i];
+    const type: 'effort' | 'recovery' = avgSpd >= threshold ? 'effort' : 'recovery';
     const dur = lap.total_elapsed_time ?? 0;
     const dist = lap.total_distance ?? 0;
-    const avgSpd = dur > 0 && dist > 0 ? dist / dur : (lap.avg_speed ?? 0);
     const num = type === 'effort' ? ++effortNum : ++recoveryNum;
     const startIdx = closestPointIndex(points, lap.start_time!);
     const endIdx = closestPointIndex(points, lap.timestamp!);

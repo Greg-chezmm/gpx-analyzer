@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Zap, AlertTriangle, Heart, Gauge, ChevronDown, Watch, TrendingUp } from "lucide-react";
+import { Zap, AlertTriangle, Heart, Gauge, ChevronDown, Watch, TrendingUp, RotateCcw } from "lucide-react";
 import type { GPXInterval } from "../utils/gpxParser";
 import type { GPXTrackPoint } from "../utils/gpxParser";
 import { formatDuration, formatPace } from "../utils/format";
@@ -26,7 +26,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   source = "detected",
 }) => {
   const [open, setOpen] = useState(false);
-  const [selectedInterval, setSelectedInterval] = useState<{ iv: GPXInterval; idx: number } | null>(null);
+  const [selectedInterval, setSelectedInterval] = useState<GPXInterval | null>(null);
 
   const effortIntervals   = intervals.filter((iv) => iv.type === "effort");
   const recoveryIntervals = intervals.filter((iv) => iv.type === "recovery");
@@ -38,11 +38,11 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
   // Cadence GPX stockée en demi-pas/s pour la course ; on multiplie par 2 pour obtenir ppm.
   const cadenceDisplay = (raw: number) => (isCycling ? raw : raw * 2);
 
-  const hasHeartRate = effortIntervals.some((iv) => iv.avgHeartRate !== null);
-  const hasCadence   = effortIntervals.some((iv) => iv.avgCadence !== null);
-  const hasPower     = effortIntervals.some((iv) => iv.avgPower != null);
-  const hasElevation = effortIntervals.some((iv) => (iv.totalAscent ?? 0) > 0 || (iv.totalDescent ?? 0) > 0);
-  const hasGAP       = !isCycling && effortIntervals.some((iv) => iv.avgGAP !== null);
+  const hasHeartRate = intervals.some((iv) => iv.avgHeartRate !== null);
+  const hasCadence   = intervals.some((iv) => iv.avgCadence !== null);
+  const hasPower     = intervals.some((iv) => iv.avgPower != null);
+  const hasElevation = intervals.some((iv) => (iv.totalAscent ?? 0) > 0 || (iv.totalDescent ?? 0) > 0);
+  const hasGAP       = !isCycling && intervals.some((iv) => iv.avgGAP !== null);
 
   const avgEffortPace    = avg(effortIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
   const avgRecoveryPace  = avg(recoveryIntervals.filter((iv) => iv.avgPace > 0).map((iv) => iv.avgPace));
@@ -112,6 +112,9 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
           color: "var(--text-secondary)", fontWeight: 500,
         }}>
           <span><strong style={{ color: "var(--text-primary)" }}>{effortIntervals.length}</strong> effort{effortIntervals.length > 1 ? "s" : ""}</span>
+          {recoveryIntervals.length > 0 && (
+            <span><strong style={{ color: "var(--text-primary)" }}>{recoveryIntervals.length}</strong> récup{recoveryIntervals.length > 1 ? "s" : ""}</span>
+          )}
           {avgEffortPace !== null && (
             <span>Allure effort moy. : <strong style={{ color: "var(--color-time)", fontFamily: "var(--font-heading)" }}>{formatPace(avgEffortPace)} /km</strong></span>
           )}
@@ -151,21 +154,31 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
               </tr>
             </thead>
             <tbody>
-              {effortIntervals.map((iv, idx) => (
+              {intervals.map((iv) => {
+                const isEffort = iv.type === "effort";
+                const accent = isEffort ? "#f97316" : "#3b82f6";
+                return (
                 <tr
-                  key={iv.number}
-                  onClick={() => setSelectedInterval({ iv, idx })}
-                  style={{ background: "#fffbeb", borderLeft: "3px solid #f97316", cursor: "pointer" }}
-                  title="Cliquer pour voir sur la carte"
+                  key={`${iv.type}-${iv.number}`}
+                  onClick={() => setSelectedInterval(iv)}
+                  style={{
+                    background: isEffort ? "#fffbeb" : "#eff6ff",
+                    borderLeft: `3px solid ${accent}`,
+                    cursor: "pointer",
+                  }}
+                  title={`Cliquer pour voir sur la carte (${isEffort ? "effort" : "récupération"})`}
                 >
-                  <td style={{ fontWeight: 700, color: "var(--color-time)", borderLeft: "3px solid #f97316" }}>
-                    {iv.number}
+                  <td style={{ fontWeight: 700, color: accent, borderLeft: `3px solid ${accent}` }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem" }}>
+                      {isEffort ? <Zap size={12} /> : <RotateCcw size={12} />}
+                      {iv.number}
+                    </span>
                   </td>
                   <td className="numeric">{formatDuration(iv.duration)}</td>
                   <td className="numeric">
                     {iv.distance >= 1000 ? `${(iv.distance / 1000).toFixed(2)} km` : `${Math.round(iv.distance)} m`}
                   </td>
-                  <td className="numeric" style={{ fontWeight: 600, color: "var(--color-time)" }}>
+                  <td className="numeric" style={{ fontWeight: 600, color: accent }}>
                     {formatPace(iv.avgPace)}
                   </td>
                   {hasGAP && (
@@ -209,7 +222,8 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
                     </td>
                   )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -217,8 +231,7 @@ export const IntervalAnalysis: React.FC<IntervalAnalysisProps> = ({
 
       {selectedInterval && (
         <IntervalMapModal
-          interval={selectedInterval.iv}
-          intervalIndex={selectedInterval.idx}
+          interval={selectedInterval}
           points={points}
           onClose={() => setSelectedInterval(null)}
         />
