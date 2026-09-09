@@ -24,12 +24,16 @@ export interface PolarizationResult {
 
 const MIN_SESSIONS = 8;
 
-/** Retourne le lundi (YYYY-MM-DD) de la semaine contenant cette date. */
+/** Retourne le lundi (YYYY-MM-DD) de la semaine contenant cette date.
+ * Parsée/manipulée en UTC (pas de suffixe horaire local) : un `Date` construit depuis une chaîne
+ * "YYYY-MM-DD" seule est déjà interprété en UTC minuit par le constructeur — utiliser les getters
+ * locaux (`getDay`/`setDate`) décale alors le résultat d'un jour pour tout fuseau à l'est de l'UTC
+ * (ex. Europe/Paris) : `mondayOf('2026-01-05')` (un vrai lundi) renvoyait '2026-01-04' (dimanche). */
 function mondayOf(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  const day = d.getDay(); // 0=dimanche..6=samedi
+  const d = new Date(dateStr);
+  const day = d.getUTCDay(); // 0=dimanche..6=samedi
   const diff = (day === 0 ? -6 : 1) - day;
-  d.setDate(d.getDate() + diff);
+  d.setUTCDate(d.getUTCDate() + diff);
   return d.toISOString().slice(0, 10);
 }
 

@@ -493,12 +493,22 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
 
   const rawBStart = rsB[best.bMin].origIndex;
   const rawBEnd = rsB[best.bMax].origIndex;
+  const bStart = snapBoundaryToTarget(pointsB, rawBStart, pointsA[0], localBearingAt(pointsA, 0), true);
+  const bEnd = snapBoundaryToTarget(pointsB, rawBEnd, pointsA[pointsA.length - 1], localBearingAt(pointsA, pointsA.length - 1), false);
+
+  // `best.dist` mesure l'étendue côté RÉFÉRENCE (rsA) — un arrêt/une pause du CANDIDAT en plein
+  // milieu du corridor peut faire progresser normalement l'appariement côté référence (donc valider
+  // le seuil) alors que la distance réellement couverte côté candidat (ce qui est stocké/affiché)
+  // est bien plus courte (bug réel constaté : un passage validé à ~400m de "distance référence" ne
+  // couvrait que 247m côté candidat, `points[bEnd].distFromStart - points[bStart].distFromStart`) —
+  // revalider sur la distance FINALE, celle qui compte réellement pour l'utilisateur.
+  const candidateDist = pointsB[bEnd].distFromStart - pointsB[bStart].distFromStart;
+  if (candidateDist < minDistanceM) return null;
 
   return {
     aStart: rsA[best.aStart].origIndex,
     aEnd: rsA[best.aEnd].origIndex,
-    bStart: snapBoundaryToTarget(pointsB, rawBStart, pointsA[0], localBearingAt(pointsA, 0), true),
-    bEnd: snapBoundaryToTarget(pointsB, rawBEnd, pointsA[pointsA.length - 1], localBearingAt(pointsA, pointsA.length - 1), false),
+    bStart, bEnd,
   };
 }
 
@@ -728,6 +738,23 @@ export function matchStoredSegmentAll(
     const bEndOrig = snapBoundaryToTarget(
       candidate.points, rsB[best.bMax].origIndex, refPoints[refPoints.length - 1], localBearingAt(refPoints, refPoints.length - 1), false,
     );
+
+    // `best.dist` mesure l'étendue côté RÉFÉRENCE (rsA) — une pause/un arrêt du candidat en plein
+    // milieu du corridor (ex. le coureur s'arrête pour reprendre son souffle entre deux répétitions)
+    // peut faire progresser normalement l'appariement côté référence tout en ne couvrant presque rien
+    // côté candidat sur cette même fenêtre : `best.dist` valide alors le seuil alors que la distance
+    // RÉELLEMENT parcourue par le candidat (celle stockée/affichée) est bien plus courte — bug réel
+    // constaté sur un vrai fichier (247m mesurés pour un passage validé à ~400m côté référence).
+    // Revalider sur cette distance finale avant d'accepter le passage.
+    const candidateDist = candidate.points[bEndOrig].distFromStart - candidate.points[bStartOrig].distFromStart;
+    if (candidateDist < requiredM) {
+      // Neutralise quand même cette plage pour ne pas la retrouver indéfiniment à la passe suivante.
+      for (let k = Math.max(0, bStartOrig - 1); k <= Math.min(working.length - 1, bEndOrig + 1); k++) {
+        working[k] = { lat: 90, lon: 0, distFromStart: working[k].distFromStart };
+      }
+      continue;
+    }
+
     results.push(buildAttempt(candidate.points, bStartOrig, bEndOrig, candidate.date, candidate.name, isCurrent));
 
     // Neutralise la plage détectée (+1 point de marge) — coordonnées écartées à un endroit qui ne
