@@ -3,7 +3,7 @@ import {
   geohashEncode, computeFingerprint, fingerprintOverlap, computeRouteGeometry,
   checkFullRouteCoverage, matchFullRoute, matchStoredSegment, matchStoredSegmentAll, toCachedAttempt,
 } from './segments';
-import { ORIGIN, walkPath, toTrackPoints, reversePath } from './testFixtures';
+import { ORIGIN, walkPath, toTrackPoints, reversePath, destinationPoint } from './testFixtures';
 
 describe('geohashEncode', () => {
   it('donne le même hash pour des points très proches (même cellule ~150m)', () => {
@@ -181,5 +181,58 @@ describe('matchStoredSegment / matchStoredSegmentAll', () => {
     const cached = toCachedAttempt(matches[0], 1, matches.length);
     expect(cached.passNumber).toBeUndefined();
     expect(cached.totalPasses).toBeUndefined();
+  });
+
+  it('affine la distance mesurée jusqu\'à quelques mètres du segment de référence malgré un point GPS isolé bruité en bord de passage (bug réel signalé par Greg : segment piste de 397m mesuré à 376m sur certains passages)', () => {
+    // Résolution fine (2m) — représentative d'un vrai enregistrement GPS, bien plus dense que le pas
+    // de rééchantillonnage du matching (10m, voir SEGMENT_RESAMPLE_STEP_M) : sans cette densité, il
+    // n'existe tout simplement aucun point plus précis vers lequel affiner la borne.
+    const refPath = walkPath(ORIGIN, [{ bearingDeg: 0, distanceM: 400 }], 2);
+    // Un seul point (le tout premier et le tout dernier) bruité de 20m latéralement — glitch GPS
+    // isolé typique en tout début/fin d'enregistrement (lock satellite pas encore stabilisé), le
+    // reste du tracé étant propre.
+    const candidate = refPath.map((p, i) => {
+      if (i !== 0 && i !== refPath.length - 1) return p;
+      const d = destinationPoint(p.lat, p.lon, 90, 20);
+      return { lat: d.lat, lon: d.lon, distFromStart: p.distFromStart };
+    });
+
+    const match = matchStoredSegment(refPath, 400, {
+      points: toTrackPoints(candidate, 3), date: '2026-01-01', name: 'piste',
+    });
+    expect(match).not.toBeNull();
+    // Sans l'affinage de bornes, ce même scénario tronque à 370m (30m de perte) — vérifié en
+    // désactivant temporairement snapBoundaryToTarget pendant le développement de ce correctif.
+    expect(Math.abs(match!.distance - 400)).toBeLessThan(10);
+  });
+
+  it('ne raccroche pas la borne affinée sur la jambe parallèle voisine d\'un lacet serré (dérive du bug de fragmentation vers snapBoundaryToTarget)', () => {
+    // Même géométrie en épingles que le test de non-régression trajet complet : virages ~170°
+    // tous les 300m, jambes parallèles proches les unes des autres.
+    const legs = [];
+    let bearing = 20;
+    for (let i = 0; i < 6; i++) {
+      legs.push({ bearingDeg: bearing, distanceM: 300 });
+      bearing = (bearing + 170) % 360;
+    }
+    const full = walkPath(ORIGIN, legs);
+
+    // Segment de référence : une seule jambe complète (la 3e, ~900-1200m), loin des bords du tracé
+    // pour que les jambes voisines (300m avant/après en distance, mais géographiquement proches) soient
+    // dans la fenêtre de recherche de snapBoundaryToTarget si le filtre de cap ne les excluait pas.
+    const refStart = full.findIndex(p => p.distFromStart >= 900);
+    const refEnd = full.findIndex(p => p.distFromStart >= 1200);
+    const refPoints = full.slice(refStart, refEnd + 1);
+    const refDistance = refPoints[refPoints.length - 1].distFromStart - refPoints[0].distFromStart;
+
+    const match = matchStoredSegment(refPoints, refDistance, {
+      points: toTrackPoints(full, 3), date: '2026-01-01', name: 'montée en lacets',
+    });
+    expect(match).not.toBeNull();
+    // Doit rester proche de la longueur de la seule jambe visée (~300m, tolérance large pour la
+    // granularité normale du rééchantillonnage/snap) — un raccrochage sur la jambe voisine ferait
+    // déraper la distance mesurée de PLUSIEURS CENTAINES de mètres (jambes à 300m d'écart), ce que
+    // cette marge suffit largement à distinguer d'un simple écart de précision.
+    expect(Math.abs(match!.distance - refDistance)).toBeLessThan(50);
   });
 });

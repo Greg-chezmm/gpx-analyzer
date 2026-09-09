@@ -415,6 +415,65 @@ function bestSegmentCluster(runs: Run[], rsA: ResampledPoint[], rsB: ResampledPo
   return clusters.reduce((a, b) => (b.dist > a.dist ? b : a));
 }
 
+// Fenêtre de recherche (en mètres, le long de distFromStart) pour affiner une borne de correspondance
+// (voir `snapBoundaryToTarget`) — corrige l'imprécision inhérente au pas de rééchantillonnage
+// (SEGMENT_RESAMPLE_STEP_M = 10m) : le point retenu par `computeRuns` pour le début/la fin d'un passage
+// est un point rééchantillonné, donc à ±10m du vrai croisement physique de chaque bord, sans compter
+// qu'un point rééchantillonné proche du bord peut aussi être rejeté par le filtre cap/corridor (ex.
+// léger virage en entrée/sortie de segment). Sur un segment court (ex. 400m piste), ces deux bords
+// perdus peuvent à eux seuls représenter ~20m d'écart entre la distance mesurée d'un passage et la
+// distance réelle du segment de référence — largement au-dessus du "~10m" attendu (bug réel signalé
+// par Greg : un segment piste de 397m mesuré à 376m sur certains passages). On recherche donc, dans
+// une petite fenêtre autour de la borne déjà trouvée, le point du tracé ORIGINAL (pas rééchantillonné)
+// le plus proche du point de référence exact — sans élargir la fenêtre au-delà de la tolérance de
+// corridor, pour ne pas "réparer" à tort un passage réellement incomplet (ex. arrêt avant la fin).
+const BOUNDARY_SNAP_WINDOW_M = SEGMENT_RESAMPLE_STEP_M * 2;
+
+/** Cap local en `points[i]` (vers le point suivant, ou depuis le précédent en bout de tracé) — `null` si `points` n'a qu'un point. */
+function localBearingAt(points: GeoPoint[], i: number): number | null {
+  if (i < points.length - 1) return bearingDeg(points[i].lat, points[i].lon, points[i + 1].lat, points[i + 1].lon);
+  if (i > 0) return bearingDeg(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+  return null;
+}
+
+/**
+ * Affine une borne de correspondance (index dans `points`) en cherchant, dans une petite fenêtre
+ * autour d'elle, le point le plus proche de `target` — voir `BOUNDARY_SNAP_WINDOW_M`.
+ *
+ * Deux garde-fous, tous deux nécessaires (bugs réels rencontrés en testant ce correctif) :
+ * - **Cap** (`expectedBearingDeg`, même tolérance que le matching principal, `DIRECTION_TOLERANCE_DEG`) :
+ *   sans ça, sur un lacet serré, la jambe parallèle voisine (aller vs retour d'une épingle, ou
+ *   répétition d'une même côte) peut être géographiquement plus proche de `target` que le vrai point
+ *   de continuité tout en allant dans le sens opposé — reproduirait le bug de "raccrochage" sur la
+ *   mauvaise jambe que `computeMatchIndices`/`computeRuns` évitent déjà pour le reste du matching.
+ * - **Sens unique** (`extendTowardStart`) : l'affinage ne peut qu'ÉTENDRE la borne vers `target`
+ *   (jamais la resserrer). Sans cette contrainte, avec une dérive GPS en rampe (proche de `target` en
+ *   ligne droite au bord, mais qui s'éloigne en s'approchant du reste du tracé), le point le plus
+ *   proche au sens strict peut se trouver À L'INTÉRIEUR du passage plutôt qu'à son bord — rétrécissant
+ *   le passage mesuré au lieu de corriger la troncature d'origine (constaté en testant : un match déjà
+ *   correct à 400/400m ramené à tort à 350m).
+ */
+function snapBoundaryToTarget(
+  points: GeoPoint[], approxIndex: number, target: GeoPoint, expectedBearingDeg: number | null,
+  extendTowardStart: boolean,
+): number {
+  const centerDist = points[approxIndex]?.distFromStart ?? 0;
+  let best = approxIndex;
+  let bestD = calculateDistance(points[approxIndex].lat, points[approxIndex].lon, target.lat, target.lon);
+  for (let i = 0; i < points.length; i++) {
+    const delta = points[i].distFromStart - centerDist;
+    if (Math.abs(delta) > BOUNDARY_SNAP_WINDOW_M) continue;
+    if (extendTowardStart ? delta > 0 : delta < 0) continue; // ne resserre jamais la borne
+    if (expectedBearingDeg !== null) {
+      const localBearing = localBearingAt(points, i);
+      if (localBearing !== null && angleDiff(localBearing, expectedBearingDeg) >= DIRECTION_TOLERANCE_DEG) continue;
+    }
+    const d = calculateDistance(points[i].lat, points[i].lon, target.lat, target.lon);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return bestD <= CORRIDOR_TOLERANCE_M ? best : approxIndex;
+}
+
 /**
  * Trouve le meilleur passage entre deux tracés — voir `bestSegmentCluster`. Nécessaire depuis la
  * découverte qu'une montée en lacets serrés peut faire diverger le suivi d'index (`computeRuns`)
@@ -432,11 +491,14 @@ function findLongestMatch(pointsA: GeoPoint[], pointsB: GeoPoint[], minDistanceM
   const best = bestSegmentCluster(runs, rsA, rsB);
   if (!best || best.dist < minDistanceM) return null;
 
+  const rawBStart = rsB[best.bMin].origIndex;
+  const rawBEnd = rsB[best.bMax].origIndex;
+
   return {
     aStart: rsA[best.aStart].origIndex,
     aEnd: rsA[best.aEnd].origIndex,
-    bStart: rsB[best.bMin].origIndex,
-    bEnd: rsB[best.bMax].origIndex,
+    bStart: snapBoundaryToTarget(pointsB, rawBStart, pointsA[0], localBearingAt(pointsA, 0), true),
+    bEnd: snapBoundaryToTarget(pointsB, rawBEnd, pointsA[pointsA.length - 1], localBearingAt(pointsA, pointsA.length - 1), false),
   };
 }
 
@@ -659,8 +721,13 @@ export function matchStoredSegmentAll(
     const best = bestSegmentCluster(runs, rsA, rsB);
     if (!best || best.dist < requiredM) break;
 
-    const bStartOrig = rsB[best.bMin].origIndex;
-    const bEndOrig = rsB[best.bMax].origIndex;
+    // Affiné sur candidate.points (tracé original, jamais neutralisé) — voir snapBoundaryToTarget.
+    const bStartOrig = snapBoundaryToTarget(
+      candidate.points, rsB[best.bMin].origIndex, refPoints[0], localBearingAt(refPoints, 0), true,
+    );
+    const bEndOrig = snapBoundaryToTarget(
+      candidate.points, rsB[best.bMax].origIndex, refPoints[refPoints.length - 1], localBearingAt(refPoints, refPoints.length - 1), false,
+    );
     results.push(buildAttempt(candidate.points, bStartOrig, bEndOrig, candidate.date, candidate.name, isCurrent));
 
     // Neutralise la plage détectée (+1 point de marge) — coordonnées écartées à un endroit qui ne
