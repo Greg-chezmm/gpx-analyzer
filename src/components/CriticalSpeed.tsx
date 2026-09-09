@@ -2,7 +2,7 @@ import React from "react";
 import { Gauge } from "lucide-react";
 import type { CloudHandle } from "../hooks/useFirebaseCloud";
 import type { ManualBests } from "../hooks/useManualBests";
-import { estimateCriticalSpeedFromHistory, dPrimeProfile } from "../utils/criticalSpeed";
+import { estimateCriticalSpeedFromHistory, dPrimeProfile, DEFAULT_WINDOW_MONTHS } from "../utils/criticalSpeed";
 import { formatPace as fmtPace } from "../utils/format";
 
 interface Props {
@@ -21,6 +21,16 @@ const D_PRIME_DESCRIPTIONS: Record<ReturnType<typeof dPrimeProfile>, string> = {
   equilibre: "réserve dans la norme des coureurs entraînés (repère usuel ~150-400 m)",
   explosif:  "réserve confortable — bonne capacité à accélérer/sprinter au-delà de ton allure critique",
 };
+
+/** Âge relatif d'une date (FR) — "il y a 3 jours" / "il y a 5 mois" / "il y a 2 ans". */
+function relativeAge(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000);
+  if (days < 1) return "aujourd'hui";
+  if (days < 14) return `il y a ${days} j`;
+  if (days < 60) return `il y a ${Math.round(days / 7)} sem.`;
+  if (days < 730) return `il y a ${Math.round(days / 30.44)} mois`;
+  return `il y a ${Math.round(days / 365.25)} ans`;
+}
 
 /**
  * Vitesse critique (Critical Speed, modèle de Monod & Scherrer) — ajustée par régression linéaire
@@ -98,16 +108,28 @@ export const CriticalSpeed: React.FC<Props> = ({ cloud, manualBests }) => {
             }}>
             {p.label} en {Math.floor(p.timeSeconds / 60)}:{Math.round(p.timeSeconds % 60).toString().padStart(2, '0')}
             {' — '}{p.entryName.length > 22 ? p.entryName.slice(0, 20) + '…' : p.entryName}
-            {' · '}{new Intl.DateTimeFormat('fr-FR', { dateStyle: 'short' }).format(new Date(p.entryDate))}
+            {' · '}<span style={{ fontStyle: 'italic' }}>{relativeAge(p.entryDate)}</span>
           </span>
         ))}
       </div>
 
-      {result.confidence !== 'high' && (
+      {result.windowMonths === null ? (
         <div style={{ fontSize: '0.71rem', color: 'var(--text-tertiary)', marginTop: '0.75rem',
           borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
+          Aucun record dans les {DEFAULT_WINDOW_MONTHS} derniers mois sur assez de distances — repli sur tout ton
+          historique, certains records ci-dessus peuvent ne plus refléter ta forme actuelle.
+        </div>
+      ) : (
+        <div style={{ fontSize: '0.71rem', color: 'var(--text-tertiary)', marginTop: '0.75rem' }}>
+          Basé sur tes records des {result.windowMonths} derniers mois (plus représentatif de ta forme actuelle).
+        </div>
+      )}
+
+      {result.confidence !== 'high' && (
+        <div style={{ fontSize: '0.71rem', color: 'var(--text-tertiary)', marginTop: '0.4rem',
+          borderTop: '1px solid var(--border-color)', paddingTop: '0.5rem' }}>
           {result.points.length < 3
-            ? "Basé sur seulement 2 records — enregistre un record supplémentaire entre 2 et 30 minutes (souvent 1km/5km/10km) pour fiabiliser l'estimation."
+            ? "Basé sur seulement 2 records — enregistre un record supplémentaire entre 2 et 30 minutes (souvent 1km/2km/5km) pour fiabiliser l'estimation."
             : "L'ajustement est imprécis (R² faible) — tes records dans cette fenêtre de durée ne suivent pas bien le modèle, résultat à prendre avec prudence."}
         </div>
       )}

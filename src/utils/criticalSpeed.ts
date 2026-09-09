@@ -1,4 +1,4 @@
-import { aggregateBestRunEfforts, type BestEffortsData } from './bestEfforts';
+import { aggregateBestRunEfforts, type AggregatedRunBest, type BestEffortsData } from './bestEfforts';
 import type { ManualBests } from '../hooks/useManualBests';
 
 // ─── Vitesse critique (Critical Speed) — modèle hyperbolique de Monod & Scherrer (1965) ────────
@@ -25,6 +25,9 @@ export interface CriticalSpeedResult {
   rSquared: number;
   confidence: 'low' | 'medium' | 'high';
   points: CSPoint[];
+  /** Fenêtre de récence (mois) réellement utilisée, `null` si repli sur tout l'historique — voir
+   * `estimateCriticalSpeedFromHistory`. */
+  windowMonths: number | null;
 }
 
 // Fenêtre de durées où le modèle CS est physiologiquement valide (domaine "sévère") — en-dehors,
@@ -61,19 +64,45 @@ export function estimateCriticalSpeed(points: CSPoint[]): CriticalSpeedResult | 
     pts.length >= 3 && rSquared >= 0.98 ? 'high' :
     rSquared >= 0.85 ? 'medium' : 'low';
 
-  return { cs, csPaceSecPerKm: 1000 / cs, dPrime, rSquared, confidence, points: pts };
+  return { cs, csPaceSecPerKm: 1000 / cs, dPrime, rSquared, confidence, points: pts, windowMonths: null };
 }
 
-/** Construit les points (distance, temps) depuis l'historique Drive et ajuste le modèle CS/D'. */
+// Fenêtre de récence par défaut : les records plus anciens peuvent ne plus refléter la forme
+// actuelle (progression ou régression depuis) — privilégier les records récents plutôt que le
+// record absolu de toute l'histoire, qui peut mélanger des époques de forme différentes.
+export const DEFAULT_WINDOW_MONTHS = 12;
+
+function monthsAgo(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.toISOString().slice(0, 10);
+}
+
+function toCSPoints(best: AggregatedRunBest[]): CSPoint[] {
+  return best.map(b => ({
+    key: b.key, label: b.label, meters: b.meters, timeSeconds: b.timeSeconds,
+    entryName: b.entryName, entryDate: b.entryDate,
+  }));
+}
+
+/**
+ * Construit les points (distance, temps) depuis l'historique Drive et ajuste le modèle CS/D'.
+ * Ne considère que les records des `windowMonths` derniers mois par défaut — sinon, se replie sur
+ * tout l'historique si la fenêtre récente ne fournit pas assez de points valides (mieux vaut une
+ * estimation sur des records plus anciens qu'aucune estimation du tout).
+ */
 export function estimateCriticalSpeedFromHistory(
   history: { activityType: string; bestEfforts?: BestEffortsData; name: string; date: string }[],
   manualBests?: ManualBests,
+  windowMonths: number = DEFAULT_WINDOW_MONTHS,
 ): CriticalSpeedResult | null {
-  const best = aggregateBestRunEfforts(history, manualBests);
-  return estimateCriticalSpeed(best.map(b => ({
-    key: b.key, label: b.label, meters: b.meters, timeSeconds: b.timeSeconds,
-    entryName: b.entryName, entryDate: b.entryDate,
-  })));
+  const cutoff = monthsAgo(windowMonths);
+  const recent = history.filter(e => e.date >= cutoff);
+  const recentResult = estimateCriticalSpeed(toCSPoints(aggregateBestRunEfforts(recent, manualBests)));
+  if (recentResult) return { ...recentResult, windowMonths };
+
+  const fullResult = estimateCriticalSpeed(toCSPoints(aggregateBestRunEfforts(history, manualBests)));
+  return fullResult ? { ...fullResult, windowMonths: null } : null;
 }
 
 /** Interprète l'ordre de grandeur de D' (réserve anaérobie) par rapport aux valeurs typiques chez les coureurs entraînés (~150-400 m). */

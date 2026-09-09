@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { estimateCriticalSpeed, dPrimeProfile, type CSPoint } from './criticalSpeed';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { estimateCriticalSpeed, estimateCriticalSpeedFromHistory, dPrimeProfile, type CSPoint } from './criticalSpeed';
+import type { BestEffortsData } from './bestEfforts';
 
 /** Point CS synthétique — construit `meters` exactement sur la droite d = cs*t + dPrime pour un temps donné. */
 function pointOnLine(key: string, timeSeconds: number, cs: number, dPrime: number): CSPoint {
@@ -84,5 +85,52 @@ describe('dPrimeProfile', () => {
     expect(dPrimeProfile(250)).toBe('equilibre');
     expect(dPrimeProfile(250.1)).toBe('explosif');
     expect(dPrimeProfile(400)).toBe('explosif');
+  });
+});
+
+/** Entrée d'historique synthétique avec un temps sur une seule distance (clé RUN_DISTANCES). */
+function historyEntry(date: string, key: string, timeSeconds: number, name = 'test'): {
+  activityType: string; bestEfforts: BestEffortsData; name: string; date: string;
+} {
+  return { activityType: 'running', bestEfforts: { unit: 'time', values: { [key]: timeSeconds } }, name, date };
+}
+
+describe('estimateCriticalSpeedFromHistory', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('utilise la fenêtre de récence par défaut (12 mois) quand elle fournit assez de points', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-09T12:00:00'));
+
+    const history = [
+      historyEntry('2026-06-01', '1km', 210),
+      historyEntry('2026-07-01', '2km', 430),
+      historyEntry('2026-08-01', '5km', 1150),
+    ];
+    const result = estimateCriticalSpeedFromHistory(history);
+    expect(result).not.toBeNull();
+    expect(result!.windowMonths).toBe(12);
+    expect(result!.points.length).toBe(3);
+  });
+
+  it('se replie sur tout l\'historique si la fenêtre récente ne fournit pas assez de points (windowMonths=null)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-09T12:00:00'));
+
+    // Un seul point récent (< 12 mois) — insuffisant seul ; les 2 autres records ont plus de 12 mois.
+    const history = [
+      historyEntry('2023-01-01', '1km', 210),
+      historyEntry('2023-06-01', '2km', 430),
+      historyEntry('2026-08-01', '5km', 1150),
+    ];
+    const result = estimateCriticalSpeedFromHistory(history);
+    expect(result).not.toBeNull();
+    expect(result!.windowMonths).toBeNull();
+    expect(result!.points.length).toBe(3);
+  });
+
+  it('retourne null si même tout l\'historique ne fournit pas 2 points valides', () => {
+    const history = [historyEntry('2020-01-01', '1km', 210)];
+    expect(estimateCriticalSpeedFromHistory(history)).toBeNull();
   });
 });
