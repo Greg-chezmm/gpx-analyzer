@@ -3,10 +3,18 @@ import type { ManualBests } from '../hooks/useManualBests';
 
 // ─── Meilleurs efforts — best efforts (course) / courbe de puissance (vélo) ────
 
-/** Distances standard pour les meilleurs efforts course à pied (mètres). */
+/**
+ * Distances standard pour les meilleurs efforts course à pied (mètres).
+ * '2km' ajouté (2026-09-09) : pour un coureur dont le 1km et le 5km encadrent la fenêtre de
+ * validité de la vitesse critique (2-30 min, voir criticalSpeed.ts), le 10km/semi/marathon tombent
+ * souvent AU-DESSUS de cette fenêtre (ex. 10km en 39min pour un 5km en 20min) et le 400m EN-DESSOUS
+ * (toujours <2min, même à fond) — sans distance intermédiaire, la régression CS/D' reste bloquée à
+ * 2 points pour toujours, quelle que soit la course courue (cas réel signalé par Greg).
+ */
 export const RUN_DISTANCES: { key: string; label: string; meters: number }[] = [
   { key: '400m',  label: '400 m',   meters: 400 },
   { key: '1km',   label: '1 km',    meters: 1000 },
+  { key: '2km',   label: '2 km',    meters: 2000 },
   { key: '5km',   label: '5 km',    meters: 5000 },
   { key: '10km',  label: '10 km',   meters: 10000 },
   { key: '21km',  label: 'Semi',    meters: 21097 },
@@ -44,7 +52,7 @@ export interface AggregatedRunBest {
 // plutôt qu'une vraie performance. Rejeté plutôt que d'exclure l'activité entière : ses autres
 // distances peuvent rester valides (ex. la partie marchée/courue d'un trajet mixte).
 const WORLD_RECORD_S: Record<string, number> = {
-  '400m': 43.03, '1km': 131.96, '5km': 755.36, '10km': 1571, '21km': 3451, '42km': 7235,
+  '400m': 43.03, '1km': 131.96, '2km': 284.79, '5km': 755.36, '10km': 1571, '21km': 3451, '42km': 7235,
 };
 const PLAUSIBILITY_MARGIN = 1.05; // 5% sous le record du monde — au-delà, quasi certainement une erreur de données
 

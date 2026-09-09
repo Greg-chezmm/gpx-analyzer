@@ -6,7 +6,7 @@ export interface ManualBest {
   date: string; // YYYY-MM-DD
 }
 
-/** Temps manuels par distance standard (clés RUN_DISTANCES : '400m'/'1km'/'5km'/'10km'/'21km'/'42km'). */
+/** Temps manuels par distance standard (clés RUN_DISTANCES : '400m'/'1km'/'2km'/'5km'/'10km'/'21km'/'42km'). */
 export type ManualBests = Record<string, ManualBest>;
 
 const KEY = "gpx_manual_bests";
