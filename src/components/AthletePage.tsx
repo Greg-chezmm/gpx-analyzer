@@ -12,6 +12,7 @@ import { BestEffortsCurve } from "./BestEffortsCurve";
 import { TrainingBalance } from "./TrainingBalance";
 import { RaceGoal } from "./RaceGoal";
 import { ProgressChart } from "./ProgressChart";
+import { ActivityCalendar } from "./ActivityCalendar";
 
 interface Props {
   cloud: CloudHandle;
@@ -23,6 +24,7 @@ interface Props {
   setManualBest: (key: string, best: ManualBest | null) => void;
   fcMax: number;
   fcRest: number;
+  onOpenActivity: (entry: ActivityIndexEntry) => Promise<void>;
   onClose: () => void;
 }
 
@@ -33,7 +35,7 @@ interface Props {
  * ces cartes dépendent de l'historique cloud (activités explicitement sauvegardées), pas de
  * l'activité en cours.
  */
-export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, manualBests, setManualBest, fcMax, fcRest, onClose }) => {
+export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, setRaceGoal, manualBests, setManualBest, fcMax, fcRest, onOpenActivity, onClose }) => {
   return (
     <>
       <div className="card animate-slide-up" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -56,6 +58,7 @@ export const AthletePage: React.FC<Props> = ({ cloud, history, tsb, raceGoal, se
       )}
 
       <AthleteProfile cloud={cloud} />
+      <ActivityCalendar cloud={cloud} onOpenActivity={onOpenActivity} />
       <PolarizationChart cloud={cloud} />
       <CriticalSpeed cloud={cloud} manualBests={manualBests} />
       <BestEffortsCurve cloud={cloud} manualBests={manualBests} setManualBest={setManualBest} />

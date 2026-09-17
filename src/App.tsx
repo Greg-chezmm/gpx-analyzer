@@ -634,6 +634,7 @@ function App() {
             setManualBest={setManualBest}
             fcMax={fcMax}
             fcRest={fcRest}
+            onOpenActivity={async (entry) => { await handleOpenCloudActivity(entry); setShowAthletePage(false); }}
             onClose={() => setShowAthletePage(false)}
           />
         ) : !activity ? (
