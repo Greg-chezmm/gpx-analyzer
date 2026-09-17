@@ -26,9 +26,21 @@ declare global {
 
 export type DriveStatus = 'unavailable' | 'disconnected' | 'connecting' | 'connected' | 'error';
 
+/** Traduit les codes d'erreur Google Identity Services en message compréhensible. */
+function describeDriveError(code: string | undefined): string {
+  switch (code) {
+    case 'popup_closed_by_user': return 'Fenêtre de connexion Google fermée avant la fin.';
+    case 'popup_failed_to_open': return "La fenêtre de connexion Google n'a pas pu s'ouvrir (bloqueur de popups ?).";
+    case 'access_denied': return "Accès refusé — l'autorisation Drive n'a pas été accordée.";
+    default: return code ? `Connexion Drive refusée (${code}).` : 'Connexion Drive refusée par le navigateur.';
+  }
+}
+
 export interface DriveHandle {
   status: DriveStatus;
   wasAuthorized: boolean;
+  /** Message d'erreur de la dernière tentative de connexion explicite (signIn) — null si aucune ou réussie. */
+  error: string | null;
   // Jeton d'accès brut — utilisé par useFirebaseCloud.ts pour l'upload/téléchargement de fichier
   // (solution hybride : fichier brut sur Drive, métadonnées sur Firestore).
   token: string | null;
@@ -51,7 +63,12 @@ export function useGoogleDrive(): DriveHandle {
   const [status, setStatus] = useState<DriveStatus>(CLIENT_ID ? 'disconnected' : 'unavailable');
   const [token, setToken] = useState<string | null>(null);
   const [history, setHistory] = useState<ActivityIndexEntry[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const clientRef = useRef<{ requestAccessToken(overrides?: { prompt?: string }): void } | null>(null);
+  // Distingue une tentative explicite (bouton "Connecter Drive") d'une reconnexion silencieuse au
+  // montage — seule la première doit afficher une erreur, l'autre échoue souvent sans conséquence
+  // (ex. token expiré, l'utilisateur reclique juste après).
+  const isExplicitAttemptRef = useRef(false);
   // Persiste à travers les refreshs : true tant que l'utilisateur n'a pas explicitement déconnecté
   const [wasAuthorized] = useState(() => localStorage.getItem(AUTHORIZED_KEY) === '1');
 
@@ -67,9 +84,13 @@ export function useGoogleDrive(): DriveHandle {
         callback: (resp) => {
           if (!resp.access_token) {
             // Reconnexion bloquée (popup-blocker, cookies tiers) — on ne supprime pas la clé
+            if (isExplicitAttemptRef.current) setError(describeDriveError(resp.error));
+            isExplicitAttemptRef.current = false;
             setStatus('disconnected');
             return;
           }
+          isExplicitAttemptRef.current = false;
+          setError(null);
           localStorage.setItem(AUTHORIZED_KEY, '1');
           setToken(resp.access_token);
           setStatus('connected');
@@ -108,6 +129,8 @@ export function useGoogleDrive(): DriveHandle {
 
   const signIn = useCallback(() => {
     if (!clientRef.current) return;
+    isExplicitAttemptRef.current = true;
+    setError(null);
     setStatus('connecting');
     // Si déjà autorisé, pas besoin de redemander le consentement — prompt vide = popup rapide sans écran de consentement
     const prompt = localStorage.getItem(AUTHORIZED_KEY) === '1' ? '' : 'consent';
@@ -153,5 +176,5 @@ export function useGoogleDrive(): DriveHandle {
     await refresh();
   }, [token, refresh]);
 
-  return { status, wasAuthorized, token, history, signIn, signOut, loadFile, deleteActivity, updateActivityMeta, refresh, saveSettings, loadSettings };
+  return { status, wasAuthorized, error, token, history, signIn, signOut, loadFile, deleteActivity, updateActivityMeta, refresh, saveSettings, loadSettings };
 }

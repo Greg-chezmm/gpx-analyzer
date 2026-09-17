@@ -45,12 +45,14 @@ interface CloudSyncButtonProps {
   fcRest: number;
   /** Déclenche la connexion Drive — nécessaire en complément de Firebase (fichier brut hébergé sur Drive). */
   onConnectDrive: () => void;
+  /** Message de la dernière tentative de connexion Drive échouée (null si aucune/réussie) — voir useGoogleDrive.ts. */
+  driveError: string | null;
   /** Ancien index Drive complet — utilisé par le bouton "Importer depuis Drive" (migration, voir plan Firebase étape E). */
   driveHistory: ActivityIndexEntry[];
 }
 
 /** Bouton principal de synchronisation cloud (Firebase) — connexion Google ou accès à l'historique. */
-export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive, driveHistory }: CloudSyncButtonProps) {
+export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive, driveError, driveHistory }: CloudSyncButtonProps) {
   const [open, setOpen] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
@@ -93,13 +95,20 @@ export function CloudSyncButton({ cloud, onLoad, fcMax, fcRest, onConnectDrive, 
 
   if (cloud.status === 'needs-drive') {
     return (
-      <button type="button" className="btn btn-outline" onClick={onConnectDrive}
-        title="Le fichier brut des activités est hébergé sur Drive — connecte aussi Drive pour sauvegarder/charger"
-        style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', borderColor: '#f59e0b', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)' }}
-      >
-        <Flame size={15} />
-        <span className="btn-text">Connecter Drive aussi</span>
-      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.3rem' }}>
+        <button type="button" className="btn btn-outline" onClick={onConnectDrive}
+          title="Le fichier brut des activités est hébergé sur Drive — connecte aussi Drive pour sauvegarder/charger"
+          style={{ padding: '0.5rem 1rem', fontSize: '0.9rem', borderColor: '#f59e0b', color: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.06)' }}
+        >
+          <Flame size={15} />
+          <span className="btn-text">Connecter Drive aussi</span>
+        </button>
+        {driveError && (
+          <span style={{ fontSize: '0.72rem', color: '#ef4444', maxWidth: 220, textAlign: 'right' }}>
+            {driveError} Réessaie.
+          </span>
+        )}
+      </div>
     );
   }
 

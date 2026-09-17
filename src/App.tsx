@@ -35,6 +35,7 @@ import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
 import { AthletePage } from "./components/AthletePage";
+import { StrengthTraining } from "./components/StrengthTraining";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -62,7 +63,7 @@ import { useStoredSegments } from "./hooks/useStoredSegments";
 
 import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
-  Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge, LayoutDashboard,
+  Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge, LayoutDashboard, Dumbbell,
 } from "lucide-react";
 
 /** Options de découpage des splits disponibles dans le sélecteur. */
@@ -102,6 +103,7 @@ function App() {
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAthletePage, setShowAthletePage] = useState(false);
+  const [showStrengthTraining, setShowStrengthTraining] = useState(false);
   const [activeTab, setActiveTab] = useState<ActivityTabId>("overview");
   const mergeInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
@@ -551,7 +553,7 @@ function App() {
 
         <div className="header-actions">
           <button type="button" className="btn btn-outline"
-            onClick={() => setShowAthletePage(v => !v)}
+            onClick={() => { setShowAthletePage(v => !v); setShowStrengthTraining(false); }}
             title="Bilan athlète — profil, records, vitesse critique, charge d'entraînement"
             style={{
               padding: "0.5rem 1rem", fontSize: "0.9rem",
@@ -564,7 +566,21 @@ function App() {
             <LayoutDashboard size={15} />
             <span className="btn-text">Bilan athlète</span>
           </button>
-          <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} driveHistory={drive.history} />
+          <button type="button" className="btn btn-outline"
+            onClick={() => { setShowStrengthTraining(v => !v); setShowAthletePage(false); }}
+            title="Renforcement trail — exercices, prescriptions et vidéos"
+            style={{
+              padding: "0.5rem 1rem", fontSize: "0.9rem",
+              ...(showStrengthTraining ? {
+                borderColor: "var(--accent-primary)", color: "var(--accent-primary)",
+                backgroundColor: "color-mix(in srgb, var(--accent-primary) 8%, transparent)",
+              } : {}),
+            }}
+          >
+            <Dumbbell size={15} />
+            <span className="btn-text">Renforcement</span>
+          </button>
+          <CloudSyncButton cloud={cloud} onLoad={handleActivityLoaded} fcMax={fcMax} fcRest={fcRest} onConnectDrive={drive.signIn} driveError={drive.error} driveHistory={drive.history} />
           {enrichedActivity && (
             <CloudSaveButton cloud={cloud} onSave={handleSaveToCloud} alreadySaved={savedToCloud} />
           )}
@@ -605,7 +621,9 @@ function App() {
       {/* ── Contenu principal ── */}
       <ErrorBoundary key={enrichedActivity?.name ?? 'accueil'}>
       <main className="main-content">
-        {showAthletePage ? (
+        {showStrengthTraining ? (
+          <StrengthTraining onClose={() => setShowStrengthTraining(false)} />
+        ) : showAthletePage ? (
           <AthletePage
             cloud={cloud}
             history={sessionsWithTrimp}
