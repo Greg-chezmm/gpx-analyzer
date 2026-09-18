@@ -1,5 +1,28 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { X, Dumbbell, ChevronDown, Play, Pause, ListChecks, Timer } from "lucide-react";
+import stepDownGif from "../assets/exercises/edb/step-down.gif";
+import sideLungeGif from "../assets/exercises/edb/side-lunge.gif";
+import plankArmRaiseGif from "../assets/exercises/edb/plank-arm-raise.gif";
+import abduction1 from "../assets/exercises/edb/abduction-1.jpg";
+import abduction2 from "../assets/exercises/edb/abduction-2.jpg";
+import romanianDeadliftGif from "../assets/exercises/edb/romanian-deadlift.gif";
+import pallofPressGif from "../assets/exercises/edb/pallof-press.gif";
+import gluteBridgeGif from "../assets/exercises/edb/glute-bridge.gif";
+import kbSwingGif from "../assets/exercises/edb/kb-swing.gif";
+import squatBulgareGif from "../assets/exercises/edb/squat-bulgare.gif";
+import walkingLungeGif from "../assets/exercises/edb/walking-lunge.gif";
+import squatPauseGif from "../assets/exercises/edb/squat-pause.gif";
+import monsterWalkGif from "../assets/exercises/edb/monster-walk.gif";
+import squatJumpGif from "../assets/exercises/edb/squat-jump.gif";
+import lungeJumpGif from "../assets/exercises/edb/lunge-jump.gif";
+import nordicCurlGif from "../assets/exercises/edb/nordic-curl.gif";
+import calfRaiseStaircaseGif from "../assets/exercises/edb/calf-raise-staircase.gif";
+import calfRaiseSingleLegGif from "../assets/exercises/edb/calf-raise-single-leg.gif";
+import clamshellGif from "../assets/exercises/edb/clamshell.gif";
+import birdDogGif from "../assets/exercises/edb/bird-dog.gif";
+import plankGif from "../assets/exercises/edb/plank.gif";
+import sidePlankDynamicGif from "../assets/exercises/edb/side-plank-dynamic.gif";
+import deadBugGif from "../assets/exercises/edb/dead-bug.gif";
 
 type Category = 'post' | 'quad' | 'stab' | 'chev' | 'tronc' | 'plio';
 type Filter = Category | 'all' | 'intact';
@@ -24,9 +47,11 @@ interface Exercise {
    * est aussi redessiné pour se lire sans le label : profil + "nez" directionnel pour 'côté', tête avec
    * yeux + épaules larges pour 'face', schéma abstrait sans silhouette pour 'dessus'). */
   view: 'face' | 'côté' | 'dessus';
-  /** Décomposition du mouvement en 4 poses (chacune un <svg viewBox="0 0 60 100"> autoporteur),
-   * lues en boucle par PoseAnimator (bouton lecture) pour visualiser l'enchaînement. */
-  frames: [ExerciseFrame, ExerciseFrame, ExerciseFrame, ExerciseFrame];
+  /** Décomposition du mouvement en 4 poses minimum (chacune un <svg> autoporteur, viewBox propre à
+   * l'exercice), lues en boucle par PoseAnimator (bouton lecture) pour visualiser l'enchaînement.
+   * La plupart des exercices en ont exactement 4 ; certains (ex. Step-down, décrit en 5 étapes dans
+   * `steps`) en ont une de plus pour un repère supplémentaire (alignement, erreur à éviter, etc.). */
+  frames: [ExerciseFrame, ExerciseFrame, ExerciseFrame, ExerciseFrame, ...ExerciseFrame[]];
 }
 
 const VIEW_LABELS: Record<Exercise['view'], string> = {
@@ -50,7 +75,7 @@ interface PoseAnimatorProps {
  * d'animation imposée à l'écran), bouton Lire/Pause pour boucler, points cliquables pour naviguer
  * manuellement pose par pose.
  */
-function PoseAnimator({ frames, svgLabel, view, size = 170 }: PoseAnimatorProps) {
+function PoseAnimator({ frames, svgLabel, view, size = 380 }: PoseAnimatorProps) {
   const [current, setCurrent] = useState(0);
   const [playing, setPlaying] = useState(false);
 
@@ -131,6 +156,109 @@ const CATEGORY_COLORS: Record<Category, string> = {
 
 const ACCENT = '#4ADE80';
 
+/** Pose illustrée par une photo/illustration recadrée (plutôt qu'un schéma vectoriel) — utilisé
+ * quand une image de référence externe (fournie par Greg) est plus lisible qu'un dessin filaire. */
+function ExercisePhoto({ src, alt }: { src: string; alt: string }) {
+  return (
+    <img src={src} alt={alt} style={{ width: '100%', height: '100%', objectFit: 'contain', borderRadius: 8 }} />
+  );
+}
+
+interface PlankFrameProps {
+  /** Préfixe d'id unique pour les <defs> (filter) de cette pose — évite les collisions d'id SVG entre poses/exercices. */
+  frameId: string;
+  /** Hauteur du bassin (seul point qui varie d'une pose à l'autre — épaules, coudes/mains et genoux/orteils restent fixes). */
+  hipY: number;
+  status: 'ok' | 'error';
+  labelText: string;
+}
+
+/**
+ * Schéma de gainage frontal (planche) — vue de côté façon "fiche technique" : fond quadrillé
+ * discret, ligne de sol, membres colorés (avant/arrière) avec squelette et nœuds d'articulation
+ * ombrés, étiquette de statut. Seul le point de bassin bouge d'une pose à l'autre pour illustrer
+ * le bassin trop haut / affaissé par rapport à la position correcte (droite).
+ * Inspiré d'un schéma fourni par Greg, adapté à la posture allongée de la planche.
+ */
+function PlankFrame({ frameId, hipY, status, labelText }: PlankFrameProps) {
+  const spineColor = status === 'ok' ? ACCENT : '#ef4444';
+  const jointAccent = status === 'ok' ? '#1e293b' : '#ef4444';
+  const shoulder = { x: 95, y: 92 };
+  const hip = { x: 300, y: hipY };
+
+  return (
+    <svg viewBox="0 0 500 260" width="100%" height="100%">
+      <defs>
+        <filter id={`${frameId}-shadow`} x="-30%" y="-30%" width="160%" height="160%">
+          <feDropShadow dx="0" dy="1.5" stdDeviation="1.5" floodColor="#000000" floodOpacity="0.18" />
+        </filter>
+      </defs>
+
+      <rect width="500" height="260" fill="#f8f9fa" rx="12" />
+      <g stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4">
+        <line x1="30" y1="60" x2="470" y2="60" />
+        <line x1="30" y1="120" x2="470" y2="120" />
+        <line x1="30" y1="180" x2="470" y2="180" />
+        <line x1="150" y1="20" x2="150" y2="240" />
+        <line x1="330" y1="20" x2="330" y2="240" />
+      </g>
+      {/* Ligne guide — hauteur de bassin idéale (alignement tête-épaules-hanches-talons) */}
+      <line x1="30" y1="100" x2="470" y2="100" stroke="#06B6D4" strokeWidth="1" strokeDasharray="3,2" opacity="0.35" />
+      {/* Sol */}
+      <line x1="30" y1="205" x2="465" y2="205" stroke="#cbd5e1" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Bras arrière (orange) — en profondeur, derrière le torse */}
+      <line x1="97" y1="96" x2="108" y2="158" stroke="#fed7aa" strokeWidth="12" strokeLinecap="round" />
+      <line x1="108" y1="158" x2="165" y2="205" stroke="#fed7aa" strokeWidth="12" strokeLinecap="round" />
+      <line x1="97" y1="96" x2="108" y2="158" stroke="#ea580c" strokeWidth="2" strokeLinecap="round" />
+      <line x1="108" y1="158" x2="165" y2="205" stroke="#ea580c" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Jambe arrière (verte) — en profondeur */}
+      <line x1={hip.x} y1={hip.y + 6} x2="400" y2="158" stroke="#bbf7d0" strokeWidth="14" strokeLinecap="round" />
+      <line x1="400" y1="158" x2="450" y2="205" stroke="#bbf7d0" strokeWidth="14" strokeLinecap="round" />
+      <line x1={hip.x} y1={hip.y + 6} x2="400" y2="158" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" />
+      <line x1="400" y1="158" x2="450" y2="205" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Tête */}
+      <circle cx="75" cy="65" r="22" fill="#e2e8f0" stroke="#475569" strokeWidth="2" />
+      <path d="M 65 68 Q 75 76 85 68" fill="none" stroke="#475569" strokeWidth="1.5" />
+      <circle cx="80" cy="72" r="1.6" fill="#475569" />
+
+      {/* Torse — ligne de dos, indicateur principal droit/plié */}
+      <line x1={shoulder.x} y1={shoulder.y} x2={hip.x} y2={hip.y} stroke={spineColor} strokeWidth="10" strokeLinecap="round" />
+
+      {/* Bras avant (sarcelle) — appui avant-bras au sol */}
+      <line x1={shoulder.x} y1={shoulder.y} x2="92" y2="150" stroke="#99f6e4" strokeWidth="14" strokeLinecap="round" />
+      <line x1="92" y1="150" x2="150" y2="205" stroke="#99f6e4" strokeWidth="14" strokeLinecap="round" />
+      <line x1={shoulder.x} y1={shoulder.y} x2="92" y2="150" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" />
+      <line x1="92" y1="150" x2="150" y2="205" stroke="#0d9488" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Jambe avant (indigo) — pointe de pied au sol */}
+      <line x1={hip.x} y1={hip.y} x2="390" y2="150" stroke="#c7d2fe" strokeWidth="16" strokeLinecap="round" />
+      <line x1="390" y1="150" x2="438" y2="205" stroke="#c7d2fe" strokeWidth="16" strokeLinecap="round" />
+      <line x1={hip.x} y1={hip.y} x2="390" y2="150" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" />
+      <line x1="390" y1="150" x2="438" y2="205" stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Nœuds d'articulation */}
+      <circle cx={shoulder.x} cy={shoulder.y} r="4.5" fill="#1e293b" filter={`url(#${frameId}-shadow)`} />
+      <circle cx={hip.x} cy={hip.y} r="5.5" fill={jointAccent} filter={`url(#${frameId}-shadow)`} />
+      <circle cx="92" cy="150" r="4" fill="#0d9488" filter={`url(#${frameId}-shadow)`} />
+      <circle cx="150" cy="205" r="3.5" fill="#0d9488" filter={`url(#${frameId}-shadow)`} />
+      <circle cx="390" cy="150" r="4" fill="#4f46e5" filter={`url(#${frameId}-shadow)`} />
+      <circle cx="438" cy="205" r="3.5" fill="#4f46e5" filter={`url(#${frameId}-shadow)`} />
+
+      {/* Étiquette de statut */}
+      <g transform="translate(20, 18)">
+        <rect width="185" height="24" rx="4" fill="#ffffff" stroke="#cbd5e1" strokeWidth="1" />
+        <circle cx="13" cy="12" r="3" fill={spineColor} />
+        <text x="22" y="16" fill="#334155" fontFamily="system-ui, sans-serif" fontSize="9.5" fontWeight="700" letterSpacing="0.4">
+          {labelText}
+        </text>
+      </g>
+    </svg>
+  );
+}
+
 const EXERCISES: Exercise[] = [
   {
     name: 'Romanian Deadlift', category: 'post', material: 'KB 12kg', intact: true,
@@ -147,106 +275,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Charnière de hanche — dos plat',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ — debout, buste droit',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <line x1="3" y1="90" x2="87" y2="90" stroke="#2E3840" strokeWidth="1" />
-            {/* Canvas élargi (0-90) pour laisser la place à un vrai buste ~horizontal en bas du mouvement.
-                La hanche (58,46, point orange) et les pieds (48/62,88) sont FIXES sur les 4 poses — seuls
-                le buste, la tête et le bras/KB pivotent autour de la hanche, comme un vrai hip hinge. */}
-            <circle cx="52" cy="12" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="46,9.5 46,14.5 39,12" fill={ACCENT} />
-            <line x1="58" y1="18" x2="55" y2="15" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="58" cy="18" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="18" x2="58" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="46" r="2.6" fill="#F59E0B" />
-            <line x1="58" y1="18" x2="55" y2="32" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="55" cy="32" r="2" fill="#8A9BA8" />
-            <line x1="55" y1="32" x2="53" y2="51" stroke={ACCENT} strokeWidth="2" />
-            <rect x="49" y="51" width="8" height="7" rx="1.5" fill={ACCENT} opacity="0.7" />
-            <line x1="58" y1="46" x2="54" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="54" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="54" y1="67" x2="48" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="58" y1="46" x2="59" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="59" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="59" y1="67" x2="62" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente — le buste bascule en avant, hanche fixe',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <line x1="3" y1="90" x2="87" y2="90" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="36" cy="17" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="30,14.5 30,19.5 23,17" fill={ACCENT} />
-            <line x1="42" y1="23" x2="39" y2="20" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="42" cy="23" r="2.2" fill="#8A9BA8" />
-            <line x1="42" y1="23" x2="58" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="46" r="2.6" fill="#F59E0B" />
-            <line x1="42" y1="23" x2="39" y2="37" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="39" cy="37" r="2" fill="#8A9BA8" />
-            <line x1="39" y1="37" x2="37" y2="55" stroke={ACCENT} strokeWidth="2" />
-            <rect x="33" y="55" width="8" height="7" rx="1.5" fill={ACCENT} opacity="0.7" />
-            <line x1="58" y1="46" x2="52" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="52" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="52" y1="67" x2="48" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="58" y1="46" x2="60" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="60" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="60" y1="67" x2="62" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — buste ~parallèle au sol, hanche toujours au même endroit',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <line x1="3" y1="90" x2="87" y2="90" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="27" cy="27" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="21,24.5 21,29.5 14,27" fill={ACCENT} />
-            <line x1="33" y1="34" x2="30" y2="31" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="34" r="2.2" fill="#8A9BA8" />
-            {/* La hanche EST le pivot — elle ne bouge pas d'une pose à l'autre, c'est le buste qui pivote autour. */}
-            <line x1="33" y1="34" x2="58" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="46" r="2.6" fill="#F59E0B" />
-            <line x1="33" y1="34" x2="30" y2="47" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="47" r="2" fill="#8A9BA8" />
-            <line x1="30" y1="47" x2="28" y2="65" stroke={ACCENT} strokeWidth="2" />
-            <rect x="24" y="65" width="8" height="7" rx="1.5" fill={ACCENT} opacity="0.7" />
-            <line x1="58" y1="46" x2="50" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="50" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="50" y1="67" x2="48" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="58" y1="46" x2="61" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="61" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="61" y1="67" x2="62" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Remontée — pousse dans les talons, fessiers',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <line x1="3" y1="90" x2="87" y2="90" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="36" cy="17" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="30,14.5 30,19.5 23,17" fill={ACCENT} />
-            <line x1="42" y1="23" x2="39" y2="20" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="42" cy="23" r="2.2" fill="#8A9BA8" />
-            <line x1="42" y1="23" x2="58" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="46" r="2.6" fill="#F59E0B" />
-            <line x1="42" y1="23" x2="39" y2="37" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="39" cy="37" r="2" fill="#8A9BA8" />
-            <line x1="39" y1="37" x2="37" y2="55" stroke={ACCENT} strokeWidth="2" />
-            <rect x="33" y="55" width="8" height="7" rx="1.5" fill={ACCENT} opacity="0.7" />
-            <line x1="58" y1="46" x2="52" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="52" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="52" y1="67" x2="48" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="58" y1="46" x2="60" y2="67" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="60" cy="67" r="2.2" fill="#8A9BA8" />
-            <line x1="60" y1="67" x2="62" y2="88" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Charnière de hanche — dos plat', svg: <ExercisePhoto src={romanianDeadliftGif} alt="Romanian Deadlift — animation du mouvement complet" /> },
+      { label: 'Charnière de hanche — dos plat', svg: <ExercisePhoto src={romanianDeadliftGif} alt="Romanian Deadlift — animation du mouvement complet" /> },
+      { label: 'Charnière de hanche — dos plat', svg: <ExercisePhoto src={romanianDeadliftGif} alt="Romanian Deadlift — animation du mouvement complet" /> },
+      { label: 'Charnière de hanche — dos plat', svg: <ExercisePhoto src={romanianDeadliftGif} alt="Romanian Deadlift — animation du mouvement complet" /> },
     ],
   },
   {
@@ -264,85 +296,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Bassin aligné — jambe libre tendue',
     view: 'côté',
     frames: [
-      {
-        label: 'Bas — bassin proche du sol',
-        svg: (
-          <svg viewBox="0 0 100 100" width="100%" height="100%">
-            <line x1="5" y1="88" x2="95" y2="88" stroke="#2E3840" strokeWidth="1" />
-            {/* Tête/épaule/pied au sol restent fixes sur les 4 poses — seuls le bassin et la jambe tendue bougent. */}
-            <circle cx="15" cy="79" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="12,73 18,73 15,68" fill={ACCENT} />
-            <circle cx="16" cy="86" r="2.2" fill="#8A9BA8" />
-            <line x1="16" y1="86" x2="45" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="45" cy="84" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="84" x2="58" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="58" cy="66" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="66" x2="60" y2="87" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="45" y1="84" x2="70" y2="83" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="70" cy="83" r="2.2" fill={ACCENT} opacity="0.7" />
-            <line x1="70" y1="83" x2="92" y2="82" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Montée',
-        svg: (
-          <svg viewBox="0 0 100 100" width="100%" height="100%">
-            <line x1="5" y1="88" x2="95" y2="88" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="15" cy="79" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="12,73 18,73 15,68" fill={ACCENT} />
-            <circle cx="16" cy="86" r="2.2" fill="#8A9BA8" />
-            <line x1="16" y1="86" x2="45" y2="74" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="45" cy="74" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="74" x2="59" y2="64" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="59" cy="64" r="2.2" fill="#8A9BA8" />
-            <line x1="59" y1="64" x2="60" y2="87" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="45" y1="74" x2="70" y2="70" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="70" cy="70" r="2.2" fill={ACCENT} opacity="0.7" />
-            <line x1="70" y1="70" x2="93" y2="66" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Haut — alignement épaule-hanche-genou',
-        svg: (
-          <svg viewBox="0 0 100 100" width="100%" height="100%">
-            <line x1="5" y1="88" x2="95" y2="88" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="15" cy="79" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="12,73 18,73 15,68" fill={ACCENT} />
-            <circle cx="16" cy="86" r="2.2" fill="#8A9BA8" />
-            {/* Ligne guide en pointillés : épaule → hanche → genou doivent être alignés en haut du mouvement. */}
-            <line x1="16" y1="86" x2="90" y2="30" stroke="#F59E0B" strokeWidth="1" strokeDasharray="2,2" opacity="0.6" />
-            <line x1="16" y1="86" x2="45" y2="64" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="45" cy="64" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="64" x2="62" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="62" cy="58" r="2.2" fill="#8A9BA8" />
-            <line x1="62" y1="58" x2="60" y2="87" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="45" y1="64" x2="68" y2="46" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="68" cy="46" r="2.2" fill={ACCENT} opacity="0.7" />
-            <line x1="68" y1="46" x2="90" y2="30" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente — contrôlée',
-        svg: (
-          <svg viewBox="0 0 100 100" width="100%" height="100%">
-            <line x1="5" y1="88" x2="95" y2="88" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="15" cy="79" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="12,73 18,73 15,68" fill={ACCENT} />
-            <circle cx="16" cy="86" r="2.2" fill="#8A9BA8" />
-            <line x1="16" y1="86" x2="45" y2="74" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="45" cy="74" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="74" x2="59" y2="64" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="59" cy="64" r="2.2" fill="#8A9BA8" />
-            <line x1="59" y1="64" x2="60" y2="87" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="45" y1="74" x2="70" y2="70" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="70" cy="70" r="2.2" fill={ACCENT} opacity="0.7" />
-            <line x1="70" y1="70" x2="93" y2="66" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Bassin aligné — jambe libre tendue', svg: <ExercisePhoto src={gluteBridgeGif} alt="Pont fessier unilatéral — animation du mouvement complet" /> },
+      { label: 'Bassin aligné — jambe libre tendue', svg: <ExercisePhoto src={gluteBridgeGif} alt="Pont fessier unilatéral — animation du mouvement complet" /> },
+      { label: 'Bassin aligné — jambe libre tendue', svg: <ExercisePhoto src={gluteBridgeGif} alt="Pont fessier unilatéral — animation du mouvement complet" /> },
+      { label: 'Bassin aligné — jambe libre tendue', svg: <ExercisePhoto src={gluteBridgeGif} alt="Pont fessier unilatéral — animation du mouvement complet" /> },
     ],
   },
   {
@@ -360,84 +317,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Corps rigide — résister avec les ischios',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ — à genoux, corps droit',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="56" y2="72" stroke="#2E3840" strokeWidth="1" />
-            {/* Le genou (44,52, point orange) est le pivot FIXE — la cheville, coincée sous le meuble,
-                reste elle aussi fixe (44,70). Seul le buste (rigide, "corps droit") bascule autour du genou. */}
-            <rect x="38" y="64" width="14" height="8" fill="#2E3840" rx="1.5" />
-            <line x1="44" y1="52" x2="44" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="44" cy="70" r="2" fill="#8A9BA8" />
-            <circle cx="44" cy="52" r="2.6" fill="#F59E0B" />
-            <circle cx="38" cy="13" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="32,10.5 32,15.5 25,13" fill={ACCENT} />
-            <line x1="44" y1="19" x2="41" y2="16" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="44" cy="19" r="2.2" fill="#8A9BA8" />
-            <line x1="40" y1="28" x2="48" y2="36" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="48" y1="28" x2="40" y2="36" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="44" y1="19" x2="44" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bascule avant — les ischios résistent',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="56" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <rect x="38" y="64" width="14" height="8" fill="#2E3840" rx="1.5" />
-            <line x1="44" y1="52" x2="44" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="44" cy="70" r="2" fill="#8A9BA8" />
-            <circle cx="44" cy="52" r="2.6" fill="#F59E0B" />
-            <circle cx="27" cy="21" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="21,18.5 21,23.5 14,21" fill={ACCENT} />
-            <line x1="33" y1="27" x2="30" y2="24" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="27" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="35" x2="37" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="37" y1="35" x2="30" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="33" y1="27" x2="44" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Résistance maximale — sur le point de lâcher',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="56" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <rect x="38" y="64" width="14" height="8" fill="#2E3840" rx="1.5" />
-            <line x1="44" y1="52" x2="44" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="44" cy="70" r="2" fill="#8A9BA8" />
-            <circle cx="44" cy="52" r="2.6" fill="#F59E0B" />
-            <circle cx="15" cy="29" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="9,26.5 9,31.5 2,29" fill={ACCENT} />
-            <line x1="21" y1="35" x2="18" y2="32" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="21" cy="35" r="2.2" fill="#8A9BA8" />
-            {/* Mains posées au sol devant — "quand tu ne tiens plus, poser les mains et pousser". */}
-            <line x1="21" y1="35" x2="14" y2="52" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="12" cy="54" r="3" fill={ACCENT} opacity="0.6" />
-            <line x1="21" y1="35" x2="44" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Remontée — poussée des bras + genou',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="56" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <rect x="38" y="64" width="14" height="8" fill="#2E3840" rx="1.5" />
-            <line x1="44" y1="52" x2="44" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="44" cy="70" r="2" fill="#8A9BA8" />
-            <circle cx="44" cy="52" r="2.6" fill="#F59E0B" />
-            <circle cx="27" cy="21" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="21,18.5 21,23.5 14,21" fill={ACCENT} />
-            <line x1="33" y1="27" x2="30" y2="24" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="27" r="2.2" fill="#8A9BA8" />
-            <line x1="33" y1="27" x2="24" y2="40" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="33" y1="27" x2="44" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
+      { label: 'Corps rigide — résister avec les ischios (démo sur banc GHD — chez toi : chevilles sous un meuble)', svg: <ExercisePhoto src={nordicCurlGif} alt="Nordic Curl — animation du mouvement complet (variante machine)" /> },
+      { label: 'Corps rigide — résister avec les ischios (démo sur banc GHD — chez toi : chevilles sous un meuble)', svg: <ExercisePhoto src={nordicCurlGif} alt="Nordic Curl — animation du mouvement complet (variante machine)" /> },
+      { label: 'Corps rigide — résister avec les ischios (démo sur banc GHD — chez toi : chevilles sous un meuble)', svg: <ExercisePhoto src={nordicCurlGif} alt="Nordic Curl — animation du mouvement complet (variante machine)" /> },
+      { label: 'Corps rigide — résister avec les ischios (démo sur banc GHD — chez toi : chevilles sous un meuble)', svg: <ExercisePhoto src={nordicCurlGif} alt="Nordic Curl — animation du mouvement complet (variante machine)" /> },
     ],
   },
   {
@@ -455,199 +338,33 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Impulsion des hanches — pas des bras',
     view: 'côté',
     frames: [
-      {
-        label: 'Arrière — charnière, KB entre les jambes',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="52" y2="72" stroke="#2E3840" strokeWidth="1" />
-            {/* Les pieds (23/37,72) sont FIXES sur les 4 poses — position debout inchangée. Seuls la
-                hanche, le buste et le KB bougent dans l'arc du swing. */}
-            <circle cx="19" cy="18" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="13,15.5 13,20.5 6,18" fill={ACCENT} />
-            <line x1="25" y1="24" x2="22" y2="21" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="25" cy="24" r="2.2" fill="#8A9BA8" />
-            <line x1="25" y1="24" x2="30" y2="44" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="30" cy="44" r="2.4" fill="#F59E0B" />
-            <line x1="25" y1="24" x2="20" y2="36" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="20" cy="36" r="2" fill="#8A9BA8" />
-            <line x1="20" y1="36" x2="18" y2="54" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="18" cy="58" r="5" fill="none" stroke={ACCENT} strokeWidth="1.5" />
-            <line x1="30" y1="44" x2="23" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="23" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="23" y1="60" x2="23" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="44" x2="35" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="35" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="35" y1="60" x2="37" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Impulsion des hanches',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="52" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="26" cy="16" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,13.5 20,18.5 13,16" fill={ACCENT} />
-            <line x1="32" y1="22" x2="29" y2="19" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="22" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="22" x2="30" y2="44" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="30" cy="44" r="2.4" fill="#F59E0B" />
-            <line x1="32" y1="22" x2="26" y2="30" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="30" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="30" x2="27" y2="46" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="28" cy="50" r="5" fill="none" stroke={ACCENT} strokeWidth="1.5" />
-            <line x1="30" y1="44" x2="24" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="24" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="24" y1="60" x2="23" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="44" x2="36" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="36" y1="60" x2="37" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Avant — KB à hauteur d’épaules',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="52" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,11.5 24,16.5 17,14" fill={ACCENT} />
-            <line x1="36" y1="20" x2="33" y2="17" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="20" r="2.2" fill="#8A9BA8" />
-            <line x1="36" y1="20" x2="30" y2="44" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="30" cy="44" r="2.4" fill="#F59E0B" />
-            <line x1="36" y1="20" x2="22" y2="18" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="22" cy="18" r="2" fill="#8A9BA8" />
-            <line x1="22" y1="18" x2="13" y2="15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="10" cy="14" r="5" fill="none" stroke={ACCENT} strokeWidth="1.5" />
-            <line x1="30" y1="44" x2="24" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="24" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="24" y1="60" x2="23" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="44" x2="36" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="36" y1="60" x2="37" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour — charnière contrôlée',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="72" x2="52" y2="72" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="26" cy="16" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,13.5 20,18.5 13,16" fill={ACCENT} />
-            <line x1="32" y1="22" x2="29" y2="19" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="22" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="22" x2="30" y2="44" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="30" cy="44" r="2.4" fill="#F59E0B" />
-            <line x1="32" y1="22" x2="26" y2="30" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="30" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="30" x2="27" y2="46" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="28" cy="50" r="5" fill="none" stroke={ACCENT} strokeWidth="1.5" />
-            <line x1="30" y1="44" x2="24" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="24" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="24" y1="60" x2="23" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="44" x2="36" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="60" r="2.2" fill="#8A9BA8" />
-            <line x1="36" y1="60" x2="37" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Impulsion des hanches — pas des bras', svg: <ExercisePhoto src={kbSwingGif} alt="KB Swing — animation du mouvement complet" /> },
+      { label: 'Impulsion des hanches — pas des bras', svg: <ExercisePhoto src={kbSwingGif} alt="KB Swing — animation du mouvement complet" /> },
+      { label: 'Impulsion des hanches — pas des bras', svg: <ExercisePhoto src={kbSwingGif} alt="KB Swing — animation du mouvement complet" /> },
+      { label: 'Impulsion des hanches — pas des bras', svg: <ExercisePhoto src={kbSwingGif} alt="KB Swing — animation du mouvement complet" /> },
     ],
   },
   {
-    name: 'Step-down excentrique', category: 'quad', material: 'Escalier', intact: true,
+    name: 'Step-down excentrique', category: 'quad', material: 'Escalier (marche 15-20cm)', intact: true,
     prescription: '3-4 × 10 chaque jambe — descente en 4 secondes — exercice clé descentes trail',
     steps: [
-      "Debout sur une marche, une jambe dans le vide",
-      "Descendre en fléchissant la jambe d'appui — 4 secondes très lent",
-      "Talon de la jambe libre effleure le sol sans y poser le poids",
-      "Remonter en 1 seconde — jambe d'appui uniquement",
-      "Genou dans l'axe du pied — ne jamais le laisser partir en dedans",
+      "Marche d'escalier 15-20cm (pas une chaise) — talon au bord dans le vide",
+      "Jambe libre tendue vers l'avant dans le vide — pas vers l'arrière",
+      "Main légèrement posée sur le mur pour l'équilibre — sans s'y appuyer, corps droit, regard devant",
+      "Descendre en fléchissant la jambe d'appui — 4 secondes, très lent",
+      "Le talon de la jambe libre descend jusqu'à effleurer le sol — sans y poser le poids",
+      "Remonter en 1 seconde en poussant sur le talon de la jambe d'appui",
+      "Genou d'appui dans l'axe du pied — jamais vers l'intérieur",
     ],
-    warning: 'Progression : S1→3×10 | S2→4×10 | S3→4×12 — réduire si quadris chargés',
+    warning: 'À éviter : descendre vite (toute la valeur est dans les 4 sec) · poser le poids sur la jambe libre · laisser le genou rentrer · s\'appuyer sur le mur',
     youtubeQuery: 'step down excentrique trail genoux',
     svgLabel: "Descente lente 4 sec — genou dans l'axe",
     view: 'côté',
     frames: [
-      {
-        label: 'Départ — jambe libre dans le vide',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="4" y="55" width="52" height="6" fill="#2E3840" rx="2" />
-            {/* Le pied d'appui (27,55, sur la marche) est FIXE sur les 4 poses — seuls la hanche/le buste
-                (qui descendent) et la jambe libre (dans le vide) bougent. */}
-            <circle cx="27" cy="55" r="2.2" fill="#F59E0B" />
-            <circle cx="24" cy="12" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="18,9.5 18,14.5 11,12" fill={ACCENT} />
-            <line x1="30" y1="18" x2="27" y2="15" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="18" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="18" x2="30" y2="45" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="30" cy="45" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="45" x2="27" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="30" y1="45" x2="40" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="40" cy="58" r="2.2" fill="#8A9BA8" />
-            <line x1="40" y1="58" x2="46" y2="58" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente (2 sec) — genou plie, pied d’appui fixe',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="4" y="55" width="52" height="6" fill="#2E3840" rx="2" />
-            <circle cx="27" cy="55" r="2.2" fill="#F59E0B" />
-            <circle cx="26" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,19.5 20,24.5 13,22" fill={ACCENT} />
-            <line x1="32" y1="28" x2="29" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="28" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="28" x2="35" y2="49" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="35" cy="49" r="2.2" fill="#8A9BA8" />
-            <line x1="35" y1="49" x2="27" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="35" y1="49" x2="45" y2="63" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="45" cy="63" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="63" x2="50" y2="64" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — talon libre effleure le sol',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="4" y="55" width="52" height="6" fill="#2E3840" rx="2" />
-            <circle cx="27" cy="55" r="2.2" fill="#F59E0B" />
-            <circle cx="30" cy="33" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,30.5 24,35.5 17,33" fill={ACCENT} />
-            <line x1="36" y1="39" x2="33" y2="36" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="39" r="2.2" fill="#8A9BA8" />
-            <line x1="36" y1="39" x2="44" y2="58" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="44" cy="58" r="2.2" fill="#8A9BA8" />
-            <line x1="44" y1="58" x2="27" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="44" y1="58" x2="52" y2="76" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="52" cy="76" r="2.2" fill="#8A9BA8" />
-            <line x1="52" y1="76" x2="57" y2="78" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Remontée (1 sec) — pousse sur la jambe d’appui',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="4" y="55" width="52" height="6" fill="#2E3840" rx="2" />
-            <circle cx="27" cy="55" r="2.2" fill="#F59E0B" />
-            <circle cx="26" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,19.5 20,24.5 13,22" fill={ACCENT} />
-            <line x1="32" y1="28" x2="29" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="28" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="28" x2="35" y2="49" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="35" cy="49" r="2.2" fill="#8A9BA8" />
-            <line x1="35" y1="49" x2="27" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="35" y1="49" x2="45" y2="63" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="45" cy="63" r="2.2" fill="#8A9BA8" />
-            <line x1="45" y1="63" x2="50" y2="64" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
+      { label: "Descente lente 4 sec — genou dans l'axe", svg: <ExercisePhoto src={stepDownGif} alt="Step-down excentrique — animation du mouvement complet" /> },
+      { label: "Descente lente 4 sec — genou dans l'axe", svg: <ExercisePhoto src={stepDownGif} alt="Step-down excentrique — animation du mouvement complet" /> },
+      { label: "Descente lente 4 sec — genou dans l'axe", svg: <ExercisePhoto src={stepDownGif} alt="Step-down excentrique — animation du mouvement complet" /> },
+      { label: "Descente lente 4 sec — genou dans l'axe", svg: <ExercisePhoto src={stepDownGif} alt="Step-down excentrique — animation du mouvement complet" /> },
     ],
   },
   {
@@ -664,100 +381,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Pied arrière sur chaise — descente verticale',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ — debout, pied avant au sol',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="34" y="48" width="24" height="5" fill="#2E3840" rx="2" />
-            <rect x="34" y="53" width="5" height="20" fill="#2E3840" />
-            <rect x="53" y="53" width="5" height="20" fill="#2E3840" />
-            {/* Pied avant (10,82) FIXE au sol, pied arrière (55,50) FIXE sur la chaise — seul le buste,
-                qui descend verticalement entre les deux, bouge d'une pose à l'autre. */}
-            <circle cx="10" cy="82" r="2.2" fill="#F59E0B" />
-            <circle cx="16" cy="12" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="10,9.5 10,14.5 3,12" fill={ACCENT} />
-            <line x1="22" y1="18" x2="19" y2="15" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="22" cy="18" r="2.2" fill="#8A9BA8" />
-            <line x1="22" y1="18" x2="18" y2="45" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="18" cy="45" r="2.2" fill="#8A9BA8" />
-            <line x1="18" y1="45" x2="12" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="12" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="12" y1="65" x2="10" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="18" y1="45" x2="40" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="40" cy="50" r="2" fill="#8A9BA8" />
-            <line x1="40" y1="50" x2="55" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="34" y="48" width="24" height="5" fill="#2E3840" rx="2" />
-            <rect x="34" y="53" width="5" height="20" fill="#2E3840" />
-            <rect x="53" y="53" width="5" height="20" fill="#2E3840" />
-            <circle cx="10" cy="82" r="2.2" fill="#F59E0B" />
-            <circle cx="14" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="8,19.5 8,24.5 1,22" fill={ACCENT} />
-            <line x1="20" y1="28" x2="17" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="20" cy="28" r="2.2" fill="#8A9BA8" />
-            <line x1="20" y1="28" x2="16" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="16" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="16" y1="52" x2="8" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="8" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="8" y1="68" x2="10" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="16" y1="52" x2="40" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="40" cy="55" r="2" fill="#8A9BA8" />
-            <line x1="40" y1="55" x2="55" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — cuisse avant parallèle au sol',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="34" y="48" width="24" height="5" fill="#2E3840" rx="2" />
-            <rect x="34" y="53" width="5" height="20" fill="#2E3840" />
-            <rect x="53" y="53" width="5" height="20" fill="#2E3840" />
-            <circle cx="10" cy="82" r="2.2" fill="#F59E0B" />
-            <circle cx="16" cy="32" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="10,29.5 10,34.5 3,32" fill={ACCENT} />
-            <line x1="22" y1="38" x2="19" y2="35" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="22" cy="38" r="2.2" fill="#8A9BA8" />
-            <line x1="22" y1="38" x2="20" y2="58" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="20" cy="58" r="2.2" fill="#8A9BA8" />
-            <line x1="20" y1="58" x2="4" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="4" cy="58" r="2" fill="#8A9BA8" />
-            <line x1="4" y1="58" x2="10" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="20" y1="58" x2="42" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="42" cy="58" r="2" fill="#8A9BA8" />
-            <line x1="42" y1="58" x2="55" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Remontée — pousse dans le talon avant',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="34" y="48" width="24" height="5" fill="#2E3840" rx="2" />
-            <rect x="34" y="53" width="5" height="20" fill="#2E3840" />
-            <rect x="53" y="53" width="5" height="20" fill="#2E3840" />
-            <circle cx="10" cy="82" r="2.2" fill="#F59E0B" />
-            <circle cx="14" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="8,19.5 8,24.5 1,22" fill={ACCENT} />
-            <line x1="20" y1="28" x2="17" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="20" cy="28" r="2.2" fill="#8A9BA8" />
-            <line x1="20" y1="28" x2="16" y2="52" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="16" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="16" y1="52" x2="8" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="8" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="8" y1="68" x2="10" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="16" y1="52" x2="40" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="40" cy="55" r="2" fill="#8A9BA8" />
-            <line x1="40" y1="55" x2="55" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Pied arrière sur chaise — descente verticale (démo haltères)', svg: <ExercisePhoto src={squatBulgareGif} alt="Squat bulgare — animation du mouvement complet" /> },
+      { label: 'Pied arrière sur chaise — descente verticale (démo haltères)', svg: <ExercisePhoto src={squatBulgareGif} alt="Squat bulgare — animation du mouvement complet" /> },
+      { label: 'Pied arrière sur chaise — descente verticale (démo haltères)', svg: <ExercisePhoto src={squatBulgareGif} alt="Squat bulgare — animation du mouvement complet" /> },
+      { label: 'Pied arrière sur chaise — descente verticale (démo haltères)', svg: <ExercisePhoto src={squatBulgareGif} alt="Squat bulgare — animation du mouvement complet" /> },
     ],
   },
   {
@@ -774,82 +401,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Jambe tendue côté opposé — talon à plat',
     view: 'face',
     frames: [
-      {
-        label: 'Départ (pieds joints)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="82" x2="54" y2="82" stroke="#2E3840" strokeWidth="1" />
-            {/* Le pied droit (36,82, point orange) reste FIXE et à plat sur les 4 poses — c'est la jambe
-                gauche qui s'écarte puis revient. */}
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="24" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="52" x2="36" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="82" r="2.2" fill="#F59E0B" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Pas latéral',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="82" x2="54" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="16" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="15" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="15" r="1" fill="#5A6B78" />
-            <line x1="22" y1="22" x2="38" y2="22" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="22" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="18" y2="68" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="18" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="18" y1="68" x2="14" y2="82" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="52" x2="36" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="82" r="2.2" fill="#F59E0B" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — genou plié, jambe opposée tendue',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="82" x2="54" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="18" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="17" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="17" r="1" fill="#5A6B78" />
-            <line x1="22" y1="24" x2="38" y2="24" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="24" x2="30" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="54" x2="6" y2="69" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="6" cy="69" r="2" fill="#8A9BA8" />
-            <line x1="6" y1="69" x2="2" y2="82" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="54" x2="36" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="82" r="2.2" fill="#F59E0B" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour au centre',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="82" x2="54" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="16" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="15" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="15" r="1" fill="#5A6B78" />
-            <line x1="22" y1="22" x2="38" y2="22" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="22" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="18" y2="68" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="18" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="18" y1="68" x2="14" y2="82" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="52" x2="36" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="36" cy="82" r="2.2" fill="#F59E0B" />
-          </svg>
-        ),
-      },
+      { label: 'Jambe tendue côté opposé — talon à plat', svg: <ExercisePhoto src={sideLungeGif} alt="Fentes latérales — animation du mouvement complet" /> },
+      { label: 'Jambe tendue côté opposé — talon à plat', svg: <ExercisePhoto src={sideLungeGif} alt="Fentes latérales — animation du mouvement complet" /> },
+      { label: 'Jambe tendue côté opposé — talon à plat', svg: <ExercisePhoto src={sideLungeGif} alt="Fentes latérales — animation du mouvement complet" /> },
+      { label: 'Jambe tendue côté opposé — talon à plat', svg: <ExercisePhoto src={sideLungeGif} alt="Fentes latérales — animation du mouvement complet" /> },
     ],
   },
   {
@@ -865,90 +420,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: "Genou avant 90° — talon d'abord",
     view: 'côté',
     frames: [
-      {
-        label: 'Départ (debout)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="82" x2="56" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="24" cy="12" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="18,9.5 18,14.5 11,12" fill={ACCENT} />
-            <line x1="30" y1="18" x2="27" y2="15" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="18" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="18" x2="30" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="48" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="48" x2="28" y2="65" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="28" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="28" y1="65" x2="26" y2="82" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="48" x2="32" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="32" y1="65" x2="34" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Grand pas en avant — le talon se pose',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="82" x2="56" y2="82" stroke="#2E3840" strokeWidth="1" />
-            {/* Une fois le pas posé, le pied avant (12,81) et le pied arrière (40,82) restent FIXES —
-                seuls la hanche et le buste descendent entre "Grand pas" et "Bas". */}
-            <circle cx="12" cy="81" r="2.2" fill="#F59E0B" />
-            <circle cx="29" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="23,11.5 23,16.5 16,14" fill={ACCENT} />
-            <line x1="35" y1="20" x2="32" y2="17" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="35" cy="20" r="2.2" fill="#8A9BA8" />
-            <line x1="35" y1="20" x2="33" y2="49" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="49" r="2.2" fill="#8A9BA8" />
-            <line x1="33" y1="49" x2="18" y2="63" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="18" cy="63" r="2" fill="#8A9BA8" />
-            <line x1="18" y1="63" x2="12" y2="81" stroke={ACCENT} strokeWidth="2" />
-            <line x1="33" y1="49" x2="42" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="42" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="42" y1="68" x2="40" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — genou avant 90°, genou arrière proche du sol',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="82" x2="56" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="12" cy="81" r="2.2" fill="#F59E0B" />
-            <circle cx="26" cy="21" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,18.5 20,23.5 13,21" fill={ACCENT} />
-            <line x1="32" y1="27" x2="29" y2="24" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="27" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="27" x2="32" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="32" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="32" y1="52" x2="12" y2="52" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="12" y1="52" x2="12" y2="81" stroke={ACCENT} strokeWidth="2" />
-            <line x1="32" y1="52" x2="40" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="40" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="40" y1="66" x2="40" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Poussée pour avancer',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="4" y1="82" x2="56" y2="82" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="12" cy="81" r="2.2" fill="#F59E0B" />
-            <circle cx="29" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="23,11.5 23,16.5 16,14" fill={ACCENT} />
-            <line x1="35" y1="20" x2="32" y2="17" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="35" cy="20" r="2.2" fill="#8A9BA8" />
-            <line x1="35" y1="20" x2="33" y2="49" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="49" r="2.2" fill="#8A9BA8" />
-            <line x1="33" y1="49" x2="18" y2="63" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="18" cy="63" r="2" fill="#8A9BA8" />
-            <line x1="18" y1="63" x2="12" y2="81" stroke={ACCENT} strokeWidth="2" />
-            <line x1="33" y1="49" x2="42" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="42" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="42" y1="68" x2="40" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: "Genou avant 90° — talon d'abord", svg: <ExercisePhoto src={walkingLungeGif} alt="Fentes marchées — animation du mouvement complet" /> },
+      { label: "Genou avant 90° — talon d'abord", svg: <ExercisePhoto src={walkingLungeGif} alt="Fentes marchées — animation du mouvement complet" /> },
+      { label: "Genou avant 90° — talon d'abord", svg: <ExercisePhoto src={walkingLungeGif} alt="Fentes marchées — animation du mouvement complet" /> },
+      { label: "Genou avant 90° — talon d'abord", svg: <ExercisePhoto src={walkingLungeGif} alt="Fentes marchées — animation du mouvement complet" /> },
     ],
   },
   {
@@ -964,93 +439,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Position basse tenue — cuisses parallèles',
     view: 'face',
     frames: [
-      {
-        label: 'Départ (debout)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#8A9BA8" strokeWidth="1" />
-            {/* Les deux pieds (22/38,84) restent FIXES et à plat au sol sur les 4 poses — seuls hanches
-                et genoux descendent puis remontent. */}
-            <circle cx="22" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="38" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="30" cy="12" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="11" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="11" r="1" fill="#5A6B78" />
-            <line x1="22" y1="18" x2="38" y2="18" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="18" x2="30" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="54" x2="22" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="54" x2="38" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="22" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="38" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="30" cy="20" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="19" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="19" r="1" fill="#5A6B78" />
-            <line x1="22" y1="26" x2="38" y2="26" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="26" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="36" y2="66" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="36" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="36" y1="66" x2="38" y2="84" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="52" x2="24" y2="66" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="24" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="24" y1="66" x2="22" y2="84" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — maintien 3 sec, cuisses parallèles',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="22" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="38" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="30" cy="30" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="29" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="29" r="1" fill="#5A6B78" />
-            <line x1="22" y1="36" x2="38" y2="36" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="36" x2="30" y2="56" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="56" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="56" x2="46" y2="62" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="46" cy="62" r="2" fill="#8A9BA8" />
-            <line x1="46" y1="62" x2="38" y2="84" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="56" x2="14" y2="62" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="14" cy="62" r="2" fill="#8A9BA8" />
-            <line x1="14" y1="62" x2="22" y2="84" stroke={ACCENT} strokeWidth="2" />
-            <text x="30" y="96" textAnchor="middle" fill="#F59E0B" fontSize="9" fontWeight="bold">3 sec</text>
-          </svg>
-        ),
-      },
-      {
-        label: 'Remontée explosive',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="22" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="38" cy="84" r="2.2" fill="#F59E0B" />
-            <circle cx="30" cy="20" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="19" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="19" r="1" fill="#5A6B78" />
-            <line x1="22" y1="26" x2="38" y2="26" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="26" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="36" y2="66" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="36" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="36" y1="66" x2="38" y2="84" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="52" x2="24" y2="66" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="24" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="24" y1="66" x2="22" y2="84" stroke={ACCENT} strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Position basse tenue — cuisses parallèles', svg: <ExercisePhoto src={squatPauseGif} alt="Squat pause — animation du mouvement complet" /> },
+      { label: 'Position basse tenue — cuisses parallèles', svg: <ExercisePhoto src={squatPauseGif} alt="Squat pause — animation du mouvement complet" /> },
+      { label: 'Position basse tenue — cuisses parallèles', svg: <ExercisePhoto src={squatPauseGif} alt="Squat pause — animation du mouvement complet" /> },
+      { label: 'Position basse tenue — cuisses parallèles', svg: <ExercisePhoto src={squatPauseGif} alt="Squat pause — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1067,90 +459,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Semi-squat — pas latéraux — tension constante',
     view: 'face',
     frames: [
-      {
-        label: 'Départ (pieds joints, semi-squat)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="50" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="50" x2="22" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="22" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="22" y1="68" x2="19" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="50" x2="38" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="38" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="38" y1="68" x2="41" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <path d="M 19 80 Q 30 76 41 80" stroke="#A78BFA" fill="none" strokeWidth="1.5" strokeDasharray="2,2" opacity="0.6" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Pas latéral (tension augmente)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="50" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="50" x2="14" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="14" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="14" y1="66" x2="9" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="50" x2="46" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="46" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="46" y1="66" x2="51" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <path d="M 9 80 Q 30 72 51 80" stroke="#A78BFA" fill="none" strokeWidth="2" strokeDasharray="3,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Tension maximale (pas large)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="16" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="15" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="15" r="1" fill="#5A6B78" />
-            <line x1="22" y1="22" x2="38" y2="22" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="22" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="52" x2="8" y2="68" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="8" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="8" y1="68" x2="4" y2="84" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="52" x2="52" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="52" cy="68" r="2" fill="#8A9BA8" />
-            <line x1="52" y1="68" x2="56" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <path d="M 4 80 Q 30 68 56 80" stroke="#A78BFA" fill="none" strokeWidth="2.5" strokeDasharray="3,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Pied rejoint (tension maintenue)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="6" y1="84" x2="54" y2="84" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="50" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="50" x2="14" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="14" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="14" y1="66" x2="9" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="50" x2="46" y2="66" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="46" cy="66" r="2" fill="#8A9BA8" />
-            <line x1="46" y1="66" x2="51" y2="84" stroke="#E8EDF1" strokeWidth="2" />
-            <path d="M 9 80 Q 30 72 51 80" stroke="#A78BFA" fill="none" strokeWidth="2" strokeDasharray="3,2" />
-          </svg>
-        ),
-      },
+      { label: 'Semi-squat — pas latéraux — tension constante', svg: <ExercisePhoto src={monsterWalkGif} alt="Monster walk — animation du mouvement complet" /> },
+      { label: 'Semi-squat — pas latéraux — tension constante', svg: <ExercisePhoto src={monsterWalkGif} alt="Monster walk — animation du mouvement complet" /> },
+      { label: 'Semi-squat — pas latéraux — tension constante', svg: <ExercisePhoto src={monsterWalkGif} alt="Monster walk — animation du mouvement complet" /> },
+      { label: 'Semi-squat — pas latéraux — tension constante', svg: <ExercisePhoto src={monsterWalkGif} alt="Monster walk — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1166,77 +478,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Appui unipodal — bassin horizontal',
     view: 'face',
     frames: [
-      {
-        label: 'Départ (jambe au sol)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#F59E0B" />
-            <line x1="30" y1="52" x2="26" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="26" y1="80" x2="22" y2="80" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="30" y1="52" x2="38" y2="76" stroke="#A78BFA" strokeWidth="2" />
-            <line x1="38" y1="76" x2="42" y2="78" stroke="#A78BFA" strokeWidth="1.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Mi-hauteur',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#F59E0B" />
-            <line x1="30" y1="52" x2="26" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="26" y1="80" x2="22" y2="80" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="30" y1="52" x2="52" y2="62" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="52" y1="62" x2="58" y2="63" stroke="#A78BFA" strokeWidth="1.5" />
-            <path d="M 30 58 Q 42 55 52 62" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Haut — maintien 1 sec',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#F59E0B" />
-            <line x1="30" y1="52" x2="26" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="26" y1="80" x2="22" y2="80" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="30" y1="52" x2="58" y2="56" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="58" y1="56" x2="68" y2="56" stroke={ACCENT} strokeWidth="1.5" />
-            <path d="M 30 56 Q 46 50 58 56" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour contrôlé',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <circle cx="30" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="27" cy="13" r="1" fill="#5A6B78" />
-            <circle cx="33" cy="13" r="1" fill="#5A6B78" />
-            <line x1="22" y1="20" x2="38" y2="20" stroke="#E8EDF1" strokeWidth="2.5" strokeLinecap="round" />
-            <line x1="30" y1="20" x2="30" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="52" r="2.2" fill="#F59E0B" />
-            <line x1="30" y1="52" x2="26" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="26" y1="80" x2="22" y2="80" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="30" y1="52" x2="52" y2="62" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="52" y1="62" x2="58" y2="63" stroke="#A78BFA" strokeWidth="1.5" />
-            <path d="M 30 58 Q 42 55 52 62" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
+      { label: 'Départ (jambe au sol)', svg: <ExercisePhoto src={abduction1} alt="Abduction debout élastique — position départ" /> },
+      { label: 'Haut — maintien 1 sec', svg: <ExercisePhoto src={abduction2} alt="Abduction debout élastique — jambe levée sur le côté" /> },
+      { label: 'Haut — maintien 1 sec', svg: <ExercisePhoto src={abduction2} alt="Abduction debout élastique — jambe levée sur le côté" /> },
+      { label: 'Départ (jambe au sol)', svg: <ExercisePhoto src={abduction1} alt="Abduction debout élastique — position départ" /> },
     ],
   },
   {
@@ -1252,81 +497,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Genou du dessus s’ouvre — talons joints',
     view: 'face',
     frames: [
-      {
-        label: 'Fermé (talons joints)',
-        svg: (
-          <svg viewBox="0 0 110 90" width="100%" height="100%">
-            <line x1="8" y1="80" x2="105" y2="80" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="18" cy="33" r="1" fill="#5A6B78" />
-            <circle cx="18" cy="37" r="1" fill="#5A6B78" />
-            <line x1="20" y1="41" x2="55" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="55" cy="52" r="2.4" fill="#F59E0B" />
-            <line x1="55" y1="52" x2="70" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="70" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="70" y1="65" x2="90" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="52" x2="70" y2="63" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="70" y1="63" x2="90" y2="66" stroke="#A78BFA" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Ouverture (mi-course)',
-        svg: (
-          <svg viewBox="0 0 110 90" width="100%" height="100%">
-            <line x1="8" y1="80" x2="105" y2="80" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="18" cy="33" r="1" fill="#5A6B78" />
-            <circle cx="18" cy="37" r="1" fill="#5A6B78" />
-            <line x1="20" y1="41" x2="55" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="55" cy="52" r="2.4" fill="#F59E0B" />
-            <line x1="55" y1="52" x2="70" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="70" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="70" y1="65" x2="90" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="52" x2="66" y2="48" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="66" y1="48" x2="85" y2="46" stroke="#A78BFA" strokeWidth="2" />
-            <path d="M 55 52 Q 60 50 66 48" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Ouvert — genou levé',
-        svg: (
-          <svg viewBox="0 0 110 90" width="100%" height="100%">
-            <line x1="8" y1="80" x2="105" y2="80" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="18" cy="33" r="1" fill="#5A6B78" />
-            <circle cx="18" cy="37" r="1" fill="#5A6B78" />
-            <line x1="20" y1="41" x2="55" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="55" cy="52" r="2.4" fill="#F59E0B" />
-            <line x1="55" y1="52" x2="70" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="70" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="70" y1="65" x2="90" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="52" x2="62" y2="34" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="62" y1="34" x2="80" y2="30" stroke="#A78BFA" strokeWidth="2" />
-            <path d="M 55 52 Q 62 46 62 34" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour lent',
-        svg: (
-          <svg viewBox="0 0 110 90" width="100%" height="100%">
-            <line x1="8" y1="80" x2="105" y2="80" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="18" cy="33" r="1" fill="#5A6B78" />
-            <circle cx="18" cy="37" r="1" fill="#5A6B78" />
-            <line x1="20" y1="41" x2="55" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="55" cy="52" r="2.4" fill="#F59E0B" />
-            <line x1="55" y1="52" x2="70" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="70" cy="65" r="2" fill="#8A9BA8" />
-            <line x1="70" y1="65" x2="90" y2="68" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="52" x2="66" y2="48" stroke="#A78BFA" strokeWidth="2.5" />
-            <line x1="66" y1="48" x2="85" y2="46" stroke="#A78BFA" strokeWidth="2" />
-            <path d="M 55 52 Q 60 50 66 48" stroke="#A78BFA" fill="none" strokeWidth="1" strokeDasharray="2,2" opacity="0.5" />
-          </svg>
-        ),
-      },
+      { label: 'Genou du dessus s’ouvre — talons joints', svg: <ExercisePhoto src={clamshellGif} alt="Clamshell élastique — animation du mouvement complet" /> },
+      { label: 'Genou du dessus s’ouvre — talons joints', svg: <ExercisePhoto src={clamshellGif} alt="Clamshell élastique — animation du mouvement complet" /> },
+      { label: 'Genou du dessus s’ouvre — talons joints', svg: <ExercisePhoto src={clamshellGif} alt="Clamshell élastique — animation du mouvement complet" /> },
+      { label: 'Genou du dessus s’ouvre — talons joints', svg: <ExercisePhoto src={clamshellGif} alt="Clamshell élastique — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1342,104 +516,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Montée 2 pieds — descente 1 pied lente',
     view: 'côté',
     frames: [
-      {
-        label: 'Bas (2 pieds, talons dans le vide)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="10" y="55" width="40" height="8" fill="#2E3840" rx="2" />
-            {/* Le point d'appui avant-pied (34,60, orange) reste FIXE sur les 4 poses — seul le talon
-                monte/descend (dorsi/plantar-flexion) et le corps s'élève légèrement en montée. */}
-            <circle cx="34" cy="60" r="2.4" fill="#F59E0B" />
-            <circle cx="24" cy="62" r="2.4" fill="#F59E0B" />
-            <circle cx="30" cy="9" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,6.5 24,11.5 18,9" fill={ACCENT} />
-            <line x1="30" y1="16" x2="27" y2="13" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="16" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="16" x2="31" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="31" cy="25" r="2.2" fill="#8A9BA8" />
-            <line x1="31" y1="25" x2="33" y2="40" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="40" r="2" fill="#8A9BA8" />
-            <line x1="33" y1="40" x2="34" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="60" x2="20" y2="72" stroke={ACCENT} strokeWidth="2" />
-            <line x1="31" y1="25" x2="25" y2="40" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="25" cy="40" r="2" fill="#8A9BA8" />
-            <line x1="25" y1="40" x2="24" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="62" x2="12" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Montée (2 pieds)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="10" y="55" width="40" height="8" fill="#2E3840" rx="2" />
-            <circle cx="34" cy="60" r="2.4" fill="#F59E0B" />
-            <circle cx="24" cy="62" r="2.4" fill="#F59E0B" />
-            <circle cx="30" cy="7" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,4.5 24,9.5 18,7" fill={ACCENT} />
-            <line x1="30" y1="14" x2="27" y2="11" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="14" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="14" x2="31" y2="23" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="31" cy="23" r="2.2" fill="#8A9BA8" />
-            <line x1="31" y1="23" x2="33" y2="38" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="38" r="2" fill="#8A9BA8" />
-            <line x1="33" y1="38" x2="34" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="60" x2="29" y2="58" stroke={ACCENT} strokeWidth="2" />
-            <line x1="31" y1="23" x2="25" y2="38" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="25" cy="38" r="2" fill="#8A9BA8" />
-            <line x1="25" y1="38" x2="24" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="62" x2="20" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <path d="M 30 50 Q 30 46 30 42" stroke={ACCENT} fill="none" strokeWidth="1.5" strokeDasharray="2,2" />
-            <polygon points="30,40 27,46 33,46" fill={ACCENT} />
-          </svg>
-        ),
-      },
-      {
-        label: 'Un pied levé (haut)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="10" y="55" width="40" height="8" fill="#2E3840" rx="2" />
-            <circle cx="34" cy="60" r="2.4" fill="#F59E0B" />
-            <circle cx="30" cy="7" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,4.5 24,9.5 18,7" fill={ACCENT} />
-            <line x1="30" y1="14" x2="27" y2="11" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="14" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="14" x2="31" y2="23" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="31" cy="23" r="2.2" fill="#8A9BA8" />
-            <line x1="31" y1="23" x2="33" y2="38" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="38" r="2" fill="#8A9BA8" />
-            <line x1="33" y1="38" x2="34" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="60" x2="29" y2="58" stroke={ACCENT} strokeWidth="2" />
-            {/* Jambe libre repliée, décollée du sol — grisée (non porteuse). */}
-            <line x1="31" y1="23" x2="42" y2="30" stroke="#8A9BA8" strokeWidth="2" />
-            <circle cx="42" cy="30" r="2" fill="#8A9BA8" />
-            <line x1="42" y1="30" x2="46" y2="38" stroke="#8A9BA8" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente lente 1 pied (3-4 sec)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="10" y="55" width="40" height="8" fill="#2E3840" rx="2" />
-            <circle cx="34" cy="60" r="2.4" fill="#F59E0B" />
-            <circle cx="30" cy="9" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="24,6.5 24,11.5 18,9" fill={ACCENT} />
-            <line x1="30" y1="16" x2="27" y2="13" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="30" cy="16" r="2.2" fill="#8A9BA8" />
-            <line x1="30" y1="16" x2="31" y2="25" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="31" cy="25" r="2.2" fill="#8A9BA8" />
-            <line x1="31" y1="25" x2="33" y2="40" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="33" cy="40" r="2" fill="#8A9BA8" />
-            <line x1="33" y1="40" x2="34" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="60" x2="20" y2="72" stroke="#FB923C" strokeWidth="2" />
-            <line x1="31" y1="25" x2="42" y2="32" stroke="#8A9BA8" strokeWidth="2" />
-            <circle cx="42" cy="32" r="2" fill="#8A9BA8" />
-            <line x1="42" y1="32" x2="46" y2="40" stroke="#8A9BA8" strokeWidth="2" />
-            <text x="44" y="70" fill="#FB923C" fontSize="8">3-4s</text>
-          </svg>
-        ),
-      },
+      { label: 'Montée 2 pieds — descente 1 pied lente (sur escalier)', svg: <ExercisePhoto src={calfRaiseStaircaseGif} alt="Mollets excentriques — animation du mouvement complet" /> },
+      { label: 'Montée 2 pieds — descente 1 pied lente (sur escalier)', svg: <ExercisePhoto src={calfRaiseStaircaseGif} alt="Mollets excentriques — animation du mouvement complet" /> },
+      { label: 'Montée 2 pieds — descente 1 pied lente (sur escalier)', svg: <ExercisePhoto src={calfRaiseStaircaseGif} alt="Mollets excentriques — animation du mouvement complet" /> },
+      { label: 'Montée 2 pieds — descente 1 pied lente (sur escalier)', svg: <ExercisePhoto src={calfRaiseStaircaseGif} alt="Mollets excentriques — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1456,83 +536,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Unilatéral — amplitude complète talon',
     view: 'côté',
     frames: [
-      {
-        label: 'Bas (talon sous la marche)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="8" y="55" width="34" height="7" fill="#2E3840" rx="2" />
-            {/* Avant-pied sur la marche (26,52, orange) FIXE sur les 4 poses — seuls le talon et la
-                hauteur du corps varient. */}
-            <circle cx="26" cy="52" r="2.4" fill="#F59E0B" />
-            <circle cx="26" cy="18" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,15.5 20,20.5 14,18" fill={ACCENT} />
-            <line x1="26" y1="25" x2="23" y2="22" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="25" r="2.2" fill="#8A9BA8" />
-            <line x1="26" y1="25" x2="26" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="38" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="52" x2="22" y2="60" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="26" y1="52" x2="40" y2="62" stroke="#8A9BA8" strokeWidth="2" />
-            <line x1="40" y1="62" x2="44" y2="70" stroke="#8A9BA8" strokeWidth="1.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Mi-hauteur',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="8" y="55" width="34" height="7" fill="#2E3840" rx="2" />
-            <circle cx="26" cy="52" r="2.4" fill="#F59E0B" />
-            <circle cx="26" cy="15" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,12.5 20,17.5 14,15" fill={ACCENT} />
-            <line x1="26" y1="22" x2="23" y2="19" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="22" r="2.2" fill="#8A9BA8" />
-            <line x1="26" y1="22" x2="26" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="36" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="52" x2="25" y2="58" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="26" y1="52" x2="40" y2="60" stroke="#8A9BA8" strokeWidth="2" />
-            <line x1="40" y1="60" x2="44" y2="68" stroke="#8A9BA8" strokeWidth="1.5" />
-            <path d="M 24 55 Q 24 51 24 47" stroke={ACCENT} fill="none" strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Haut — contraction max',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="8" y="55" width="34" height="7" fill="#2E3840" rx="2" />
-            <circle cx="26" cy="52" r="2.4" fill="#F59E0B" />
-            <circle cx="26" cy="13" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,10.5 20,15.5 14,13" fill={ACCENT} />
-            <line x1="26" y1="20" x2="23" y2="17" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="20" r="2.2" fill="#8A9BA8" />
-            <line x1="26" y1="20" x2="26" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="35" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="52" x2="28" y2="56" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="26" y1="52" x2="42" y2="62" stroke="#8A9BA8" strokeWidth="2" />
-            <line x1="42" y1="62" x2="46" y2="72" stroke="#8A9BA8" strokeWidth="1.5" />
-            <path d="M 22 50 Q 22 46 22 42" stroke={ACCENT} fill="none" strokeWidth="1.5" strokeDasharray="2,2" />
-            <polygon points="22,40 19,46 25,46" fill={ACCENT} />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente (2-3 sec)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <rect x="8" y="55" width="34" height="7" fill="#2E3840" rx="2" />
-            <circle cx="26" cy="52" r="2.4" fill="#F59E0B" />
-            <circle cx="26" cy="15" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <polygon points="20,12.5 20,17.5 14,15" fill={ACCENT} />
-            <line x1="26" y1="22" x2="23" y2="19" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="22" r="2.2" fill="#8A9BA8" />
-            <line x1="26" y1="22" x2="26" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="26" cy="36" r="2" fill="#8A9BA8" />
-            <line x1="26" y1="52" x2="25" y2="58" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="26" y1="52" x2="40" y2="60" stroke="#8A9BA8" strokeWidth="2" />
-            <line x1="40" y1="60" x2="44" y2="68" stroke="#8A9BA8" strokeWidth="1.5" />
-          </svg>
-        ),
-      },
+      { label: 'Unilatéral — amplitude complète talon (démo au sol — chez toi : sur une marche)', svg: <ExercisePhoto src={calfRaiseSingleLegGif} alt="Single leg calf raise — animation du mouvement complet" /> },
+      { label: 'Unilatéral — amplitude complète talon (démo au sol — chez toi : sur une marche)', svg: <ExercisePhoto src={calfRaiseSingleLegGif} alt="Single leg calf raise — animation du mouvement complet" /> },
+      { label: 'Unilatéral — amplitude complète talon (démo au sol — chez toi : sur une marche)', svg: <ExercisePhoto src={calfRaiseSingleLegGif} alt="Single leg calf raise — animation du mouvement complet" /> },
+      { label: 'Unilatéral — amplitude complète talon (démo au sol — chez toi : sur une marche)', svg: <ExercisePhoto src={calfRaiseSingleLegGif} alt="Single leg calf raise — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1551,77 +558,19 @@ const EXERCISES: Exercise[] = [
     frames: [
       {
         label: 'Position correcte — corps aligné',
-        svg: (
-          <svg viewBox="0 0 110 80" width="100%" height="100%">
-            <circle cx="18" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="21" y1="41" x2="25" y2="45" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="18" y1="41" x2="95" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="22" y1="46" x2="30" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="55" x2="38" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="18" cy="41" r="2.2" fill="#8A9BA8" />
-            <circle cx="55" cy="48" r="2" fill="#8A9BA8" />
-            <line x1="92" y1="54" x2="100" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="92" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="100" y1="62" x2="108" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="18" y1="55" x2="108" y2="62" stroke="#06B6D4" strokeWidth="1" strokeDasharray="3,2" opacity="0.4" />
-          </svg>
-        ),
+        svg: <ExercisePhoto src={plankGif} alt="Gainage frontal — position correcte, corps aligné" />,
       },
       {
         label: 'Erreur à éviter — bassin trop haut',
-        svg: (
-          <svg viewBox="0 0 110 80" width="100%" height="100%">
-            <circle cx="18" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="21" y1="41" x2="25" y2="45" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="18" y1="41" x2="55" y2="38" stroke="#ef4444" strokeWidth="2.5" />
-            <line x1="55" y1="38" x2="95" y2="55" stroke="#ef4444" strokeWidth="2.5" />
-            <line x1="22" y1="46" x2="30" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="55" x2="38" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="18" cy="41" r="2.2" fill="#8A9BA8" />
-            <circle cx="55" cy="38" r="2" fill="#ef4444" />
-            <line x1="92" y1="54" x2="100" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="92" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="100" y1="62" x2="108" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="18" y1="55" x2="108" y2="62" stroke="#06B6D4" strokeWidth="1" strokeDasharray="3,2" opacity="0.3" />
-          </svg>
-        ),
+        svg: <PlankFrame frameId="gf-2" hipY={55} status="error" labelText="ERREUR — BASSIN HAUT" />,
       },
       {
         label: 'Erreur à éviter — bassin qui s’affaisse',
-        svg: (
-          <svg viewBox="0 0 110 80" width="100%" height="100%">
-            <circle cx="18" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="21" y1="41" x2="25" y2="45" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="18" y1="41" x2="55" y2="62" stroke="#ef4444" strokeWidth="2.5" />
-            <line x1="55" y1="62" x2="95" y2="55" stroke="#ef4444" strokeWidth="2.5" />
-            <line x1="22" y1="46" x2="30" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="55" x2="38" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="18" cy="41" r="2.2" fill="#8A9BA8" />
-            <circle cx="55" cy="62" r="2" fill="#ef4444" />
-            <line x1="92" y1="54" x2="100" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="92" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="100" y1="62" x2="108" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="18" y1="55" x2="108" y2="62" stroke="#06B6D4" strokeWidth="1" strokeDasharray="3,2" opacity="0.3" />
-          </svg>
-        ),
+        svg: <PlankFrame frameId="gf-3" hipY={165} status="error" labelText="ERREUR — BASSIN BAS" />,
       },
       {
         label: 'Retour à la position correcte',
-        svg: (
-          <svg viewBox="0 0 110 80" width="100%" height="100%">
-            <circle cx="18" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="21" y1="41" x2="25" y2="45" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="18" y1="41" x2="95" y2="55" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="22" y1="46" x2="30" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="55" x2="38" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="18" cy="41" r="2.2" fill="#8A9BA8" />
-            <circle cx="55" cy="48" r="2" fill="#8A9BA8" />
-            <line x1="92" y1="54" x2="100" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <circle cx="92" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="100" y1="62" x2="108" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="18" y1="55" x2="108" y2="62" stroke="#06B6D4" strokeWidth="1" strokeDasharray="3,2" opacity="0.4" />
-          </svg>
-        ),
+        svg: <ExercisePhoto src={plankGif} alt="Gainage frontal — retour à la position correcte" />,
       },
     ],
   },
@@ -1639,66 +588,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Bras tendu — bassin immobile',
     view: 'côté',
     frames: [
-      {
-        label: 'Gainage frontal (appui 2 bras)',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="25" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="19" y1="33" x2="13" y2="35" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="25" y1="41" x2="90" y2="55" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="90" y1="55" x2="108" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="108" y1="62" x2="116" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="38" y1="47" x2="46" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="46" y1="55" x2="54" y2="55" stroke="#06B6D4" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bras qui se lève',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="25" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="19" y1="33" x2="13" y2="35" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="25" y1="41" x2="90" y2="55" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="90" y1="55" x2="108" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="108" y1="62" x2="116" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="38" y1="47" x2="46" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="46" y1="55" x2="54" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="25" y1="44" x2="14" y2="42" stroke={ACCENT} strokeWidth="2.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bras tendu à l’horizontale (2 sec)',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="25" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="19" y1="33" x2="13" y2="35" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="25" y1="41" x2="90" y2="55" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="90" y1="55" x2="108" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="108" y1="62" x2="116" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="38" y1="47" x2="46" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="46" y1="55" x2="54" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="25" y1="44" x2="6" y2="38" stroke={ACCENT} strokeWidth="2.5" />
-            <polygon points="6,38 12,35 10,42" fill={ACCENT} />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour contrôlé',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="25" cy="35" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="19" y1="33" x2="13" y2="35" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="25" y1="41" x2="90" y2="55" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="90" y1="55" x2="108" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="108" y1="62" x2="116" y2="62" stroke="#8A9BA8" strokeWidth="1.5" />
-            <line x1="38" y1="47" x2="46" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="46" y1="55" x2="54" y2="55" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="25" y1="44" x2="14" y2="42" stroke={ACCENT} strokeWidth="2.5" />
-          </svg>
-        ),
-      },
+      { label: 'Bras tendu — bassin immobile', svg: <ExercisePhoto src={plankArmRaiseGif} alt="Gainage frontal + extension bras — animation du mouvement complet" /> },
+      { label: 'Bras tendu — bassin immobile', svg: <ExercisePhoto src={plankArmRaiseGif} alt="Gainage frontal + extension bras — animation du mouvement complet" /> },
+      { label: 'Bras tendu — bassin immobile', svg: <ExercisePhoto src={plankArmRaiseGif} alt="Gainage frontal + extension bras — animation du mouvement complet" /> },
+      { label: 'Bras tendu — bassin immobile', svg: <ExercisePhoto src={plankArmRaiseGif} alt="Gainage frontal + extension bras — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1715,83 +608,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Montée/descente du bassin — corps aligné',
     view: 'face',
     frames: [
-      {
-        label: 'Bas (bassin proche du sol)',
-        svg: (
-          <svg viewBox="0 0 120 65" width="100%" height="100%">
-            <line x1="10" y1="60" x2="115" y2="60" stroke="#2E3840" strokeWidth="1" />
-            {/* Avant-bras (18,40) et pieds (100,46) restent FIXES sur les 4 poses — seul le bassin (au
-                milieu) descend et remonte, comme une bascule entre ces deux appuis. */}
-            <circle cx="18" cy="40" r="2.4" fill="#F59E0B" />
-            <circle cx="100" cy="46" r="2.4" fill="#F59E0B" />
-            <circle cx="13" cy="34" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="11" cy="32" r="1" fill="#5A6B78" />
-            <circle cx="11" cy="36" r="1" fill="#5A6B78" />
-            <line x1="18" y1="40" x2="58" y2="54" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="54" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="54" x2="100" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="22" y1="43" x2="30" y2="46" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="30" y1="46" x2="38" y2="46" stroke="#06B6D4" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Montée (bassin qui remonte)',
-        svg: (
-          <svg viewBox="0 0 120 65" width="100%" height="100%">
-            <line x1="10" y1="60" x2="115" y2="60" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="18" cy="40" r="2.4" fill="#F59E0B" />
-            <circle cx="100" cy="46" r="2.4" fill="#F59E0B" />
-            <circle cx="13" cy="34" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="11" cy="32" r="1" fill="#5A6B78" />
-            <circle cx="11" cy="36" r="1" fill="#5A6B78" />
-            <line x1="18" y1="40" x2="58" y2="47" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="47" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="47" x2="100" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="22" y1="43" x2="30" y2="46" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="30" y1="46" x2="38" y2="46" stroke="#06B6D4" strokeWidth="2" />
-            <path d="M 58 51 Q 58 47 58 43" stroke={ACCENT} fill="none" strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Haut — alignement corps droit',
-        svg: (
-          <svg viewBox="0 0 120 65" width="100%" height="100%">
-            <line x1="10" y1="60" x2="115" y2="60" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="18" cy="40" r="2.4" fill="#F59E0B" />
-            <circle cx="100" cy="46" r="2.4" fill="#F59E0B" />
-            <circle cx="13" cy="34" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="11" cy="32" r="1" fill="#5A6B78" />
-            <circle cx="11" cy="36" r="1" fill="#5A6B78" />
-            {/* Ligne guide en pointillés : bras-hanche-pieds parfaitement alignés en haut du mouvement. */}
-            <line x1="18" y1="40" x2="100" y2="46" stroke="#F59E0B" strokeWidth="1" strokeDasharray="2,2" opacity="0.6" />
-            <line x1="18" y1="40" x2="58" y2="43" stroke={ACCENT} strokeWidth="2.5" />
-            <circle cx="58" cy="43" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="43" x2="100" y2="46" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="22" y1="43" x2="30" y2="46" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="30" y1="46" x2="38" y2="46" stroke="#06B6D4" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente contrôlée',
-        svg: (
-          <svg viewBox="0 0 120 65" width="100%" height="100%">
-            <line x1="10" y1="60" x2="115" y2="60" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="18" cy="40" r="2.4" fill="#F59E0B" />
-            <circle cx="100" cy="46" r="2.4" fill="#F59E0B" />
-            <circle cx="13" cy="34" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <circle cx="11" cy="32" r="1" fill="#5A6B78" />
-            <circle cx="11" cy="36" r="1" fill="#5A6B78" />
-            <line x1="18" y1="40" x2="58" y2="47" stroke="#E8EDF1" strokeWidth="2.5" />
-            <circle cx="58" cy="47" r="2.2" fill="#8A9BA8" />
-            <line x1="58" y1="47" x2="100" y2="46" stroke="#E8EDF1" strokeWidth="2.5" />
-            <line x1="22" y1="43" x2="30" y2="46" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="30" y1="46" x2="38" y2="46" stroke="#06B6D4" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Montée/descente du bassin — corps aligné', svg: <ExercisePhoto src={sidePlankDynamicGif} alt="Gainage latéral dynamique — animation du mouvement complet" /> },
+      { label: 'Montée/descente du bassin — corps aligné', svg: <ExercisePhoto src={sidePlankDynamicGif} alt="Gainage latéral dynamique — animation du mouvement complet" /> },
+      { label: 'Montée/descente du bassin — corps aligné', svg: <ExercisePhoto src={sidePlankDynamicGif} alt="Gainage latéral dynamique — animation du mouvement complet" /> },
+      { label: 'Montée/descente du bassin — corps aligné', svg: <ExercisePhoto src={sidePlankDynamicGif} alt="Gainage latéral dynamique — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1808,76 +628,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Dos plaqué — bras/jambe opposés descendent',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ — bras et genoux en l’air',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <line x1="10" y1="55" x2="110" y2="55" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="48" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="20" y1="41" x2="20" y2="36" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="20" y1="54" x2="65" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="54" x2="42" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="42" y1="42" x2="52" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="54" x2="34" y2="40" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="40" x2="26" y2="34" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="54" x2="55" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="42" x2="65" y2="40" stroke="#E8EDF1" strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Descente bras droit / jambe gauche',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <line x1="10" y1="55" x2="110" y2="55" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="48" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="20" y1="41" x2="20" y2="36" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="20" y1="54" x2="65" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="54" x2="48" y2="48" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="48" y1="48" x2="58" y2="48" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="40" y1="54" x2="35" y2="41" stroke={ACCENT} strokeWidth="2" />
-            <line x1="35" y1="41" x2="25" y2="35" stroke={ACCENT} strokeWidth="2" />
-            <line x1="55" y1="54" x2="55" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="42" x2="65" y2="40" stroke="#E8EDF1" strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bas — membres effleurent le sol',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <line x1="10" y1="55" x2="110" y2="55" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="48" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="20" y1="41" x2="20" y2="36" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="20" y1="54" x2="65" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="54" x2="50" y2="44" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="50" y1="44" x2="62" y2="44" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="40" y1="54" x2="38" y2="42" stroke={ACCENT} strokeWidth="2" />
-            <line x1="38" y1="42" x2="28" y2="36" stroke={ACCENT} strokeWidth="2" />
-            <line x1="55" y1="54" x2="55" y2="44" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="44" x2="65" y2="42" stroke="#E8EDF1" strokeWidth="1.5" strokeDasharray="2,2" />
-            <line x1="55" y1="54" x2="75" y2="68" stroke={ACCENT} strokeWidth="2" />
-            <line x1="75" y1="68" x2="90" y2="72" stroke={ACCENT} strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour au centre',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <line x1="10" y1="55" x2="110" y2="55" stroke="#2E3840" strokeWidth="1" />
-            <circle cx="20" cy="48" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="20" y1="41" x2="20" y2="36" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="20" y1="54" x2="65" y2="54" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="54" x2="48" y2="48" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="48" y1="48" x2="58" y2="48" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="40" y1="54" x2="35" y2="41" stroke={ACCENT} strokeWidth="2" />
-            <line x1="35" y1="41" x2="25" y2="35" stroke={ACCENT} strokeWidth="2" />
-            <line x1="55" y1="54" x2="55" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="55" y1="42" x2="65" y2="40" stroke="#E8EDF1" strokeWidth="1.5" strokeDasharray="2,2" />
-          </svg>
-        ),
-      },
+      { label: 'Dos plaqué — bras/jambe opposés descendent', svg: <ExercisePhoto src={deadBugGif} alt="Dead bug — animation du mouvement complet" /> },
+      { label: 'Dos plaqué — bras/jambe opposés descendent', svg: <ExercisePhoto src={deadBugGif} alt="Dead bug — animation du mouvement complet" /> },
+      { label: 'Dos plaqué — bras/jambe opposés descendent', svg: <ExercisePhoto src={deadBugGif} alt="Dead bug — animation du mouvement complet" /> },
+      { label: 'Dos plaqué — bras/jambe opposés descendent', svg: <ExercisePhoto src={deadBugGif} alt="Dead bug — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1894,77 +648,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Pousser les bras — résister à la rotation',
     view: 'dessus',
     frames: [
-      {
-        label: 'Bras à la poitrine (pas de tension)',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <rect x="8" y="35" width="6" height="30" fill="#2E3840" rx="2" />
-            <line x1="14" y1="50" x2="34" y2="50" stroke="#06B6D4" strokeWidth="2" strokeDasharray="4,2" />
-            <circle cx="40" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="40" y1="28" x2="40" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="28" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="52" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="34" y1="50" x2="40" y2="50" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="40" y1="58" x2="30" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="58" x2="50" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="78" x2="56" y2="78" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Poussée (~40%)',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <rect x="8" y="35" width="6" height="30" fill="#2E3840" rx="2" />
-            <line x1="14" y1="50" x2="45" y2="50" stroke="#06B6D4" strokeWidth="2" strokeDasharray="4,2" />
-            <circle cx="40" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="40" y1="28" x2="40" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="28" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="52" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="35" y1="50" x2="58" y2="50" stroke={ACCENT} strokeWidth="2.5" />
-            <polygon points="58,50 52,47 52,53" fill={ACCENT} />
-            <line x1="40" y1="58" x2="30" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="58" x2="50" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="78" x2="56" y2="78" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Bras tendus — résistance max',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <rect x="8" y="35" width="6" height="30" fill="#2E3840" rx="2" />
-            <line x1="14" y1="50" x2="55" y2="50" stroke="#06B6D4" strokeWidth="2" strokeDasharray="4,2" />
-            <circle cx="40" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="40" y1="28" x2="40" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="28" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="52" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="35" y1="50" x2="70" y2="50" stroke={ACCENT} strokeWidth="2.5" />
-            <polygon points="70,50 64,47 64,53" fill={ACCENT} />
-            <line x1="40" y1="58" x2="30" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="58" x2="50" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="78" x2="56" y2="78" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour (~40%)',
-        svg: (
-          <svg viewBox="0 0 90 100" width="100%" height="100%">
-            <rect x="8" y="35" width="6" height="30" fill="#2E3840" rx="2" />
-            <line x1="14" y1="50" x2="45" y2="50" stroke="#06B6D4" strokeWidth="2" strokeDasharray="4,2" />
-            <circle cx="40" cy="22" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="40" y1="28" x2="40" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="28" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="40" x2="52" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="35" y1="50" x2="58" y2="50" stroke={ACCENT} strokeWidth="2.5" />
-            <polygon points="58,50 52,47 52,53" fill={ACCENT} />
-            <line x1="40" y1="58" x2="30" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="40" y1="58" x2="50" y2="78" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="24" y1="78" x2="56" y2="78" stroke="#8A9BA8" strokeWidth="1" />
-          </svg>
-        ),
-      },
+      { label: 'Pousser les bras — résister à la rotation', svg: <ExercisePhoto src={pallofPressGif} alt="Pallof press élastique — animation du mouvement complet" /> },
+      { label: 'Pousser les bras — résister à la rotation', svg: <ExercisePhoto src={pallofPressGif} alt="Pallof press élastique — animation du mouvement complet" /> },
+      { label: 'Pousser les bras — résister à la rotation', svg: <ExercisePhoto src={pallofPressGif} alt="Pallof press élastique — animation du mouvement complet" /> },
+      { label: 'Pousser les bras — résister à la rotation', svg: <ExercisePhoto src={pallofPressGif} alt="Pallof press élastique — animation du mouvement complet" /> },
     ],
   },
   {
@@ -1981,73 +668,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Bras et jambe opposés — dos plat',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ (à quatre pattes)',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="60" cy="32" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="53" y1="31" x2="47" y2="33" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="60" y1="38" x2="60" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="48" y1="48" x2="48" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="48" x2="72" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="60" y1="44" x2="48" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="60" y1="44" x2="72" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="48" y1="62" x2="44" y2="70" stroke="#E8EDF1" strokeWidth="1.5" />
-            <line x1="72" y1="62" x2="76" y2="70" stroke="#E8EDF1" strokeWidth="1.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Extension partielle',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="60" cy="32" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="53" y1="31" x2="47" y2="33" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="60" y1="38" x2="60" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="48" x2="72" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="62" x2="76" y2="70" stroke="#E8EDF1" strokeWidth="1.5" />
-            <line x1="60" y1="44" x2="72" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="60" y1="44" x2="36" y2="46" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="48" y1="55" x2="48" y2="62" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="48" y1="62" x2="44" y2="70" stroke="#06B6D4" strokeWidth="1.5" />
-            <line x1="60" y1="50" x2="86" y2="52" stroke="#06B6D4" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Extension max — bras/jambe à l’horizontale',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="60" cy="32" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="53" y1="31" x2="47" y2="33" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="60" y1="38" x2="60" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="48" x2="72" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="62" x2="76" y2="70" stroke="#E8EDF1" strokeWidth="1.5" />
-            <line x1="60" y1="44" x2="72" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="60" y1="44" x2="18" y2="44" stroke={ACCENT} strokeWidth="2.5" />
-            <polygon points="18,44 24,41 24,47" fill={ACCENT} />
-            <line x1="60" y1="50" x2="102" y2="50" stroke="#06B6D4" strokeWidth="2.5" />
-            <polygon points="102,50 96,47 96,53" fill="#06B6D4" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Retour contrôlé',
-        svg: (
-          <svg viewBox="0 0 120 80" width="100%" height="100%">
-            <circle cx="60" cy="32" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="53" y1="31" x2="47" y2="33" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="60" y1="38" x2="60" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="48" x2="72" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="72" y1="62" x2="76" y2="70" stroke="#E8EDF1" strokeWidth="1.5" />
-            <line x1="60" y1="44" x2="72" y2="48" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="60" y1="44" x2="36" y2="46" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="48" y1="55" x2="48" y2="62" stroke="#06B6D4" strokeWidth="2" />
-            <line x1="48" y1="62" x2="44" y2="70" stroke="#06B6D4" strokeWidth="1.5" />
-            <line x1="60" y1="50" x2="86" y2="52" stroke="#06B6D4" strokeWidth="2.5" />
-          </svg>
-        ),
-      },
+      { label: 'Bras et jambe opposés — dos plat', svg: <ExercisePhoto src={birdDogGif} alt="Bird dog — animation du mouvement complet" /> },
+      { label: 'Bras et jambe opposés — dos plat', svg: <ExercisePhoto src={birdDogGif} alt="Bird dog — animation du mouvement complet" /> },
+      { label: 'Bras et jambe opposés — dos plat', svg: <ExercisePhoto src={birdDogGif} alt="Bird dog — animation du mouvement complet" /> },
+      { label: 'Bras et jambe opposés — dos plat', svg: <ExercisePhoto src={birdDogGif} alt="Bird dog — animation du mouvement complet" /> },
     ],
   },
   {
@@ -2064,67 +688,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: 'Impulsion explosive — réception souple',
     view: 'côté',
     frames: [
-      {
-        label: 'Départ (accroupi)',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="8" y1="82" x2="52" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="30" cy="50" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="37" y1="49" x2="43" y2="51" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="30" y1="56" x2="27" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="64" x2="17" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="64" x2="37" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="72" x2="19" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="72" x2="35" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Impulsion — extension explosive',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="8" y1="82" x2="52" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="30" cy="28" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="37" y1="27" x2="43" y2="29" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="30" y1="34" x2="29" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="29" y1="42" x2="18" y2="32" stroke={ACCENT} strokeWidth="2" />
-            <line x1="29" y1="42" x2="40" y2="32" stroke={ACCENT} strokeWidth="2" />
-            <line x1="29" y1="58" x2="23" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="29" y1="58" x2="35" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="23" y1="72" x2="21" y2="80" stroke="#E8EDF1" strokeWidth="1.5" />
-            <line x1="35" y1="72" x2="37" y2="80" stroke="#E8EDF1" strokeWidth="1.5" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Haut du saut — genoux repliés',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <circle cx="30" cy="18" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="37" y1="17" x2="43" y2="19" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="30" y1="24" x2="30" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="36" x2="18" y2="28" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="36" x2="42" y2="28" stroke={ACCENT} strokeWidth="2" />
-            <line x1="30" y1="50" x2="23" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="30" y1="50" x2="37" y2="65" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Réception souple — mi-pied',
-        svg: (
-          <svg viewBox="0 0 60 100" width="100%" height="100%">
-            <line x1="8" y1="82" x2="52" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="30" cy="50" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="37" y1="49" x2="43" y2="51" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="30" y1="56" x2="27" y2="72" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="64" x2="17" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="64" x2="37" y2="70" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="72" x2="19" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="27" y1="72" x2="35" y2="82" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: 'Impulsion explosive — réception souple', svg: <ExercisePhoto src={squatJumpGif} alt="Squat jump — animation du mouvement complet" /> },
+      { label: 'Impulsion explosive — réception souple', svg: <ExercisePhoto src={squatJumpGif} alt="Squat jump — animation du mouvement complet" /> },
+      { label: 'Impulsion explosive — réception souple', svg: <ExercisePhoto src={squatJumpGif} alt="Squat jump — animation du mouvement complet" /> },
+      { label: 'Impulsion explosive — réception souple', svg: <ExercisePhoto src={squatJumpGif} alt="Squat jump — animation du mouvement complet" /> },
     ],
   },
   {
@@ -2141,73 +708,10 @@ const EXERCISES: Exercise[] = [
     svgLabel: "Échange des jambes en l'air — réception fente",
     view: 'côté',
     frames: [
-      {
-        label: 'Fente basse (départ)',
-        svg: (
-          <svg viewBox="0 0 100 90" width="100%" height="100%">
-            <line x1="4" y1="82" x2="96" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="40" cy="20" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="47" y1="19" x2="53" y2="21" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="40" y1="26" x2="38" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="36" x2="30" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="36" x2="48" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="38" y1="52" x2="14" y2="60" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="14" y1="60" x2="10" y2="80" stroke={ACCENT} strokeWidth="2" />
-            <line x1="38" y1="52" x2="56" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="56" y1="60" x2="78" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Impulsion (saut vertical)',
-        svg: (
-          <svg viewBox="0 0 100 90" width="100%" height="100%">
-            <line x1="4" y1="82" x2="96" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="40" cy="14" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="47" y1="13" x2="53" y2="15" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="40" y1="20" x2="39" y2="46" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="30" x2="28" y2="22" stroke={ACCENT} strokeWidth="2" />
-            <line x1="39" y1="30" x2="50" y2="22" stroke={ACCENT} strokeWidth="2" />
-            <line x1="39" y1="46" x2="28" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="28" y1="62" x2="24" y2="76" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="46" x2="50" y2="62" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="50" y1="62" x2="54" y2="76" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: "Échange des jambes en l'air",
-        svg: (
-          <svg viewBox="0 0 100 90" width="100%" height="100%">
-            <circle cx="40" cy="18" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="47" y1="17" x2="53" y2="19" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="40" y1="24" x2="38" y2="50" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="36" x2="26" y2="28" stroke={ACCENT} strokeWidth="2" />
-            <line x1="39" y1="36" x2="52" y2="28" stroke={ACCENT} strokeWidth="2" />
-            <line x1="38" y1="50" x2="15" y2="68" stroke="#F43F5E" strokeWidth="2.5" />
-            <line x1="15" y1="68" x2="2" y2="80" stroke="#F43F5E" strokeWidth="2" />
-            <line x1="38" y1="50" x2="62" y2="58" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="62" y1="58" x2="76" y2="55" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
-      {
-        label: 'Réception — fente opposée',
-        svg: (
-          <svg viewBox="0 0 100 90" width="100%" height="100%">
-            <line x1="4" y1="82" x2="96" y2="82" stroke="#8A9BA8" strokeWidth="1" />
-            <circle cx="40" cy="20" r="7" fill={ACCENT} fillOpacity="0.15" stroke={ACCENT} strokeWidth="2" />
-            <line x1="47" y1="19" x2="53" y2="21" stroke={ACCENT} strokeWidth="2" strokeLinecap="round" />
-            <line x1="40" y1="26" x2="38" y2="52" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="36" x2="30" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="39" y1="36" x2="48" y2="42" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="38" y1="52" x2="14" y2="60" stroke={ACCENT} strokeWidth="2.5" />
-            <line x1="14" y1="60" x2="10" y2="80" stroke={ACCENT} strokeWidth="2" />
-            <line x1="38" y1="52" x2="56" y2="60" stroke="#E8EDF1" strokeWidth="2" />
-            <line x1="56" y1="60" x2="78" y2="80" stroke="#E8EDF1" strokeWidth="2" />
-          </svg>
-        ),
-      },
+      { label: "Échange des jambes en l'air — réception fente", svg: <ExercisePhoto src={lungeJumpGif} alt="Fentes sautées — animation du mouvement complet" /> },
+      { label: "Échange des jambes en l'air — réception fente", svg: <ExercisePhoto src={lungeJumpGif} alt="Fentes sautées — animation du mouvement complet" /> },
+      { label: "Échange des jambes en l'air — réception fente", svg: <ExercisePhoto src={lungeJumpGif} alt="Fentes sautées — animation du mouvement complet" /> },
+      { label: "Échange des jambes en l'air — réception fente", svg: <ExercisePhoto src={lungeJumpGif} alt="Fentes sautées — animation du mouvement complet" /> },
     ],
   },
 ];
@@ -2919,7 +1423,7 @@ export function StrengthTraining({ onClose }: Props) {
                   }}>
                     {ex.prescription}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 200px', gap: '0.9rem', alignItems: 'start' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 410px', gap: '0.9rem', alignItems: 'start' }}>
                     <div>
                       <div style={{ fontSize: '0.65rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', marginBottom: '0.4rem' }}>
                         Exécution
@@ -2961,6 +1465,9 @@ export function StrengthTraining({ onClose }: Props) {
             </div>
           );
         })}
+      </div>
+      <div style={{ padding: '0.6rem 1.5rem 1rem', fontSize: '0.7rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
+        Illustrations d'exercices : ExerciseDB (oss.exercisedb.dev, usage non-commercial), LitoBox.com, RecoverAthletics.com, Queensland Health (hw.qld.gov.au), DailyBurn et FitCarrots.com.
       </div>
       </>
       )}
