@@ -58,6 +58,30 @@ export interface DriveHandle {
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const AUTHORIZED_KEY = 'gpx_drive_authorized';
+const OAUTH_STATE_KEY = 'gpx_drive_oauth_state';
+
+// Le flux popup (Google Identity Services) est peu fiable sur navigateurs mobiles (Android/iOS) —
+// boucle "choix du compte → popup se ferme → se rouvre" sans jamais aboutir. Sur mobile on utilise
+// donc une redirection pleine page vers l'écran de consentement Google à la place (voir signIn /
+// l'effet qui lit le token dans le hash au retour).
+const isMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+function driveRedirectUri(): string {
+  return window.location.origin + import.meta.env.BASE_URL;
+}
+
+function buildDriveAuthUrl(prompt: string, state: string): string {
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID!,
+    redirect_uri: driveRedirectUri(),
+    response_type: 'token',
+    scope: SCOPE,
+    include_granted_scopes: 'true',
+    state,
+  });
+  if (prompt) params.set('prompt', prompt);
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
 
 export function useGoogleDrive(): DriveHandle {
   const [status, setStatus] = useState<DriveStatus>(CLIENT_ID ? 'disconnected' : 'unavailable');
@@ -72,8 +96,26 @@ export function useGoogleDrive(): DriveHandle {
   // Persiste à travers les refreshs : true tant que l'utilisateur n'a pas explicitement déconnecté
   const [wasAuthorized] = useState(() => localStorage.getItem(AUTHORIZED_KEY) === '1');
 
+  // Retour de la redirection mobile — le token arrive dans le fragment d'URL (#access_token=...).
+  // Tourne aussi sur desktop par sécurité (ex. lien ouvert depuis un partage mobile), sans effet si absent.
   useEffect(() => {
-    if (!CLIENT_ID) return;
+    if (!CLIENT_ID || !window.location.hash.includes('access_token=')) return;
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = params.get('access_token');
+    const returnedState = params.get('state');
+    const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    // Nettoie l'URL dans tous les cas pour ne pas laisser le jeton dans la barre d'adresse / l'historique.
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (!accessToken || !expectedState || returnedState !== expectedState) return;
+    localStorage.setItem(AUTHORIZED_KEY, '1');
+    setError(null);
+    setToken(accessToken);
+    setStatus('connected');
+  }, []);
+
+  useEffect(() => {
+    if (!CLIENT_ID || isMobile) return; // mobile passe par la redirection ci-dessus, pas le client popup
 
     const init = () => {
       if (!window.google?.accounts?.oauth2) return;
@@ -128,12 +170,18 @@ export function useGoogleDrive(): DriveHandle {
   useEffect(() => { if (token) refresh(); }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const signIn = useCallback(() => {
+    // Si déjà autorisé, pas besoin de redemander le consentement — prompt vide = accès direct sans écran de consentement
+    const prompt = localStorage.getItem(AUTHORIZED_KEY) === '1' ? '' : 'consent';
+    if (isMobile) {
+      const state = crypto.randomUUID();
+      sessionStorage.setItem(OAUTH_STATE_KEY, state);
+      window.location.href = buildDriveAuthUrl(prompt, state);
+      return;
+    }
     if (!clientRef.current) return;
     isExplicitAttemptRef.current = true;
     setError(null);
     setStatus('connecting');
-    // Si déjà autorisé, pas besoin de redemander le consentement — prompt vide = popup rapide sans écran de consentement
-    const prompt = localStorage.getItem(AUTHORIZED_KEY) === '1' ? '' : 'consent';
     clientRef.current.requestAccessToken({ prompt });
   }, []);
 
