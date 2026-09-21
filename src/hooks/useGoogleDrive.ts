@@ -15,7 +15,7 @@ declare global {
           initTokenClient(config: {
             client_id: string;
             scope: string;
-            callback: (resp: { access_token?: string; error?: string }) => void;
+            callback: (resp: { access_token?: string; error?: string; expires_in?: number }) => void;
           }): { requestAccessToken(overrides?: { prompt?: string }): void };
           revoke(token: string, done: () => void): void;
         };
@@ -59,6 +59,25 @@ const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const AUTHORIZED_KEY = 'gpx_drive_authorized';
 const OAUTH_STATE_KEY = 'gpx_drive_oauth_state';
+// Le token est aussi mis en sessionStorage (en plus du state React) pour survivre à un rechargement
+// d'onglet — fréquent sur mobile quand le navigateur décharge l'onglet en arrière-plan pendant que
+// le sélecteur de fichier natif est ouvert (perte de mémoire vive, pas propre à notre code).
+const TOKEN_STORAGE_KEY = 'gpx_drive_token';
+
+function storeToken(token: string, expiresInSeconds: number | undefined) {
+  const expiresAt = Date.now() + (expiresInSeconds ?? 3600) * 1000;
+  sessionStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({ token, expiresAt }));
+}
+
+function readStoredToken(): string | null {
+  const raw = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  if (!raw) return null;
+  try {
+    const { token, expiresAt } = JSON.parse(raw) as { token: string; expiresAt: number };
+    if (Date.now() >= expiresAt) { sessionStorage.removeItem(TOKEN_STORAGE_KEY); return null; }
+    return token;
+  } catch { return null; }
+}
 
 // Le flux popup (Google Identity Services) est peu fiable sur navigateurs mobiles (Android/iOS) —
 // boucle "choix du compte → popup se ferme → se rouvre" sans jamais aboutir. Sur mobile on utilise
@@ -96,12 +115,21 @@ export function useGoogleDrive(): DriveHandle {
   // Persiste à travers les refreshs : true tant que l'utilisateur n'a pas explicitement déconnecté
   const [wasAuthorized] = useState(() => localStorage.getItem(AUTHORIZED_KEY) === '1');
 
+  // Restaure un token encore valide après un rechargement d'onglet (voir TOKEN_STORAGE_KEY) — avant
+  // le traitement du hash ci-dessous, qui prévaut si un retour de redirection est aussi présent.
+  useEffect(() => {
+    if (!CLIENT_ID) return;
+    const stored = readStoredToken();
+    if (stored) { setToken(stored); setStatus('connected'); }
+  }, []);
+
   // Retour de la redirection mobile — le token arrive dans le fragment d'URL (#access_token=...).
   // Tourne aussi sur desktop par sécurité (ex. lien ouvert depuis un partage mobile), sans effet si absent.
   useEffect(() => {
     if (!CLIENT_ID || !window.location.hash.includes('access_token=')) return;
     const params = new URLSearchParams(window.location.hash.slice(1));
     const accessToken = params.get('access_token');
+    const expiresIn = params.get('expires_in');
     const returnedState = params.get('state');
     const expectedState = sessionStorage.getItem(OAUTH_STATE_KEY);
     sessionStorage.removeItem(OAUTH_STATE_KEY);
@@ -109,6 +137,7 @@ export function useGoogleDrive(): DriveHandle {
     window.history.replaceState(null, '', window.location.pathname + window.location.search);
     if (!accessToken || !expectedState || returnedState !== expectedState) return;
     localStorage.setItem(AUTHORIZED_KEY, '1');
+    storeToken(accessToken, expiresIn ? Number(expiresIn) : undefined);
     setError(null);
     setToken(accessToken);
     setStatus('connected');
@@ -134,6 +163,7 @@ export function useGoogleDrive(): DriveHandle {
           isExplicitAttemptRef.current = false;
           setError(null);
           localStorage.setItem(AUTHORIZED_KEY, '1');
+          storeToken(resp.access_token, resp.expires_in);
           setToken(resp.access_token);
           setStatus('connected');
         },
@@ -162,6 +192,7 @@ export function useGoogleDrive(): DriveHandle {
       setHistory(await fetchActivityList(token));
     } catch (e: unknown) {
       if ((e as { status?: number }).status === 401) {
+        sessionStorage.removeItem(TOKEN_STORAGE_KEY);
         setToken(null); setStatus('disconnected');
       }
     }
@@ -188,6 +219,7 @@ export function useGoogleDrive(): DriveHandle {
   const signOut = useCallback(() => {
     if (token) window.google.accounts.oauth2.revoke(token, () => {});
     localStorage.removeItem(AUTHORIZED_KEY);
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     setToken(null); setStatus('disconnected'); setHistory([]);
   }, [token]);
 
