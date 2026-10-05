@@ -24,6 +24,62 @@ export interface GPXInterval {
 }
 
 /**
+ * Fusionne plusieurs intervalles consécutifs (ex. deux laps mal découpés par la montre) en un seul.
+ * Les moyennes (FC, cadence, puissance, GAP) sont pondérées par la durée de chaque segment ;
+ * le type retenu est celui du segment le plus long en durée.
+ */
+export function mergeIntervals(chunk: GPXInterval[]): GPXInterval {
+  if (chunk.length === 1) return chunk[0];
+
+  const first = chunk[0];
+  const last = chunk[chunk.length - 1];
+  const duration = chunk.reduce((a, c) => a + c.duration, 0);
+  const distance = chunk.reduce((a, c) => a + c.distance, 0);
+  const avgSpeed = duration > 0 ? distance / duration : 0;
+  const maxSpeed = Math.max(...chunk.map(c => c.maxSpeed));
+
+  const weightedAvg = (sel: (c: GPXInterval) => number | null | undefined): number | null => {
+    let sum = 0, weight = 0;
+    for (const c of chunk) {
+      const v = sel(c);
+      if (v != null) { sum += v * c.duration; weight += c.duration; }
+    }
+    return weight > 0 ? sum / weight : null;
+  };
+
+  const maxOf = (sel: (c: GPXInterval) => number | null | undefined): number | null => {
+    const values = chunk.map(sel).filter((v): v is number => v != null);
+    return values.length > 0 ? Math.max(...values) : null;
+  };
+
+  const effortDuration = chunk.filter(c => c.type === 'effort').reduce((a, c) => a + c.duration, 0);
+  const type: 'effort' | 'recovery' = effortDuration >= duration - effortDuration ? 'effort' : 'recovery';
+  const totalAscent = chunk.reduce((a, c) => a + (c.totalAscent ?? 0), 0);
+  const totalDescent = chunk.reduce((a, c) => a + (c.totalDescent ?? 0), 0);
+
+  return {
+    number: first.number,
+    type,
+    startTime: first.startTime,
+    endTime: last.endTime,
+    duration,
+    distance,
+    avgSpeed,
+    maxSpeed,
+    avgPace: avgSpeed > 0 ? 1000 / avgSpeed : 0,
+    avgGAP: weightedAvg(c => c.avgGAP),
+    avgHeartRate: weightedAvg(c => c.avgHeartRate),
+    maxHeartRate: maxOf(c => c.maxHeartRate),
+    avgCadence: weightedAvg(c => c.avgCadence),
+    avgPower: weightedAvg(c => c.avgPower),
+    totalAscent: totalAscent || null,
+    totalDescent: totalDescent || null,
+    startPointIndex: first.startPointIndex,
+    endPointIndex: last.endPointIndex,
+  };
+}
+
+/**
  * Détecte automatiquement les intervalles (efforts/récupérations) dans une activité par machine à états hystérétique sur la vitesse.
  * Seuil effort : médiane × 1,15 ; seuil retour : médiane × 0,90.
  * Retourne null si moins de 2 efforts significatifs ou si le ratio effort/récup est insuffisant (<1,10).
@@ -88,7 +144,7 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
   if (avgOf(filtered, 'effort') / Math.max(avgOf(filtered, 'recovery'), 0.1) < 1.10) return null;
 
   const intervals: GPXInterval[] = [];
-  let effortNum = 0, recoveryNum = 0;
+  let num = 0;
 
   for (const seg of filtered) {
     const pts = points.slice(seg.start, seg.end + 1);
@@ -104,7 +160,8 @@ export function detectIntervals(activity: GPXActivity): GPXInterval[] | null {
     }
 
     const avgSpd = dur > 0 ? dist / dur : 0;
-    const num = seg.type === 'effort' ? ++effortNum : ++recoveryNum;
+    // Numéro global séquentiel (1, 2, 3…), pas un compteur séparé par type.
+    ++num;
 
     intervals.push({
       number: num,

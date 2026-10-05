@@ -92,12 +92,11 @@ export function parseFIT(buffer: ArrayBuffer, defaultName = "Activité FIT"): Pr
 }
 
 // ─── FIT laps → GPXInterval[] ─────────────────────────────────────────────────
-// Only laps triggered by fitness_equipment (structured workout) or manual (lap button).
-// Autolap (distance/time) produces many identical laps and is intentionally excluded.
+// Tous les laps de la montre sont repris (manuel, séance structurée, autolap
+// distance/temps) — l'utilisateur peut ensuite corriger le type effort/récup
+// de chacun via le bouton de bascule dans IntervalAnalysis.
 
-const STRUCTURED_TRIGGERS = new Set(['fitness_equipment', 'manual']);
-
-function closestPointIndex(points: GPXTrackPoint[], time: Date): number {
+export function closestPointIndex(points: GPXTrackPoint[], time: Date): number {
   const target = time.getTime();
   let best = 0, bestDiff = Infinity;
   for (let i = 0; i < points.length; i++) {
@@ -114,7 +113,7 @@ function closestPointIndex(points: GPXTrackPoint[], time: Date): number {
 // middle of the pack (e.g. a longer 300m recovery jog) whenever the fast/slow group sizes
 // are uneven, since the median then lands inside the larger group rather than in the gap
 // between the two real clusters.
-function largestGapThreshold(values: number[]): number {
+export function largestGapThreshold(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   let maxGap = -Infinity, gapIdx = Math.floor(sorted.length / 2);
   for (let i = 1; i < sorted.length; i++) {
@@ -125,10 +124,11 @@ function largestGapThreshold(values: number[]): number {
 }
 
 function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterval[] | null {
+  // Pas de seuil de distance : un lap manuel peut couvrir une portion sans GPS/capteurs
+  // (ex. pause indoor) et avoir total_distance = 0 — on le garde quand même, l'utilisateur
+  // pourra lui assigner un type via le bouton de bascule effort/récup.
   const meaningful = laps.filter(l =>
-    STRUCTURED_TRIGGERS.has(l.lap_trigger ?? '') &&
-    (l.total_elapsed_time ?? 0) > 10 &&
-    (l.total_distance ?? 0) > 50 &&
+    (l.total_elapsed_time ?? 0) > 2 &&
     l.start_time != null &&
     l.timestamp != null
   );
@@ -147,7 +147,6 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
   const threshold = largestGapThreshold(speeds);
 
   const intervals: GPXInterval[] = [];
-  let effortNum = 0, recoveryNum = 0;
 
   for (let i = 0; i < meaningful.length; i++) {
     const lap = meaningful[i];
@@ -156,7 +155,8 @@ function fitLapsToIntervals(laps: FitLap[], points: GPXTrackPoint[]): GPXInterva
     const type: 'effort' | 'recovery' = avgSpd >= threshold ? 'effort' : 'recovery';
     const dur = lap.total_elapsed_time ?? 0;
     const dist = lap.total_distance ?? 0;
-    const num = type === 'effort' ? ++effortNum : ++recoveryNum;
+    // Numéro global séquentiel (1, 2, 3…), pas un compteur séparé par type — comme la montre.
+    const num = i + 1;
     const startIdx = closestPointIndex(points, lap.start_time!);
     const endIdx = closestPointIndex(points, lap.timestamp!);
 

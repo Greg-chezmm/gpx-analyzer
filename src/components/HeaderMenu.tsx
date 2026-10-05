@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Menu, Settings, Sun, Moon, Download, GitMerge, Trash2 } from 'lucide-react';
+import { Menu, Settings, Sun, Moon, Download, GitMerge, Trash2, Watch } from 'lucide-react';
 
 interface HeaderMenuProps {
   isDark: boolean;
@@ -9,13 +9,14 @@ interface HeaderMenuProps {
   hasActivity?: boolean;
   onExportGPX?: () => void;
   onMerge?: () => void;
+  onImportSuuntoLaps?: () => void;
   onReset?: () => void;
 }
 
 /** Menu burger du header — regroupe thème, profil et actions sur l'activité en cours. */
 export function HeaderMenu({
   isDark, onToggleTheme, onOpenSettings,
-  hasActivity, onExportGPX, onMerge, onReset,
+  hasActivity, onExportGPX, onMerge, onImportSuuntoLaps, onReset,
 }: HeaderMenuProps) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, right: 0 });
@@ -99,6 +100,11 @@ export function HeaderMenu({
                 icon={<GitMerge size={15} />}
                 label="Ajouter un segment"
                 onClick={() => { onMerge?.(); close(); }}
+              />
+              <MenuItem
+                icon={<Watch size={15} />}
+                label="Importer les laps (JSON Suunto)"
+                onClick={() => { onImportSuuntoLaps?.(); close(); }}
               />
               <div style={{ height: '1px', background: 'var(--border-color)', margin: '0.25rem 0.5rem' }} />
               <MenuItem

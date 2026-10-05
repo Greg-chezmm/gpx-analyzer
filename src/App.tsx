@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, lazy, Suspense } from "react";
 import {
-  parseGPX, calculateSplits, detectIntervals,
+  parseGPX, calculateSplits, detectIntervals, mergeIntervals,
   detectClimbs, classifySession, calcCardiacDrift,
   calcTRIMP, calcNormalizedPower, estimateVO2max, calcTSB,
   calcCardiacPace, detectHillRepeats, calcAvgGAP,
@@ -58,6 +58,7 @@ import { WeatherCard } from "./components/WeatherCard";
 import { getActivityWeather, weatherToEntryFields, entryToWeather, type WeatherInfo } from "./utils/weather";
 import { computeBestEfforts, aggregateBestRunEfforts } from "./utils/bestEfforts";
 import { computeFingerprint, computeRouteGeometry, matchStoredSegmentAll, toCachedAttempt } from "./utils/segments";
+import { parseWorkoutStructure, matchWorkoutStructure, type WorkoutMatchResult } from "./utils/workoutStructure";
 import { useSegmentPicker } from "./hooks/useSegmentPicker";
 import { useStoredSegments } from "./hooks/useStoredSegments";
 
@@ -65,6 +66,20 @@ import {
   Activity, Timer, TrendingUp, Heart, Map as MapIcon,
   Calendar, Gauge, Loader2, Sparkles, ArrowLeftRight, X, GitMerge, LayoutDashboard, Dumbbell,
 } from "lucide-react";
+
+/**
+ * Corrections manuelles appliquées aux laps détectés/montre : type effort/récup et fusions.
+ * Clé = numéro de lap (iv.number), pas startPointIndex — certains horodatages de laps Suunto
+ * sont corrompus à la source (ex. un lap de 285s dont l'horodatage de fin est incohérent avec
+ * sa propre durée), ce qui peut faire tomber deux laps différents sur le même point GPS le
+ * plus proche ; le numéro, lui, est unique et stable (voir intervals.ts/fitParser.ts/suuntoParser.ts).
+ */
+interface IntervalEdits {
+  overrides: Record<number, 'effort' | 'recovery'>;
+  // Numéros de laps après lesquels le lap suivant doit être fusionné.
+  mergedAfter: number[];
+}
+const EMPTY_INTERVAL_EDITS: IntervalEdits = { overrides: {}, mergedAfter: [] };
 
 /** Options de découpage des splits disponibles dans le sélecteur. */
 const SPLIT_OPTIONS = [
@@ -100,12 +115,17 @@ function App() {
   const [savedToCloud, setSavedToCloud] = useState(false);
   const [customActivityName, setCustomActivityName] = useState<string>('');
   const [overrideActivityType, setOverrideActivityType] = useState<'running' | 'cycling' | null>(null);
+  // Corrections manuelles des laps (type + fusions) — clés = startPointIndex, stable tant que l'activité ne change pas.
+  const [intervalEdits, setIntervalEdits] = useState<IntervalEdits>(EMPTY_INTERVAL_EDITS);
+  // Pile d'annulation — un snapshot de intervalEdits avant chaque modification.
+  const [intervalEditHistory, setIntervalEditHistory] = useState<IntervalEdits[]>([]);
   const [mergeNotice, setMergeNotice] = useState<MergeInfo | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAthletePage, setShowAthletePage] = useState(false);
   const [showStrengthTraining, setShowStrengthTraining] = useState(false);
   const [activeTab, setActiveTab] = useState<ActivityTabId>("overview");
   const mergeInputRef = useRef<HTMLInputElement>(null);
+  const suuntoLapsInputRef = useRef<HTMLInputElement>(null);
   const [locationName, setLocationName] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [weather, setWeather] = useState<WeatherInfo | null>(null);
@@ -133,12 +153,86 @@ function App() {
     [enrichedActivity, splitDistance]
   );
 
-  const intervals = useMemo(() => {
+  // Laps bruts, avant toute correction manuelle — référence stable pour la détection de structure.
+  const rawIntervals = useMemo(() => {
     if (!enrichedActivity) return null;
     // Préfère les laps montre (séance structurée / lap manuel) à la détection par vitesse.
-    if (enrichedActivity.fitLaps?.length) return enrichedActivity.fitLaps;
-    return detectIntervals(enrichedActivity);
+    return enrichedActivity.fitLaps?.length ? enrichedActivity.fitLaps : detectIntervals(enrichedActivity);
   }, [enrichedActivity]);
+
+  const intervals = useMemo(() => {
+    const raw = rawIntervals;
+    if (!raw) return null;
+    if (Object.keys(intervalEdits.overrides).length === 0 && intervalEdits.mergedAfter.length === 0) return raw;
+
+    // Fusionne les laps consécutifs marqués par l'utilisateur (regroupe en "chunks" contigus).
+    const mergeSet = new Set(intervalEdits.mergedAfter);
+    const merged: typeof raw = [];
+    let i = 0;
+    while (i < raw.length) {
+      const chunk = [raw[i]];
+      while (mergeSet.has(chunk[chunk.length - 1].number) && i + chunk.length < raw.length) {
+        chunk.push(raw[i + chunk.length]);
+      }
+      merged.push(chunk.length === 1 ? chunk[0] : mergeIntervals(chunk));
+      i += chunk.length;
+    }
+
+    // Applique les corrections de type sans renuméroter — le numéro affiché reste celui
+    // d'origine (ou celui du 1er lap fusionné), même après une bascule effort ↔ récup.
+    return merged.map(iv => {
+      const type = intervalEdits.overrides[iv.number] ?? iv.type;
+      return type === iv.type ? iv : { ...iv, type };
+    });
+  }, [rawIntervals, intervalEdits]);
+
+  /** Applique une modification aux laps en poussant l'état précédent sur la pile d'annulation. */
+  const updateIntervalEdits = (updater: (prev: IntervalEdits) => IntervalEdits) => {
+    setIntervalEdits(prev => {
+      setIntervalEditHistory(h => [...h, prev]);
+      return updater(prev);
+    });
+  };
+
+  /** Bascule manuellement le type (effort ↔ récup) d'un lap — utile quand un lap montre manuel est mal classé. */
+  const handleToggleIntervalType = (number: number, currentType: 'effort' | 'recovery') => {
+    const newType = currentType === 'effort' ? 'recovery' : 'effort';
+    updateIntervalEdits(prev => ({ ...prev, overrides: { ...prev.overrides, [number]: newType } }));
+  };
+
+  /** Fusionne une sélection de laps consécutifs en un seul — utile quand la montre a coupé un même effort/récup en plusieurs morceaux. */
+  const handleMergeIntervalSelection = (numbers: number[]) => {
+    if (numbers.length < 2) return;
+    updateIntervalEdits(prev => {
+      const mergedAfter = new Set(prev.mergedAfter);
+      for (let i = 0; i < numbers.length - 1; i++) mergedAfter.add(numbers[i]);
+      return { ...prev, mergedAfter: Array.from(mergedAfter) };
+    });
+  };
+
+  /**
+   * Applique une structure d'entraînement cible (ex. "800m 1000m 1200m 1000m 800m r200m") en
+   * fusionnant/typant automatiquement les laps bruts pour s'en approcher au mieux — remplace
+   * toute correction manuelle précédente (poussée sur la pile d'annulation en un seul bloc).
+   */
+  const handleDetectWorkoutStructure = (structureText: string): WorkoutMatchResult | { error: string } => {
+    if (!rawIntervals) return { error: "Aucun lap disponible sur cette activité." };
+    const segments = parseWorkoutStructure(structureText);
+    if (segments.length === 0) return { error: "Structure illisible — ex. « 800m 1000m 1200m 1000m 800m r200m »." };
+    const result = matchWorkoutStructure(rawIntervals, segments);
+    if (!result) return { error: "Impossible de faire correspondre cette structure aux laps de l'activité." };
+    updateIntervalEdits(() => ({ overrides: result.overrides, mergedAfter: result.mergedAfter }));
+    return result;
+  };
+
+  /** Annule la dernière correction de lap (type ou fusion). */
+  const handleUndoIntervalEdit = () => {
+    setIntervalEditHistory(h => {
+      if (h.length === 0) return h;
+      setIntervalEdits(h[h.length - 1]);
+      return h.slice(0, -1);
+    });
+  };
 
   const climbs = useMemo(
     () => (enrichedActivity ? detectClimbs(enrichedActivity) : []),
@@ -352,6 +446,8 @@ function App() {
         setRawFileData(data);
         setSavedToCloud(false);
         setOverrideActivityType(null);
+        setIntervalEdits(EMPTY_INTERVAL_EDITS);
+        setIntervalEditHistory([]);
         segmentPicker.reset();
       } catch (err: unknown) {
         alert(err instanceof Error ? err.message : "Erreur de chargement du fichier.");
@@ -379,6 +475,8 @@ function App() {
     setSavedToCloud(false);
     setMergeNotice(null);
     setOverrideActivityType(null);
+    setIntervalEdits(EMPTY_INTERVAL_EDITS);
+    setIntervalEditHistory([]);
     setCustomActivityName('');
     segmentPicker.reset();
   };
@@ -409,6 +507,33 @@ function App() {
       setFileName(mergedFileName);
     } catch (err) {
       alert(`Impossible de fusionner : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  /**
+   * Remplace les laps de l'activité par ceux d'un export JSON Suunto (DeviceLog.Windows) —
+   * bien plus complet que les laps FIT, qui peuvent omettre la plupart des appuis manuels.
+   */
+  const handleImportSuuntoLaps = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !activity) return;
+    setIsLoading(true);
+    try {
+      const text = await file.text();
+      const { parseSuuntoLapsFromJSON } = await import("./utils/suuntoParser");
+      const laps = parseSuuntoLapsFromJSON(text, activity);
+      if (!laps) {
+        alert("Aucun lap exploitable trouvé dans ce fichier JSON.");
+        return;
+      }
+      setActivity(prev => prev ? { ...prev, fitLaps: laps } : prev);
+      setIntervalEdits(EMPTY_INTERVAL_EDITS);
+      setIntervalEditHistory([]);
+    } catch (err) {
+      alert(`Impossible d'importer les laps : ${err instanceof Error ? err.message : 'Erreur inconnue'}`);
     } finally {
       setIsLoading(false);
     }
@@ -606,6 +731,14 @@ function App() {
             style={{ display: "none" }}
             onChange={handleMergeFile}
           />
+          {/* Input fichier caché pour l'import des laps JSON Suunto */}
+          <input
+            ref={suuntoLapsInputRef}
+            type="file"
+            accept=".json"
+            style={{ display: "none" }}
+            onChange={handleImportSuuntoLaps}
+          />
           <HeaderMenu
             isDark={isDark}
             onToggleTheme={toggleTheme}
@@ -613,6 +746,7 @@ function App() {
             hasActivity={!!activity}
             onExportGPX={() => downloadGPX(enrichedActivity!, intervals)}
             onMerge={() => mergeInputRef.current?.click()}
+            onImportSuuntoLaps={() => suuntoLapsInputRef.current?.click()}
             onReset={handleReset}
           />
         </div>
@@ -991,6 +1125,10 @@ function App() {
                   activityType={enrichedActivity!.activityType}
                   points={enrichedActivity!.points}
                   source={enrichedActivity!.fitLaps?.length ? 'fit' : 'detected'}
+                  onToggleType={handleToggleIntervalType}
+                  onMergeSelection={handleMergeIntervalSelection}
+                  onDetectStructure={handleDetectWorkoutStructure}
+                  onUndo={intervalEditHistory.length > 0 ? handleUndoIntervalEdit : undefined}
                 />
               </Suspense>
             )}
