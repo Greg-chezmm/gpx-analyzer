@@ -25,3 +25,9 @@ dist-ssr
 
 # Fichier de test local
 exemple.fit
+
+# Fichiers personnels de test à la racine (jamais commités)
+/*.mp4
+/*.pdf
+/*.fit
+/5montees.gpx
