@@ -30,12 +30,13 @@ const ClimbAnalysis   = lazy(() => import("./components/ClimbAnalysis").then(m =
 const HillRepeats     = lazy(() => import("./components/HillRepeats").then(m => ({ default: m.HillRepeats })));
 const StoredSegments = lazy(() => import("./components/StoredSegments").then(m => ({ default: m.StoredSegments })));
 const RouteHistory = lazy(() => import("./components/RouteHistory").then(m => ({ default: m.RouteHistory })));
+// Pages plein écran ouvertes à la demande (bilan athlète, renforcement + ses GIFs)
+const AthletePage = lazy(() => import("./components/AthletePage").then(m => ({ default: m.AthletePage })));
+const StrengthTraining = lazy(() => import("./components/StrengthTraining").then(m => ({ default: m.StrengthTraining })));
 import { FitSummary } from "./components/FitSummary";
 import { CardiacDrift } from "./components/CardiacDrift";
 import { ScatterPlot } from "./components/ScatterPlot";
 import { TrainingLoad } from "./components/TrainingLoad";
-import { AthletePage } from "./components/AthletePage";
-import { StrengthTraining } from "./components/StrengthTraining";
 import { PowerMetrics } from "./components/PowerMetrics";
 import { PowerZones } from "./components/PowerZones";
 import { PaceZones } from "./components/PaceZones";
@@ -756,8 +757,11 @@ function App() {
       <ErrorBoundary key={enrichedActivity?.name ?? 'accueil'}>
       <main className="main-content">
         {showStrengthTraining ? (
-          <StrengthTraining onClose={() => setShowStrengthTraining(false)} />
+          <Suspense fallback={sectionLoader}>
+            <StrengthTraining onClose={() => setShowStrengthTraining(false)} />
+          </Suspense>
         ) : showAthletePage ? (
+          <Suspense fallback={sectionLoader}>
           <AthletePage
             cloud={cloud}
             history={sessionsWithTrimp}
@@ -771,6 +775,7 @@ function App() {
             onOpenActivity={async (entry) => { await handleOpenCloudActivity(entry); setShowAthletePage(false); }}
             onClose={() => setShowAthletePage(false)}
           />
+          </Suspense>
         ) : !activity ? (
           /* ── Écran d'accueil ── */
           <div className="welcome-section animate-slide-up">
